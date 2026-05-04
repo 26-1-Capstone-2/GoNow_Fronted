@@ -1,3 +1,4 @@
+import AlarmSettingsSheet from '@/src/screens/main/AlarmSettingsSheet';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -173,7 +174,7 @@ const BOTTOM_TABS = [
   { icon: 'user', label: '개인', route: '/(tabs)/personal' },
   { icon: 'users', label: '그룹', route: '/(tabs)/group' },
   { icon: 'navigation', label: '귀가', route: '/(tabs)/home-alarm' },
-  { icon: 'settings', label: '설정', route: '/(tabs)/settings' },
+  { icon: 'settings', label: '설정', route: '' },
 ];
 
 export default function MainCalendarScreen() {
@@ -184,6 +185,7 @@ export default function MainCalendarScreen() {
   const { selectedYear, selectedMonth, selectedDate, setSelectedDate, setYearMonth } = useCalendarStore();
 
   const [containerHeight, setContainerHeight] = useState(0);
+  const [showSettings, setShowSettings] = useState(false);
   const [events, setEvents] = useState<EventMap>({});
   const flatListRef = useRef<FlatList>(null);
 
@@ -304,7 +306,7 @@ export default function MainCalendarScreen() {
             <TouchableOpacity
               key={item.label}
               style={styles.rightBtn}
-              onPress={() => router.push(item.route as any)}
+              onPress={() => item.label === '설정' ? setShowSettings(true) : router.push(item.route as any)}
               activeOpacity={0.7}
             >
               <Feather name={item.icon as any} size={26} color="#444444" />
@@ -313,6 +315,12 @@ export default function MainCalendarScreen() {
           ))}
         </View>
       </View>
+      {showSettings && (
+        <AlarmSettingsSheet
+          onClose={() => setShowSettings(false)}
+          onSave={(s) => console.log(s)}
+        />
+      )}
     </SafeAreaView>
   );
 }
