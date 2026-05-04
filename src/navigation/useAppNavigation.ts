@@ -18,6 +18,16 @@ export function useAppNavigation() {
     router.replace(ROUTES.mainTabs);
   }, [router]);
 
+  /** 로그인 성공(또는 데모) 후 필수 설정: 귀가지 */
+  const goToHomeAddressSetup = useCallback(() => {
+    router.replace(ROUTES.homeAddressSetup);
+  }, [router]);
+
+  /** 귀가지 설정 완료 후: 여유시간 설정 (뒤로가기로 귀가지 화면 복귀 가능) */
+  const goToLeaveTimeSetup = useCallback(() => {
+    router.push(ROUTES.leaveTimeSetup);
+  }, [router]);
+
   const replace = useCallback(
     (href: Href) => {
       router.replace(href);
@@ -42,11 +52,13 @@ export function useAppNavigation() {
     () => ({
       routes: ROUTES,
       goToSignUp,
+      goToHomeAddressSetup,
+      goToLeaveTimeSetup,
       goToMainTabs,
       goBack,
       replace,
       push,
     }),
-    [goToSignUp, goToMainTabs, goBack, replace, push],
+    [goToSignUp, goToHomeAddressSetup, goToLeaveTimeSetup, goToMainTabs, goBack, replace, push],
   );
 }
