@@ -1,15 +1,15 @@
+import { Feather } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
-  FlatList,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    FlatList,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
-
-import { useAppNavigation } from '@/src/navigation';
 
 interface AddressResult {
   id: string;
@@ -27,39 +27,51 @@ const MOCK_RESULTS: AddressResult[] = [
   },
 ];
 
-export default function HomeAddressSetupScreen() {
-  const { goToLeaveTimeSetup } = useAppNavigation();
+interface Props {
+  isOnboarding?: boolean; // true: 온보딩 플로우 / false: 설정에서 진입
+}
+
+export default function HomeAddressSetupScreen({ isOnboarding = false }: Props) {
+  const router = useRouter();
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<AddressResult | null>(MOCK_RESULTS[0]);
   const [searchResults, setSearchResults] = useState<AddressResult[]>(MOCK_RESULTS);
 
   const handleSearch = (text: string) => {
     setQuery(text);
-    // TODO: 주소 검색 API 연결 (카카오 주소 API 등)
-    if (text.trim() === '') {
-      setSearchResults(MOCK_RESULTS);
-    }
-  };
-
-  const handleSelect = (item: AddressResult) => {
-    setSelected(item);
+    // TODO: 카카오 주소 API 연결
+    if (text.trim() === '') setSearchResults(MOCK_RESULTS);
   };
 
   const handleComplete = () => {
     if (!selected) return;
-    // TODO: 주소 저장 API 연동
-    goToLeaveTimeSetup();
+    if (isOnboarding) {
+      router.push('/(auth)/leave-time-setup');
+    } else {
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace('/(tabs)');
+      }
+    }
   };
+
   return (
     <SafeAreaView style={styles.container}>
-      {/* 타이틀 */}
+      {/* 헤더 */}
       <View style={styles.header}>
+        {!isOnboarding && (
+          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+            <Feather name="chevron-left" size={26} color="#1A1A1A" />
+          </TouchableOpacity>
+        )}
         <Text style={styles.title}>귀가지 설정</Text>
+        {!isOnboarding && <View style={{ width: 34 }} />}
       </View>
 
       {/* 검색창 */}
       <View style={styles.searchContainer}>
-        <Text style={styles.searchIcon}>🔍</Text>
+        <Feather name="search" size={16} color="#AAAAAA" style={{ marginRight: 8 }} />
         <TextInput
           style={styles.searchInput}
           placeholder="지번, 도로명, 건물명으로 검색"
@@ -67,6 +79,11 @@ export default function HomeAddressSetupScreen() {
           value={query}
           onChangeText={handleSearch}
         />
+        {query.length > 0 && (
+          <TouchableOpacity onPress={() => { setQuery(''); setSearchResults(MOCK_RESULTS); }}>
+            <Feather name="x-circle" size={16} color="#AAAAAA" />
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* 검색 결과 리스트 */}
@@ -78,10 +95,10 @@ export default function HomeAddressSetupScreen() {
         renderItem={({ item }) => (
           <TouchableOpacity
             style={styles.resultItem}
-            onPress={() => handleSelect(item)}
+            onPress={() => setSelected(item)}
           >
             <View style={styles.iconContainer}>
-              <Text style={styles.houseIcon}>🏠</Text>
+              <Feather name="home" size={18} color="#555555" />
             </View>
 
             <View style={styles.addressInfo}>
@@ -97,7 +114,7 @@ export default function HomeAddressSetupScreen() {
             </View>
 
             {selected?.id === item.id && (
-              <Text style={styles.checkIcon}>✓</Text>
+              <Feather name="check" size={20} color="#1A1A1A" />
             )}
           </TouchableOpacity>
         )}
@@ -118,15 +135,20 @@ export default function HomeAddressSetupScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-  },
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
   header: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 20,
+    justifyContent: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0F0',
+  },
+  backButton: {
+    position: 'absolute',
+    left: 16,
+    padding: 4,
   },
   title: {
     fontSize: 17,
@@ -143,23 +165,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     height: 44,
   },
-  searchIcon: {
-    fontSize: 15,
-    marginRight: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 14,
-    color: '#1A1A1A',
-  },
-  list: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
-  separator: {
-    height: 1,
-    backgroundColor: '#F0F0F0',
-  },
+  searchInput: { flex: 1, fontSize: 14, color: '#1A1A1A' },
+  list: { flex: 1, paddingHorizontal: 20 },
+  separator: { height: 1, backgroundColor: '#F0F0F0' },
   resultItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -174,43 +182,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 12,
   },
-  houseIcon: {
-    fontSize: 18,
-  },
-  addressInfo: {
-    flex: 1,
-  },
+  addressInfo: { flex: 1 },
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     marginBottom: 3,
   },
-  placeName: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#1A1A1A',
-  },
+  placeName: { fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
   currentBadge: {
     backgroundColor: '#E8F5E9',
     borderRadius: 4,
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
-  currentBadgeText: {
-    fontSize: 10,
-    color: '#4CAF50',
-    fontWeight: '500',
-  },
-  addressText: {
-    fontSize: 13,
-    color: '#888888',
-  },
-  checkIcon: {
-    fontSize: 18,
-    color: '#1A1A1A',
-    fontWeight: '600',
-  },
+  currentBadgeText: { fontSize: 10, color: '#4CAF50', fontWeight: '500' },
+  addressText: { fontSize: 13, color: '#888888' },
   footer: {
     paddingHorizontal: 20,
     paddingBottom: 32,
@@ -223,12 +210,6 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 48,
   },
-  completeButtonDisabled: {
-    backgroundColor: '#CCCCCC',
-  },
-  completeButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
+  completeButtonDisabled: { backgroundColor: '#CCCCCC' },
+  completeButtonText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
 });

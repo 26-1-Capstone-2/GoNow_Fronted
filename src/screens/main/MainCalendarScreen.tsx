@@ -237,13 +237,13 @@ export default function MainCalendarScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.yearNav}
-          onPress={() => router.push('/(tabs)/year-calendar')}
+          onPress={() => router.push('/year-calendar')}
         >
           <Ionicons name="chevron-back" size={18} color="#1A1A1A" />
           <Text style={styles.yearText}>{selectedYear}년</Text>
         </TouchableOpacity>
         <View style={styles.headerIcons}>
-          <TouchableOpacity style={styles.headerIcon}>
+          <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/home-address')}>
             <Feather name="home" size={22} color="#1A1A1A" />
           </TouchableOpacity>
           <TouchableOpacity style={styles.headerIcon}>
