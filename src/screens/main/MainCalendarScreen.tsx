@@ -98,12 +98,13 @@ interface CalendarMonthProps {
   todayStr: string;
   selectedDate: string;
   onSelectDate: (date: string) => void;
+  onDayPress: (date: string) => void;
   containerHeight: number;
   events: EventMap;
 }
 
 const CalendarMonth = memo(function CalendarMonth({
-  year, month, todayStr, selectedDate, onSelectDate, containerHeight, events,
+  year, month, todayStr, selectedDate, onSelectDate, onDayPress, containerHeight, events,
 }: CalendarMonthProps) {
   const weeks = getCalendarWeeks(year, month);
   const MONTH_TITLE_H = 60;
@@ -135,7 +136,11 @@ const CalendarMonth = memo(function CalendarMonth({
                 <TouchableOpacity
                   key={di}
                   style={styles.dayCell}
-                  onPress={() => isCur && onSelectDate(day.fullDate)}
+                  onPress={() => {
+                    if (isCur) {
+                      onDayPress(day.fullDate);
+                    }
+                  }}
                   activeOpacity={0.7}
                 >
                   <View style={[
@@ -246,6 +251,7 @@ export default function MainCalendarScreen() {
         todayStr={todayStr}
         selectedDate={selectedDate}
         onSelectDate={setSelectedDate}
+        onDayPress={(date) => router.push('/daily-alarm')}
         containerHeight={containerHeight}
         events={events}
       />
@@ -334,10 +340,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
   },
-  yearNav: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  yearNav: { flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: '#F0F0F0', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
   yearText: { fontSize: 15, fontWeight: '500', color: '#1A1A1A' },
   headerIcons: { flexDirection: 'row', gap: 16 },
-  headerIcon: { padding: 4 },
+  headerIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center' },
   calendarArea: { flex: 1 },
   monthTitleRow: { paddingHorizontal: 20, justifyContent: 'flex-end', paddingBottom: 4 },
   monthTitle: { fontSize: 34, fontWeight: '800', color: '#1A1A1A' },

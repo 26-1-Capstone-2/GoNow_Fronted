@@ -26,6 +26,7 @@ export default function RootLayout() {
           <Stack.Screen name="profile-settings" />
           <Stack.Screen name="change-nickname" />
           <Stack.Screen name="change-password" />
+          <Stack.Screen name="daily-alarm" />
         </Stack>
         <StatusBar style="auto" />
       </ThemeProvider>
