@@ -32,14 +32,21 @@ export function useAppNavigation() {
     [router],
   );
 
+  const goBack = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+    }
+  }, [router]);
+
   return useMemo(
     () => ({
       routes: ROUTES,
       goToSignUp,
       goToMainTabs,
+      goBack,
       replace,
       push,
     }),
-    [goToSignUp, goToMainTabs, replace, push],
+    [goToSignUp, goToMainTabs, goBack, replace, push],
   );
 }
