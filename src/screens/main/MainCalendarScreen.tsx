@@ -1,7 +1,8 @@
+import AlarmSettingsSheet from '@/src/screens/main/AlarmSettingsSheet';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   Dimensions,
   FlatList,
@@ -22,7 +23,6 @@ const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const TOTAL_MONTHS = 49;
 const CENTER_INDEX = 24;
 
-// ── 공휴일 API ──────────────────────────────────────────
 const SERVICE_KEY = 'f72192a95a1f1c519e3d89b202a2e0811505d0fbb33385bc5770a4ec5fa03ba6';
 const BASE_URL = 'https://apis.data.go.kr/B090041/openapi/service/SpcdeInfoService';
 
@@ -49,7 +49,6 @@ function locdateToString(locdate: number): string {
   const s = String(locdate);
   return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
 }
-// ────────────────────────────────────────────────────────
 
 type EventMap = Record<string, { label: string; color: string }[]>;
 
@@ -103,7 +102,9 @@ interface CalendarMonthProps {
   events: EventMap;
 }
 
-function CalendarMonth({ year, month, todayStr, selectedDate, onSelectDate, containerHeight, events }: CalendarMonthProps) {
+const CalendarMonth = memo(function CalendarMonth({
+  year, month, todayStr, selectedDate, onSelectDate, containerHeight, events,
+}: CalendarMonthProps) {
   const weeks = getCalendarWeeks(year, month);
   const MONTH_TITLE_H = 60;
   const WEEKDAY_H = 32;
@@ -167,7 +168,14 @@ function CalendarMonth({ year, month, todayStr, selectedDate, onSelectDate, cont
       </View>
     </View>
   );
-}
+});
+
+const BOTTOM_TABS = [
+  { icon: 'user', label: '개인', route: '/(tabs)/personal' },
+  { icon: 'users', label: '그룹', route: '/(tabs)/group' },
+  { icon: 'navigation', label: '귀가', route: '/(tabs)/home-alarm' },
+  { icon: 'settings', label: '설정', route: '' },
+];
 
 export default function MainCalendarScreen() {
   const today = new Date();
@@ -177,10 +185,10 @@ export default function MainCalendarScreen() {
   const { selectedYear, selectedMonth, selectedDate, setSelectedDate, setYearMonth } = useCalendarStore();
 
   const [containerHeight, setContainerHeight] = useState(0);
+  const [showSettings, setShowSettings] = useState(false);
   const [events, setEvents] = useState<EventMap>({});
   const flatListRef = useRef<FlatList>(null);
 
-  // store의 year/month → FlatList 인덱스 계산
   const currentIndex = CENTER_INDEX + getOffsetFromBase(
     today.getFullYear(), today.getMonth() + 1,
     selectedYear, selectedMonth
@@ -188,7 +196,6 @@ export default function MainCalendarScreen() {
 
   const months = Array.from({ length: TOTAL_MONTHS }, (_, i) => i);
 
-  // store year/month 바뀌면 (YearCalendar에서 선택) 해당 월로 스크롤
   useEffect(() => {
     if (containerHeight > 0 && flatListRef.current) {
       const clampedIndex = Math.max(0, Math.min(TOTAL_MONTHS - 1, currentIndex));
@@ -196,7 +203,6 @@ export default function MainCalendarScreen() {
     }
   }, [selectedYear, selectedMonth, containerHeight]);
 
-  // 월 바뀔 때 공휴일 불러오기
   useEffect(() => {
     fetchHolidays(selectedYear, selectedMonth).then((holidays) => {
       const map: EventMap = {};
@@ -231,28 +237,38 @@ export default function MainCalendarScreen() {
     setSelectedDate(todayStr);
   }, [todayStr]);
 
+  const renderItem = useCallback(({ item }: { item: number }) => {
+    const { year, month } = getYearMonthFromIndex(today.getFullYear(), today.getMonth() + 1, item);
+    return (
+      <CalendarMonth
+        year={year}
+        month={month}
+        todayStr={todayStr}
+        selectedDate={selectedDate}
+        onSelectDate={setSelectedDate}
+        containerHeight={containerHeight}
+        events={events}
+      />
+    );
+  }, [containerHeight, events, selectedDate, todayStr]);
+
   return (
     <SafeAreaView style={styles.container}>
-      {/* 상단 헤더 */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.yearNav}
-          onPress={() => router.push('/(tabs)/year-calendar')}
-        >
+        <TouchableOpacity style={styles.yearNav} onPress={() => router.push('/year-calendar')}>
           <Ionicons name="chevron-back" size={18} color="#1A1A1A" />
           <Text style={styles.yearText}>{selectedYear}년</Text>
         </TouchableOpacity>
         <View style={styles.headerIcons}>
-          <TouchableOpacity style={styles.headerIcon}>
+          <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/home-address')}>
             <Feather name="home" size={22} color="#1A1A1A" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.headerIcon}>
+          <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/profile-settings')}>
             <Feather name="user" size={22} color="#1A1A1A" />
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* 캘린더 영역 */}
       <View style={styles.calendarArea} onLayout={onLayout}>
         {containerHeight > 0 && (
           <FlatList
@@ -271,41 +287,26 @@ export default function MainCalendarScreen() {
             decelerationRate="fast"
             snapToInterval={containerHeight}
             snapToAlignment="start"
-            renderItem={({ item }) => {
-              const { year, month } = getYearMonthFromIndex(today.getFullYear(), today.getMonth() + 1, item);
-              return (
-                <CalendarMonth
-                  year={year}
-                  month={month}
-                  todayStr={todayStr}
-                  selectedDate={selectedDate}
-                  onSelectDate={setSelectedDate}
-                  containerHeight={containerHeight}
-                  events={events}
-                />
-              );
-            }}
+            renderItem={renderItem}
+            initialNumToRender={3}
+            maxToRenderPerBatch={3}
+            windowSize={5}
+            removeClippedSubviews
           />
         )}
       </View>
 
-      {/* 하단 버튼 */}
       <View style={styles.bottomBar}>
         <TouchableOpacity style={styles.todayBtn} onPress={goToToday} activeOpacity={0.7}>
           <Text style={styles.todayBtnNum}>{today.getDate()}</Text>
           <Text style={styles.todayBtnLabel}>오늘</Text>
         </TouchableOpacity>
         <View style={styles.rightBtns}>
-          {[
-            { icon: 'user', label: '개인', route: '/(tabs)/personal' },
-            { icon: 'users', label: '그룹', route: '/(tabs)/group' },
-            { icon: 'navigation', label: '귀가', route: '/(tabs)/home-alarm' },
-            { icon: 'settings', label: '설정', route: '/(tabs)/settings' },
-          ].map((item) => (
+          {BOTTOM_TABS.map((item) => (
             <TouchableOpacity
               key={item.label}
               style={styles.rightBtn}
-              onPress={() => router.push(item.route as any)}
+              onPress={() => item.label === '설정' ? setShowSettings(true) : router.push(item.route as any)}
               activeOpacity={0.7}
             >
               <Feather name={item.icon as any} size={26} color="#444444" />
@@ -314,6 +315,12 @@ export default function MainCalendarScreen() {
           ))}
         </View>
       </View>
+      {showSettings && (
+        <AlarmSettingsSheet
+          onClose={() => setShowSettings(false)}
+          onSave={(s) => console.log(s)}
+        />
+      )}
     </SafeAreaView>
   );
 }

@@ -1,7 +1,7 @@
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useRef, useState } from 'react';
+import React, { memo, useCallback, useRef, useState } from 'react';
 import {
   Dimensions,
   FlatList,
@@ -41,7 +41,7 @@ function getCalendarWeeks(year: number, month: number) {
   return weeks;
 }
 
-function MiniMonth({
+const MiniMonth = memo(function MiniMonth({
   year,
   month,
   todayYear,
@@ -105,9 +105,9 @@ function MiniMonth({
       ))}
     </TouchableOpacity>
   );
-}
+});
 
-function YearPage({
+const YearPage = memo(function YearPage({
   year,
   todayYear,
   todayMonth,
@@ -124,22 +124,16 @@ function YearPage({
 }) {
   const YEAR_TITLE_H = 60;
   const AVAILABLE_H = containerHeight - YEAR_TITLE_H;
-  // 4행 x 3열 = 12개월, 행 높이 계산
   const ROW_H = Math.floor(AVAILABLE_H / 4);
-  // 각 달력 높이에서 daySize 계산 (월타이틀 16 + 요일헤더 12 + 6주)
   const MONTH_INNER_H = ROW_H - 8;
   const DAY_SIZE = Math.floor(Math.min(MONTH_WIDTH / 7, (MONTH_INNER_H - 28) / 6));
-
   const monthRows = [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]];
 
   return (
     <View style={{ width: SCREEN_WIDTH, height: containerHeight }}>
-      {/* 연도 타이틀 */}
       <View style={{ height: YEAR_TITLE_H, justifyContent: 'flex-end', paddingHorizontal: H_PADDING, paddingBottom: 8 }}>
         <Text style={styles.yearTitle}>{year}년</Text>
       </View>
-
-      {/* 3열 4행 달력 그리드 */}
       {monthRows.map((row, ri) => (
         <View key={ri} style={{ flexDirection: 'row', height: ROW_H, paddingHorizontal: H_PADDING, gap: COL_GAP }}>
           {row.map((month) => (
@@ -158,7 +152,7 @@ function YearPage({
       ))}
     </View>
   );
-}
+});
 
 export default function YearCalendarScreen() {
   const today = new Date();
@@ -197,22 +191,34 @@ export default function YearCalendarScreen() {
     setCurrentIndex(CENTER_INDEX);
   }, []);
 
+  const renderItem = useCallback(({ item }: { item: number }) => {
+    const y = today.getFullYear() - CENTER_INDEX + item;
+    return (
+      <YearPage
+        year={y}
+        todayYear={today.getFullYear()}
+        todayMonth={today.getMonth() + 1}
+        todayDate={today.getDate()}
+        containerHeight={containerHeight}
+        onMonthPress={handleMonthPress}
+      />
+    );
+  }, [containerHeight, handleMonthPress]);
+
   return (
     <SafeAreaView style={styles.container}>
-      {/* 상단 헤더 */}
       <View style={styles.header}>
         <View style={{ flex: 1 }} />
         <View style={styles.headerIcons}>
-          <TouchableOpacity style={styles.headerIcon}>
+          <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/home-address')}>
             <Feather name="home" size={22} color="#1A1A1A" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.headerIcon}>
+          <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/profile-settings')}>
             <Feather name="user" size={22} color="#1A1A1A" />
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* 수직 스냅 FlatList */}
       <View style={styles.calendarArea} onLayout={onLayout}>
         {containerHeight > 0 && (
           <FlatList
@@ -231,24 +237,15 @@ export default function YearCalendarScreen() {
             decelerationRate="fast"
             snapToInterval={containerHeight}
             snapToAlignment="start"
-            renderItem={({ item }) => {
-              const y = today.getFullYear() - CENTER_INDEX + item;
-              return (
-                <YearPage
-                  year={y}
-                  todayYear={today.getFullYear()}
-                  todayMonth={today.getMonth() + 1}
-                  todayDate={today.getDate()}
-                  containerHeight={containerHeight}
-                  onMonthPress={handleMonthPress}
-                />
-              );
-            }}
+            renderItem={renderItem}
+            initialNumToRender={3}
+            maxToRenderPerBatch={3}
+            windowSize={5}
+            removeClippedSubviews
           />
         )}
       </View>
 
-      {/* 하단 오늘 버튼 */}
       <View style={styles.bottomBar}>
         <TouchableOpacity style={styles.todayBtn} onPress={goToToday} activeOpacity={0.7}>
           <Text style={styles.todayBtnNum}>{today.getDate()}</Text>
