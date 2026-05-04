@@ -21,6 +21,9 @@ export default function RootLayout() {
         <Stack.Screen name="year-calendar" />
         <Stack.Screen name="home-address" />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal', headerShown: true }} />
+        <Stack.Screen name="profile-settings" />
+        <Stack.Screen name="change-nickname" />
+        <Stack.Screen name="change-password" />
       </Stack>
       <StatusBar style="auto" />
     </ThemeProvider>

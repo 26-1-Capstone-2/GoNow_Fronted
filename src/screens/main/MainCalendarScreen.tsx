@@ -246,7 +246,7 @@ export default function MainCalendarScreen() {
           <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/home-address')}>
             <Feather name="home" size={22} color="#1A1A1A" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.headerIcon}>
+          <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/profile-settings')}>
             <Feather name="user" size={22} color="#1A1A1A" />
           </TouchableOpacity>
         </View>
