@@ -4,8 +4,18 @@
     "slug": "gonow",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/gonow_logo.png",
     "scheme": "gonow",
+    "splash": {
+      "image": "./assets/images/gonow_logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff",
+      "dark": {
+        "image": "./assets/images/gonow_logo.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#000000"
+      }
+    },
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -30,11 +40,12 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 200,
+          "image": "./assets/images/gonow_logo.png",
+          "imageWidth": 220,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff",
           "dark": {
+            "image": "./assets/images/gonow_logo.png",
             "backgroundColor": "#000000"
           }
         }
