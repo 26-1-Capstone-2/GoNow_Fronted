@@ -8,6 +8,7 @@ export default function TabLayout() {
       <Tabs.Screen name="group" />
       <Tabs.Screen name="home-alarm" />
       <Tabs.Screen name="settings" />
+      <Tabs.Screen name="year-calendar" />
     </Tabs>
   );
 }

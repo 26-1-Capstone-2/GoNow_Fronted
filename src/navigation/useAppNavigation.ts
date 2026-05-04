@@ -28,6 +28,16 @@ export function useAppNavigation() {
     router.push(ROUTES.leaveTimeSetup);
   }, [router]);
 
+  const goToYearCalendar = useCallback(
+    (y: number) => {
+      router.push({
+        pathname: ROUTES.yearCalendar,
+        params: { year: String(y) },
+      } as Href);
+    },
+    [router],
+  );
+
   const replace = useCallback(
     (href: Href) => {
       router.replace(href);
@@ -54,11 +64,12 @@ export function useAppNavigation() {
       goToSignUp,
       goToHomeAddressSetup,
       goToLeaveTimeSetup,
+      goToYearCalendar,
       goToMainTabs,
       goBack,
       replace,
       push,
     }),
-    [goToSignUp, goToHomeAddressSetup, goToLeaveTimeSetup, goToMainTabs, goBack, replace, push],
+    [goToSignUp, goToHomeAddressSetup, goToLeaveTimeSetup, goToYearCalendar, goToMainTabs, goBack, replace, push],
   );
 }

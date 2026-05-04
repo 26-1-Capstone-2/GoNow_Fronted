@@ -1,3 +1,4 @@
+import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -28,7 +29,6 @@ const BASE_URL = 'https://apis.data.go.kr/B090041/openapi/service/SpcdeInfoServi
 interface Holiday {
   dateName: string;
   locdate: number;
-  isHoliday: string;
 }
 
 async function fetchHolidays(year: number, month: number): Promise<Holiday[]> {
@@ -53,7 +53,12 @@ function locdateToString(locdate: number): string {
 
 type EventMap = Record<string, { label: string; color: string }[]>;
 
-function getYearMonth(baseYear: number, baseMonth: number, offset: number) {
+function getOffsetFromBase(baseYear: number, baseMonth: number, targetYear: number, targetMonth: number) {
+  return (targetYear - baseYear) * 12 + (targetMonth - baseMonth);
+}
+
+function getYearMonthFromIndex(baseYear: number, baseMonth: number, index: number) {
+  const offset = index - CENTER_INDEX;
   let m = baseMonth - 1 + offset;
   let y = baseYear + Math.floor(m / 12);
   m = ((m % 12) + 12) % 12;
@@ -169,18 +174,31 @@ export default function MainCalendarScreen() {
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   const router = useRouter();
 
-  const [currentIndex, setCurrentIndex] = useState(CENTER_INDEX);
-  const [selectedDate, setSelectedDate] = useState(todayStr);
+  const { selectedYear, selectedMonth, selectedDate, setSelectedDate, setYearMonth } = useCalendarStore();
+
   const [containerHeight, setContainerHeight] = useState(0);
   const [events, setEvents] = useState<EventMap>({});
   const flatListRef = useRef<FlatList>(null);
 
-  const { year, month } = getYearMonth(today.getFullYear(), today.getMonth() + 1, currentIndex - CENTER_INDEX);
+  // store의 year/month → FlatList 인덱스 계산
+  const currentIndex = CENTER_INDEX + getOffsetFromBase(
+    today.getFullYear(), today.getMonth() + 1,
+    selectedYear, selectedMonth
+  );
+
   const months = Array.from({ length: TOTAL_MONTHS }, (_, i) => i);
 
-  // 월 바뀔 때마다 공휴일 불러오기
+  // store year/month 바뀌면 (YearCalendar에서 선택) 해당 월로 스크롤
   useEffect(() => {
-    fetchHolidays(year, month).then((holidays) => {
+    if (containerHeight > 0 && flatListRef.current) {
+      const clampedIndex = Math.max(0, Math.min(TOTAL_MONTHS - 1, currentIndex));
+      flatListRef.current.scrollToIndex({ index: clampedIndex, animated: true });
+    }
+  }, [selectedYear, selectedMonth, containerHeight]);
+
+  // 월 바뀔 때 공휴일 불러오기
+  useEffect(() => {
+    fetchHolidays(selectedYear, selectedMonth).then((holidays) => {
       const map: EventMap = {};
       holidays.forEach((h) => {
         const dateStr = locdateToString(h.locdate);
@@ -188,14 +206,15 @@ export default function MainCalendarScreen() {
       });
       setEvents((prev) => ({ ...prev, ...map }));
     });
-  }, [year, month]);
+  }, [selectedYear, selectedMonth]);
 
   const onLayout = useCallback((e: LayoutChangeEvent) => {
     const h = e.nativeEvent.layout.height;
     setContainerHeight(h);
     if (h > 0) {
       setTimeout(() => {
-        flatListRef.current?.scrollToIndex({ index: CENTER_INDEX, animated: false });
+        const clampedIndex = Math.max(0, Math.min(TOTAL_MONTHS - 1, currentIndex));
+        flatListRef.current?.scrollToIndex({ index: clampedIndex, animated: false });
       }, 50);
     }
   }, []);
@@ -203,12 +222,12 @@ export default function MainCalendarScreen() {
   const onMomentumScrollEnd = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     if (containerHeight === 0) return;
     const index = Math.round(e.nativeEvent.contentOffset.y / containerHeight);
-    setCurrentIndex(index);
+    const { year, month } = getYearMonthFromIndex(today.getFullYear(), today.getMonth() + 1, index);
+    setYearMonth(year, month);
   }, [containerHeight]);
 
   const goToToday = useCallback(() => {
-    flatListRef.current?.scrollToIndex({ index: CENTER_INDEX, animated: true });
-    setCurrentIndex(CENTER_INDEX);
+    setYearMonth(today.getFullYear(), today.getMonth() + 1);
     setSelectedDate(todayStr);
   }, [todayStr]);
 
@@ -216,9 +235,12 @@ export default function MainCalendarScreen() {
     <SafeAreaView style={styles.container}>
       {/* 상단 헤더 */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.yearNav} onPress={goToToday}>
+        <TouchableOpacity
+          style={styles.yearNav}
+          onPress={() => router.push('/(tabs)/year-calendar')}
+        >
           <Ionicons name="chevron-back" size={18} color="#1A1A1A" />
-          <Text style={styles.yearText}>{year}년</Text>
+          <Text style={styles.yearText}>{selectedYear}년</Text>
         </TouchableOpacity>
         <View style={styles.headerIcons}>
           <TouchableOpacity style={styles.headerIcon}>
@@ -239,7 +261,7 @@ export default function MainCalendarScreen() {
             keyExtractor={(item) => String(item)}
             pagingEnabled
             showsVerticalScrollIndicator={false}
-            initialScrollIndex={CENTER_INDEX}
+            initialScrollIndex={Math.max(0, Math.min(TOTAL_MONTHS - 1, currentIndex))}
             getItemLayout={(_, index) => ({
               length: containerHeight,
               offset: containerHeight * index,
@@ -250,15 +272,11 @@ export default function MainCalendarScreen() {
             snapToInterval={containerHeight}
             snapToAlignment="start"
             renderItem={({ item }) => {
-              const { year: y, month: m } = getYearMonth(
-                today.getFullYear(),
-                today.getMonth() + 1,
-                item - CENTER_INDEX
-              );
+              const { year, month } = getYearMonthFromIndex(today.getFullYear(), today.getMonth() + 1, item);
               return (
                 <CalendarMonth
-                  year={y}
-                  month={m}
+                  year={year}
+                  month={month}
                   todayStr={todayStr}
                   selectedDate={selectedDate}
                   onSelectDate={setSelectedDate}
@@ -279,10 +297,10 @@ export default function MainCalendarScreen() {
         </TouchableOpacity>
         <View style={styles.rightBtns}>
           {[
-            { icon: 'user', label: '개인', route: '/personal' },
-            { icon: 'users', label: '그룹', route: '/group' },
-            { icon: 'navigation', label: '귀가', route: '/home-alarm' },
-            { icon: 'settings', label: '설정', route: '/settings' },
+            { icon: 'user', label: '개인', route: '/(tabs)/personal' },
+            { icon: 'users', label: '그룹', route: '/(tabs)/group' },
+            { icon: 'navigation', label: '귀가', route: '/(tabs)/home-alarm' },
+            { icon: 'settings', label: '설정', route: '/(tabs)/settings' },
           ].map((item) => (
             <TouchableOpacity
               key={item.label}
@@ -314,56 +332,23 @@ const styles = StyleSheet.create({
   headerIcons: { flexDirection: 'row', gap: 16 },
   headerIcon: { padding: 4 },
   calendarArea: { flex: 1 },
-  monthTitleRow: {
-    paddingHorizontal: 20,
-    justifyContent: 'flex-end',
-    paddingBottom: 4,
-  },
+  monthTitleRow: { paddingHorizontal: 20, justifyContent: 'flex-end', paddingBottom: 4 },
   monthTitle: { fontSize: 34, fontWeight: '800', color: '#1A1A1A' },
-  weekdayRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 4,
-    alignItems: 'center',
-  },
-  weekdayText: {
-    width: DAY_WIDTH,
-    textAlign: 'center',
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#AAAAAA',
-  },
+  weekdayRow: { flexDirection: 'row', paddingHorizontal: 4, alignItems: 'center' },
+  weekdayText: { width: DAY_WIDTH, textAlign: 'center', fontSize: 12, fontWeight: '500', color: '#AAAAAA' },
   sundayText: { color: '#FF3B30' },
   saturdayText: { color: '#007AFF' },
   weekRow: { flexDirection: 'row' },
-  weekBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E0E0E0',
-  },
+  weekBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E0E0E0' },
   dayCell: { width: DAY_WIDTH, paddingTop: 4, alignItems: 'center' },
-  dayNumWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 2,
-  },
+  dayNumWrap: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
   todayCircle: { backgroundColor: '#FF3B30' },
   selectedCircle: { backgroundColor: '#1A1A1A' },
   dayNum: { fontSize: 16, fontWeight: '400', color: '#1A1A1A' },
   todayText: { color: '#FFFFFF', fontWeight: '700' },
   selectedText: { color: '#FFFFFF', fontWeight: '700' },
   otherMonthDay: { color: '#C8C8C8' },
-  eventBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 4,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    marginTop: 1,
-    maxWidth: DAY_WIDTH - 4,
-    gap: 3,
-  },
+  eventBadge: { flexDirection: 'row', alignItems: 'center', borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1, marginTop: 1, maxWidth: DAY_WIDTH - 4, gap: 3 },
   eventDot: { width: 6, height: 6, borderRadius: 3 },
   eventLabel: { fontSize: 9, fontWeight: '500', flexShrink: 1 },
   bottomBar: {
@@ -377,27 +362,10 @@ const styles = StyleSheet.create({
     borderTopColor: '#E8E8E8',
     backgroundColor: '#FFFFFF',
   },
-  todayBtn: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 44,
-  },
-  todayBtnNum: {
-    fontSize: 20,
-    fontWeight: '300',
-    color: '#FF3B30',
-    lineHeight: 24,
-  },
-  todayBtnLabel: {
-    fontSize: 11,
-    color: '#FF3B30',
-    fontWeight: '500',
-  },
-  rightBtns: {
-    flexDirection: 'row',
-    gap: 28,
-    alignItems: 'center',
-  },
+  todayBtn: { alignItems: 'center', justifyContent: 'center', minWidth: 44 },
+  todayBtnNum: { fontSize: 20, fontWeight: '300', color: '#FF3B30', lineHeight: 24 },
+  todayBtnLabel: { fontSize: 11, color: '#FF3B30', fontWeight: '500' },
+  rightBtns: { flexDirection: 'row', gap: 28, alignItems: 'center' },
   rightBtn: { alignItems: 'center', gap: 3 },
   rightBtnLabel: { fontSize: 10, color: '#444444', fontWeight: '500' },
 });

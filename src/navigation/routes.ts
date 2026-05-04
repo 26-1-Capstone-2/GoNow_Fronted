@@ -11,6 +11,7 @@ export const ROUTES = {
   homeAddressSetup: '/home-address-setup' as Href,
   leaveTimeSetup: '/leave-time-setup' as Href,
   mainTabs: '/(tabs)' satisfies Href,
+  yearCalendar: '/year-calendar' as Href,
 } as const;
 
 export type AppHref = (typeof ROUTES)[keyof typeof ROUTES];
