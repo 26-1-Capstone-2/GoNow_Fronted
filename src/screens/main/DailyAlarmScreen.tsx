@@ -1,29 +1,19 @@
 import { useCalendarStore } from '@/src/store/calendarStore';
-import { Feather } from '@expo/vector-icons';
+import { Feather, FontAwesome6 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    TouchableOpacity,
-    View,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
 
-// 그룹 멤버 아이콘 컴포넌트 — 파랑(활성), 회색(비활성)
-function MemberIcon({ active }: { active: boolean }) {
-  return (
-    <View style={[styles.memberCircle, active ? styles.memberActive : styles.memberInactive]}>
-      <Feather name="user" size={14} color={active ? '#FFFFFF' : '#AAAAAA'} />
-    </View>
-  );
-}
-
-// 샘플 데이터
 const SAMPLE_ALARMS = {
   personal: [
     { id: '1', ampm: '오후', time: '3:00', place: '중앙대학교 후문 입구, 4/7', enabled: true },
@@ -39,7 +29,15 @@ const SAMPLE_ALARMS = {
   ],
 };
 
-export default function DailyAlarmScreen() {
+interface Props {
+  onPersonalPress: () => void;
+  onGroupPress: () => void;
+  onHomePress: () => void;
+  onArrivalPress: () => void;
+  isArrivalActive?: boolean;
+}
+
+export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHomePress, onArrivalPress, isArrivalActive = false }: Props) {
   const router = useRouter();
   const { selectedDate, selectedMonth } = useCalendarStore();
   const [alarms, setAlarms] = useState(SAMPLE_ALARMS);
@@ -59,7 +57,7 @@ export default function DailyAlarmScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       {/* 헤더 */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
@@ -77,12 +75,11 @@ export default function DailyAlarmScreen() {
       <Text style={styles.dateTitle}>{month}월 {date}일 {dayName}요일</Text>
 
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-
         {/* 개인 섹션 */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>개인</Text>
-            <TouchableOpacity onPress={() => router.push('/(tabs)/personal' as any)}>
+            <TouchableOpacity onPress={onPersonalPress}>
               <Feather name="menu" size={20} color="#888888" />
             </TouchableOpacity>
           </View>
@@ -108,16 +105,8 @@ export default function DailyAlarmScreen() {
         {/* 그룹 섹션 */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <View style={styles.groupTitleRow}>
-              <Text style={styles.sectionTitle}>그룹</Text>
-              {/* 멤버 활성화 아이콘 */}
-              <View style={styles.memberIcons}>
-                {SAMPLE_ALARMS.group[0].members.map((m, i) => (
-                  <MemberIcon key={i} active={m.active} />
-                ))}
-              </View>
-            </View>
-            <TouchableOpacity onPress={() => router.push('/(tabs)/group' as any)}>
+            <Text style={styles.sectionTitle}>그룹</Text>
+            <TouchableOpacity onPress={onGroupPress}>
               <Feather name="menu" size={20} color="#888888" />
             </TouchableOpacity>
           </View>
@@ -130,12 +119,21 @@ export default function DailyAlarmScreen() {
                 </View>
                 <Text style={styles.alarmPlace}>{alarm.place}</Text>
               </View>
-              <Switch
-                value={alarm.enabled}
-                onValueChange={() => toggleAlarm('group', alarm.id)}
-                trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-                thumbColor="#FFFFFF"
-              />
+              <View style={styles.groupCardRight}>
+                <TouchableOpacity
+                  onPress={onArrivalPress}
+                  disabled={!isArrivalActive}
+                  style={[styles.arrivalBtn, isArrivalActive && styles.arrivalBtnActive]}
+                >
+                  <FontAwesome6 name="person-walking" size={14} color={isArrivalActive ? '#FFFFFF' : '#CCCCCC'} />
+                </TouchableOpacity>
+                <Switch
+                  value={alarm.enabled}
+                  onValueChange={() => toggleAlarm('group', alarm.id)}
+                  trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
             </View>
           ))}
         </View>
@@ -144,7 +142,7 @@ export default function DailyAlarmScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>귀가</Text>
-            <TouchableOpacity onPress={() => router.push('/(tabs)/home-alarm' as any)}>
+            <TouchableOpacity onPress={onHomePress}>
               <Feather name="menu" size={20} color="#888888" />
             </TouchableOpacity>
           </View>
@@ -164,12 +162,16 @@ export default function DailyAlarmScreen() {
           ))}
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  container: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    paddingTop: Platform.OS === 'ios' ? 50 : 0,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -227,25 +229,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1A1A1A',
   },
-  memberIcons: {
-    flexDirection: 'row',
-    gap: -6,
-  },
-  memberCircle: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: '#FFFFFF',
-  },
-  memberActive: {
-    backgroundColor: '#4A90D9',
-  },
-  memberInactive: {
-    backgroundColor: '#DDDDDD',
-  },
+
   alarmCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -285,5 +269,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#888888',
     marginTop: 2,
+  },
+  groupCardRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  groupActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  arrivalBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#E0E0E0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  arrivalBtnActive: {
+    backgroundColor: '#92DEFE',
   },
 });
