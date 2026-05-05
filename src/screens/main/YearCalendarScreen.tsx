@@ -204,12 +204,13 @@ export default function YearCalendarScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <View style={{ flex: 1 }} />
-        <View style={styles.headerIcons}>
-          <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/home-address')}>
-            <Feather name="home" size={22} color="#1A1A1A" />
+        <View style={styles.headerIconPill}>
+          <TouchableOpacity style={styles.headerIconBtn} onPress={() => router.push('/home-address')}>
+            <Feather name="home" size={20} color="#1A1A1A" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/profile-settings')}>
-            <Feather name="user" size={22} color="#1A1A1A" />
+          <View style={styles.headerIconDivider} />
+          <TouchableOpacity style={styles.headerIconBtn} onPress={() => router.push('/profile-settings')}>
+            <Feather name="user" size={20} color="#1A1A1A" />
           </TouchableOpacity>
         </View>
       </View>
@@ -259,8 +260,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
   },
-  headerIcons: { flexDirection: 'row', gap: 16 },
-  headerIcon: { padding: 4 },
+  headerIconPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0F0F0', borderRadius: 20, overflow: 'hidden' },
+  headerIconBtn: { paddingHorizontal: 12, paddingVertical: 8 },
+  headerIconDivider: { width: StyleSheet.hairlineWidth, height: 20, backgroundColor: '#CCCCCC' },
   calendarArea: { flex: 1 },
   yearTitle: { fontSize: 36, fontWeight: '800', color: '#FF3B30' },
   miniMonth: { flex: 1 },

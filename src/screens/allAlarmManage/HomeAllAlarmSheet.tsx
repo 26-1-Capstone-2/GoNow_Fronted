@@ -16,8 +16,12 @@ const DAYS = ['일요일마다', '월요일마다', '화요일마다', '수요�
 const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));
 const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
 
-interface Alarm {
+type AlarmMode = 'lastTrain' | 'deadline';
+type ViewType = 'list' | 'edit' | 'repeat' | 'homePlace';
+
+interface HomeAlarm {
   id: string;
+  mode: AlarmMode;
   ampm: string;
   hour: string;
   minute: string;
@@ -41,30 +45,28 @@ function getRepeatLabel(repeat: string[]): string {
   return repeat.map((r) => r.replace('요일마다', '')).join(', ');
 }
 
-const SAMPLE_PLACES = [
-  { id: '1', name: '홍대역 2번 출구', address: '서울 저쩌고 어쩌고', isCurrent: true },
-  { id: '2', name: '중앙대학교 후문 입구', address: '서울 어쩌고 저쩌고', isCurrent: false },
+const SAMPLE_HOME_PLACES = [
+  { id: '1', name: '우리집', address: '서울 어쩌고 저쩌고', isCurrent: true, isHome: true },
+  { id: '2', name: '서울 가가가', address: '서울 저쩌고 어쩌고', isCurrent: false, isHome: false },
 ];
 
-const SAMPLE_ALARMS: Alarm[] = [
-  { id: '1', ampm: '오후', hour: '3', minute: '00', place: '중앙대학교 후문 입구', repeat: ['안함'], enabled: true },
-  { id: '2', ampm: '오전', hour: '9', minute: '00', place: '중앙대학교 후문 입구', repeat: ['금요일마다'], enabled: true },
+const SAMPLE_HOME_ALARMS: HomeAlarm[] = [
+  { id: '1', mode: 'lastTrain', ampm: '오후', hour: '11', minute: '00', place: '우리집', repeat: ['안함'], enabled: true },
+  { id: '2', mode: 'deadline', ampm: '오후', hour: '11', minute: '00', place: '우리집', repeat: ['월요일마다', '화요일마다', '수요일마다', '목요일마다', '금요일마다'], enabled: true },
 ];
 
-const DEFAULT_ALARM: Alarm = {
-  id: '', ampm: '오전', hour: '7', minute: '00',
-  place: '', repeat: ['안함'], enabled: true,
+const DEFAULT_ALARM: HomeAlarm = {
+  id: '', mode: 'lastTrain', ampm: '오후', hour: '11', minute: '00',
+  place: '우리집', repeat: ['안함'], enabled: true,
 };
 
-type ViewType = 'list' | 'edit' | 'repeat' | 'place';
-
-export default function PersonalAllAlarmSheet({ onClose }: Props) {
+export default function HomeAllAlarmSheet({ onClose }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['85%'], []);
 
   const [view, setView] = useState<ViewType>('list');
-  const [alarms, setAlarms] = useState<Alarm[]>(SAMPLE_ALARMS);
-  const [editAlarm, setEditAlarm] = useState<Alarm>(DEFAULT_ALARM);
+  const [alarms, setAlarms] = useState<HomeAlarm[]>(SAMPLE_HOME_ALARMS);
+  const [editAlarm, setEditAlarm] = useState<HomeAlarm>(DEFAULT_ALARM);
   const [tempPlace, setTempPlace] = useState('');
   const [placeQuery, setPlaceQuery] = useState('');
   const isEditMode = !!editAlarm.id;
@@ -74,8 +76,8 @@ export default function PersonalAllAlarmSheet({ onClose }: Props) {
   }, [onClose]);
 
   const openAdd = () => { setEditAlarm(DEFAULT_ALARM); setView('edit'); };
-  const openEdit = (alarm: Alarm) => { setEditAlarm(alarm); setView('edit'); };
-  const openPlace = () => { setTempPlace(editAlarm.place); setView('place'); };
+  const openEdit = (alarm: HomeAlarm) => { setEditAlarm(alarm); setView('edit'); };
+  const openHomePlace = () => { setTempPlace(editAlarm.place); setView('homePlace'); };
 
   const handleSave = () => {
     if (isEditMode) {
@@ -126,43 +128,42 @@ export default function PersonalAllAlarmSheet({ onClose }: Props) {
             <TouchableOpacity style={styles.headerBtn} onPress={onClose}>
               <Feather name="x" size={22} color="#1A1A1A" />
             </TouchableOpacity>
-            <Text style={styles.title}>개인</Text>
+            <Text style={styles.title}>귀가</Text>
             <TouchableOpacity style={styles.addBtn} onPress={openAdd}>
               <Feather name="plus" size={22} color="#1A1A1A" />
             </TouchableOpacity>
           </View>
-
-          {/* 전체 pill */}
           <View style={styles.datePillContainer}>
             <View style={styles.datePill}>
               <Text style={styles.datePillText}>전체</Text>
             </View>
           </View>
-
           <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-            {alarms.map((alarm) => (
-              <TouchableOpacity
-                key={alarm.id}
-                style={styles.alarmCard}
-                onPress={() => openEdit(alarm)}
-                activeOpacity={0.7}
-              >
-                <View style={styles.alarmInfo}>
-                  <View style={styles.timeRow}>
-                    <Text style={styles.ampmSmall}>{alarm.ampm}</Text>
-                    <Text style={styles.alarmTime}>{alarm.hour}:{alarm.minute}</Text>
+            {alarms.map((alarm, index) => (
+              <View key={alarm.id}>
+                <TouchableOpacity style={styles.alarmCard} onPress={() => openEdit(alarm)} activeOpacity={0.7}>
+                  <View style={styles.alarmInfo}>
+                    {alarm.mode === 'lastTrain' ? (
+                      <Text style={styles.lastTrainText}>막차</Text>
+                    ) : (
+                      <View style={styles.timeRow}>
+                        <Text style={styles.ampmSmall}>{alarm.ampm}</Text>
+                        <Text style={styles.alarmTime}>{alarm.hour}:{alarm.minute}</Text>
+                      </View>
+                    )}
+                    <Text style={styles.alarmPlace}>
+                      {alarm.place}, {getRepeatLabel(alarm.repeat)}
+                    </Text>
                   </View>
-                  <Text style={styles.alarmPlace}>
-                    {alarm.place}{alarm.repeat[0] !== '안함' ? `, ${getRepeatLabel(alarm.repeat)}` : ''}
-                  </Text>
-                </View>
-                <Switch
-                  value={alarm.enabled}
-                  onValueChange={() => toggleAlarm(alarm.id)}
-                  trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-                  thumbColor="#FFFFFF"
-                />
-              </TouchableOpacity>
+                  <Switch
+                    value={alarm.enabled}
+                    onValueChange={() => toggleAlarm(alarm.id)}
+                    trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                    thumbColor="#FFFFFF"
+                  />
+                </TouchableOpacity>
+                {index < alarms.length - 1 && <View style={styles.cardSeparator} />}
+              </View>
             ))}
           </BottomSheetScrollView>
         </>
@@ -175,49 +176,71 @@ export default function PersonalAllAlarmSheet({ onClose }: Props) {
             <TouchableOpacity style={styles.headerBtn} onPress={() => setView('list')}>
               <Feather name="x" size={22} color="#1A1A1A" />
             </TouchableOpacity>
-            <Text style={styles.title}>{isEditMode ? '알람 수정' : '알람 추가'}</Text>
             <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
               <Feather name="check" size={20} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
 
+          {/* 막차 / 데드라인 탭 */}
+          <View style={styles.tabContainer}>
+            <TouchableOpacity
+              style={[styles.tab, editAlarm.mode === 'lastTrain' && styles.tabActive]}
+              onPress={() => setEditAlarm((prev) => ({ ...prev, mode: 'lastTrain' }))}
+            >
+              <Text style={[styles.tabText, editAlarm.mode === 'lastTrain' && styles.tabTextActive]}>막차</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tab, editAlarm.mode === 'deadline' && styles.tabActive]}
+              onPress={() => setEditAlarm((prev) => ({ ...prev, mode: 'deadline' }))}
+            >
+              <Text style={[styles.tabText, editAlarm.mode === 'deadline' && styles.tabTextActive]}>데드라인</Text>
+            </TouchableOpacity>
+          </View>
+
           <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-            <View style={styles.pickerContainer}>
-              <Picker
-                selectedValue={editAlarm.ampm}
-                onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, ampm: v }))}
-                style={styles.picker}
-                itemStyle={styles.pickerItem}
-              >
-                <Picker.Item label="오전" value="오전" />
-                <Picker.Item label="오후" value="오후" />
-              </Picker>
-              <Picker
-                selectedValue={editAlarm.hour}
-                onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, hour: v }))}
-                style={styles.picker}
-                itemStyle={styles.pickerItem}
-              >
-                {HOURS.map((h) => <Picker.Item key={h} label={h} value={h} />)}
-              </Picker>
-              <Picker
-                selectedValue={editAlarm.minute}
-                onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, minute: v }))}
-                style={styles.picker}
-                itemStyle={styles.pickerItem}
-              >
-                {MINUTES.map((m) => <Picker.Item key={m} label={m} value={m} />)}
-              </Picker>
-            </View>
+            {editAlarm.mode === 'lastTrain' ? (
+              <View style={styles.lastTrainInfo}>
+                <Text style={styles.lastTrainBig}>막차</Text>
+                <Text style={styles.lastTrainDesc}>설정한 귀가지까지의 막차를 기준으로 알람을 드립니다.</Text>
+              </View>
+            ) : (
+              <View style={styles.pickerContainer}>
+                <Picker
+                  selectedValue={editAlarm.ampm}
+                  onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, ampm: v }))}
+                  style={styles.picker}
+                  itemStyle={styles.pickerItem}
+                >
+                  <Picker.Item label="오전" value="오전" />
+                  <Picker.Item label="오후" value="오후" />
+                </Picker>
+                <Picker
+                  selectedValue={editAlarm.hour}
+                  onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, hour: v }))}
+                  style={styles.picker}
+                  itemStyle={styles.pickerItem}
+                >
+                  {HOURS.map((h) => <Picker.Item key={h} label={h} value={h} />)}
+                </Picker>
+                <Picker
+                  selectedValue={editAlarm.minute}
+                  onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, minute: v }))}
+                  style={styles.picker}
+                  itemStyle={styles.pickerItem}
+                >
+                  {MINUTES.map((m) => <Picker.Item key={m} label={m} value={m} />)}
+                </Picker>
+              </View>
+            )}
+
+            <View style={styles.divider} />
 
             <View style={styles.section}>
               <View style={styles.optionBox}>
-                <TouchableOpacity style={styles.optionRow} onPress={openPlace}>
-                  <Text style={styles.optionLabel}>목적지</Text>
+                <TouchableOpacity style={styles.optionRow} onPress={openHomePlace}>
+                  <Text style={styles.optionLabel}>귀가지</Text>
                   <View style={styles.rowRight}>
-                    <Text style={styles.rowValue} numberOfLines={1}>
-                      {editAlarm.place || '선택'}
-                    </Text>
+                    <Text style={styles.rowValue}>{editAlarm.place}</Text>
                     <Feather name="chevron-right" size={16} color="#AAAAAA" />
                   </View>
                 </TouchableOpacity>
@@ -272,15 +295,18 @@ export default function PersonalAllAlarmSheet({ onClose }: Props) {
         </>
       )}
 
-      {/* ── 목적지 선택 화면 ── */}
-      {view === 'place' && (
+      {/* ── 귀가지 선택 화면 ── */}
+      {view === 'homePlace' && (
         <>
           <View style={styles.header}>
             <TouchableOpacity style={styles.headerBtn} onPress={() => setView('edit')}>
               <Feather name="chevron-left" size={22} color="#1A1A1A" />
             </TouchableOpacity>
-            <Text style={styles.title}>목적지</Text>
-            <TouchableOpacity style={styles.saveBtn} onPress={() => { setEditAlarm((prev) => ({ ...prev, place: tempPlace })); setView('edit'); }}>
+            <Text style={styles.title}>귀가지</Text>
+            <TouchableOpacity style={styles.saveBtn} onPress={() => {
+              setEditAlarm((prev) => ({ ...prev, place: tempPlace }));
+              setView('edit');
+            }}>
               <Feather name="check" size={20} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
@@ -301,13 +327,17 @@ export default function PersonalAllAlarmSheet({ onClose }: Props) {
           </View>
           <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             <View style={styles.optionBox}>
-              {SAMPLE_PLACES.map((place, index) => {
+              {SAMPLE_HOME_PLACES.map((place, index) => {
                 const isSelected = tempPlace === place.name;
                 return (
                   <View key={place.id}>
                     <TouchableOpacity style={styles.placeRow} onPress={() => setTempPlace(place.name)}>
                       <View style={[styles.placeIconWrap, isSelected && { backgroundColor: '#1A1A1A' }]}>
-                        <Feather name="map-pin" size={18} color={isSelected ? '#FFFFFF' : '#AAAAAA'} />
+                        <Feather
+                          name={place.isHome ? 'home' : 'map-pin'}
+                          size={18}
+                          color={isSelected ? '#FFFFFF' : '#AAAAAA'}
+                        />
                       </View>
                       <View style={styles.placeInfo}>
                         <View style={styles.placeNameRow}>
@@ -322,7 +352,7 @@ export default function PersonalAllAlarmSheet({ onClose }: Props) {
                       </View>
                       {isSelected && <Feather name="check" size={18} color="#1A1A1A" />}
                     </TouchableOpacity>
-                    {index < SAMPLE_PLACES.length - 1 && <View style={styles.separator} />}
+                    {index < SAMPLE_HOME_PLACES.length - 1 && <View style={styles.separator} />}
                   </View>
                 );
               })}
@@ -338,27 +368,22 @@ const styles = StyleSheet.create({
   indicator: { backgroundColor: '#DDDDDD', width: 40 },
   background: { backgroundColor: '#FFFFFF', borderRadius: 20 },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: 'row', alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingHorizontal: 20, paddingVertical: 16,
   },
   headerBtn: {
     width: 36, height: 36, borderRadius: 18,
-    backgroundColor: '#E0E0E0',
-    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center',
   },
   title: { fontSize: 16, fontWeight: '600', color: '#1A1A1A' },
   addBtn: {
     width: 36, height: 36, borderRadius: 18,
-    backgroundColor: '#E0E0E0',
-    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center',
   },
   saveBtn: {
     width: 36, height: 36, borderRadius: 18,
-    backgroundColor: '#F5A623',
-    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#F5A623', alignItems: 'center', justifyContent: 'center',
   },
   datePillContainer: { alignItems: 'center', marginBottom: 16 },
   datePill: {
@@ -372,19 +397,33 @@ const styles = StyleSheet.create({
     paddingVertical: 16, paddingHorizontal: 16,
     backgroundColor: '#F5F5F5', borderRadius: 12, marginBottom: 8,
   },
+  cardSeparator: { height: 0 },
   alarmInfo: { flex: 1 },
   timeRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
   ampmSmall: { fontSize: 14, color: '#1A1A1A', marginBottom: 8 },
   alarmTime: { fontSize: 48, fontWeight: '500', color: '#1A1A1A', letterSpacing: -1, lineHeight: 54 },
+  lastTrainText: { fontSize: 36, fontWeight: '600', color: '#1A1A1A', lineHeight: 44 },
   alarmPlace: { fontSize: 12, color: '#888888', marginTop: 2 },
+  tabContainer: {
+    flexDirection: 'row', marginHorizontal: 16, marginBottom: 8,
+    backgroundColor: '#F5F5F5', borderRadius: 10, padding: 4,
+  },
+  tab: { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center' },
+  tabActive: { backgroundColor: '#FFFFFF' },
+  tabText: { fontSize: 14, fontWeight: '500', color: '#AAAAAA' },
+  tabTextActive: { color: '#1A1A1A', fontWeight: '600' },
+  lastTrainInfo: { alignItems: 'center', paddingVertical: 32 },
+  lastTrainBig: { fontSize: 40, fontWeight: '700', color: '#1A1A1A', marginBottom: 12 },
+  lastTrainDesc: { fontSize: 13, color: '#888888', textAlign: 'center', lineHeight: 20 },
+  divider: { height: StyleSheet.hairlineWidth, backgroundColor: '#E0E0E0', marginVertical: 16 },
   pickerContainer: {
-    flexDirection: 'row', marginBottom: 24,
+    flexDirection: 'row', marginBottom: 8,
     backgroundColor: '#F5F5F5', borderRadius: 14,
     overflow: 'hidden', height: 200,
   },
   picker: { flex: 1 },
   pickerItem: { fontSize: 20, color: '#1A1A1A', height: 200 },
-  section: { marginBottom: 20 },
+  section: { marginBottom: 16 },
   optionBox: { backgroundColor: '#F5F5F5', borderRadius: 12, paddingHorizontal: 16 },
   optionRow: {
     flexDirection: 'row', alignItems: 'center',
@@ -410,8 +449,7 @@ const styles = StyleSheet.create({
   placeRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14 },
   placeIconWrap: {
     width: 34, height: 34, borderRadius: 17,
-    backgroundColor: '#EEEEEE',
-    alignItems: 'center', justifyContent: 'center', marginRight: 12,
+    backgroundColor: '#EEEEEE', alignItems: 'center', justifyContent: 'center', marginRight: 12,
   },
   placeInfo: { flex: 1 },
   placeNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },

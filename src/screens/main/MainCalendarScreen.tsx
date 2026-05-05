@@ -1,3 +1,6 @@
+import ArrivalDashboardSheet from '@/src/screens/alarmManage/ArrivalDashboardSheet';
+import GroupAllAlarmSheet from '@/src/screens/allAlarmManage/GroupAllAlarmSheet';
+import HomeAllAlarmSheet from '@/src/screens/allAlarmManage/HomeAllAlarmSheet';
 import PersonalAllAlarmSheet from '@/src/screens/allAlarmManage/PersonalAllAlarmSheet';
 import AlarmSettingsSheet from '@/src/screens/main/AlarmSettingsSheet';
 import { useCalendarStore } from '@/src/store/calendarStore';
@@ -182,6 +185,10 @@ export default function MainCalendarScreen() {
   const [containerHeight, setContainerHeight] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [showPersonalSheet, setShowPersonalSheet] = useState(false);
+  const [showGroupSheet, setShowGroupSheet] = useState(false);
+  const [showHomeSheet, setShowHomeSheet] = useState(false);
+  const [showArrivalSheet, setShowArrivalSheet] = useState(false);
+  const [selectedGroupAlarm, setSelectedGroupAlarm] = useState<any>(null);
   const [events, setEvents] = useState<EventMap>({});
   const flatListRef = useRef<FlatList>(null);
   const isAtTodayRef = useRef(true);
@@ -274,12 +281,13 @@ export default function MainCalendarScreen() {
           <Ionicons name="chevron-back" size={18} color="#1A1A1A" />
           <Text style={styles.yearText}>{selectedYear}년</Text>
         </TouchableOpacity>
-        <View style={styles.headerIcons}>
-          <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/home-address')}>
-            <Feather name="home" size={22} color="#1A1A1A" />
+        <View style={styles.headerIconPill}>
+          <TouchableOpacity style={styles.headerIconBtn} onPress={() => router.push('/home-address')}>
+            <Feather name="home" size={20} color="#1A1A1A" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.headerIcon} onPress={() => router.push('/profile-settings')}>
-            <Feather name="user" size={22} color="#1A1A1A" />
+          <View style={styles.headerIconDivider} />
+          <TouchableOpacity style={styles.headerIconBtn} onPress={() => router.push('/profile-settings')}>
+            <Feather name="user" size={20} color="#1A1A1A" />
           </TouchableOpacity>
         </View>
       </View>
@@ -323,12 +331,12 @@ export default function MainCalendarScreen() {
             <Text style={styles.rightBtnLabel}>개인</Text>
           </TouchableOpacity>
           {/* 그룹 */}
-          <TouchableOpacity style={styles.rightBtn} onPress={() => {}} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.rightBtn} onPress={() => setShowGroupSheet(true)} activeOpacity={0.7}>
             <Feather name="users" size={26} color="#444444" />
             <Text style={styles.rightBtnLabel}>그룹</Text>
           </TouchableOpacity>
           {/* 귀가 */}
-          <TouchableOpacity style={styles.rightBtn} onPress={() => {}} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.rightBtn} onPress={() => setShowHomeSheet(true)} activeOpacity={0.7}>
             <Feather name="navigation" size={26} color="#444444" />
             <Text style={styles.rightBtnLabel}>귀가</Text>
           </TouchableOpacity>
@@ -351,6 +359,29 @@ export default function MainCalendarScreen() {
           onClose={() => setShowPersonalSheet(false)}
         />
       )}
+      {showGroupSheet && (
+        <GroupAllAlarmSheet
+          onClose={() => setShowGroupSheet(false)}
+          onArrivalPress={(alarm) => {
+            setSelectedGroupAlarm(alarm);
+            setShowArrivalSheet(true);
+          }}
+        />
+      )}
+      {showHomeSheet && (
+        <HomeAllAlarmSheet onClose={() => setShowHomeSheet(false)} />
+      )}
+      {showArrivalSheet && selectedGroupAlarm && (
+        <ArrivalDashboardSheet
+          onClose={() => setShowArrivalSheet(false)}
+          destination={selectedGroupAlarm.place}
+          alarmTime={selectedGroupAlarm.ampm + ' ' + selectedGroupAlarm.hour + '시'}
+          members={selectedGroupAlarm.members.map((m: any) => ({
+            ...m,
+            arrivalTime: m.isMe ? undefined : '오후 7시 3분',
+          }))}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -366,8 +397,9 @@ const styles = StyleSheet.create({
   },
   yearNav: { flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: '#F0F0F0', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
   yearText: { fontSize: 15, fontWeight: '500', color: '#1A1A1A' },
-  headerIcons: { flexDirection: 'row', gap: 16 },
-  headerIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center' },
+  headerIconPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0F0F0', borderRadius: 20, overflow: 'hidden' },
+  headerIconBtn: { paddingHorizontal: 12, paddingVertical: 8 },
+  headerIconDivider: { width: StyleSheet.hairlineWidth, height: 20, backgroundColor: '#CCCCCC' },
   calendarArea: { flex: 1 },
   monthTitleRow: { paddingHorizontal: 20, justifyContent: 'flex-end', paddingBottom: 4 },
   monthTitle: { fontSize: 34, fontWeight: '800', color: '#1A1A1A' },
