@@ -161,6 +161,7 @@ export default function YearCalendarScreen() {
 
   const [currentIndex, setCurrentIndex] = useState(CENTER_INDEX);
   const [containerHeight, setContainerHeight] = useState(0);
+  const isAtTodayRef = useRef(true);
   const flatListRef = useRef<FlatList>(null);
 
   const years = Array.from({ length: TOTAL_YEARS }, (_, i) => i);
@@ -179,6 +180,7 @@ export default function YearCalendarScreen() {
     if (containerHeight === 0) return;
     const index = Math.round(e.nativeEvent.contentOffset.y / containerHeight);
     setCurrentIndex(index);
+    isAtTodayRef.current = index === CENTER_INDEX;
   }, [containerHeight]);
 
   const handleMonthPress = useCallback((year: number, month: number) => {
@@ -187,8 +189,16 @@ export default function YearCalendarScreen() {
   }, []);
 
   const goToToday = useCallback(() => {
-    flatListRef.current?.scrollToIndex({ index: CENTER_INDEX, animated: true });
-    setCurrentIndex(CENTER_INDEX);
+    if (isAtTodayRef.current) {
+      // 이미 현재 연도 → MainCalendarScreen으로 이동
+      setYearMonth(today.getFullYear(), today.getMonth() + 1);
+      router.back();
+    } else {
+      // 현재 연도로 스크롤
+      flatListRef.current?.scrollToIndex({ index: CENTER_INDEX, animated: true });
+      setCurrentIndex(CENTER_INDEX);
+      isAtTodayRef.current = true;
+    }
   }, []);
 
   const renderItem = useCallback(({ item }: { item: number }) => {
@@ -261,19 +271,11 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingVertical: 10,
   },
   headerIcons: { flexDirection: 'row', gap: 16 },
-  headerIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#F0F0F0',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  headerIcon: { padding: 4 },
   calendarArea: { flex: 1 },
   yearTitle: { fontSize: 36, fontWeight: '800', color: '#FF3B30' },
   miniMonth: { flex: 1 },

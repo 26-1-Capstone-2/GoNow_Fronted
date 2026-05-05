@@ -191,6 +191,7 @@ export default function MainCalendarScreen() {
 
   const [containerHeight, setContainerHeight] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
+  const isAtTodayRef = useRef(true);
   const [events, setEvents] = useState<EventMap>({});
   const flatListRef = useRef<FlatList>(null);
 
@@ -235,11 +236,19 @@ export default function MainCalendarScreen() {
     const index = Math.round(e.nativeEvent.contentOffset.y / containerHeight);
     const { year, month } = getYearMonthFromIndex(today.getFullYear(), today.getMonth() + 1, index);
     setYearMonth(year, month);
+    isAtTodayRef.current = year === today.getFullYear() && month === today.getMonth() + 1;
   }, [containerHeight]);
 
   const goToToday = useCallback(() => {
-    setYearMonth(today.getFullYear(), today.getMonth() + 1);
-    setSelectedDate(todayStr);
+    if (isAtTodayRef.current) {
+      // 이미 당일 달력 → DailyAlarmScreen으로 이동
+      router.push('/daily-alarm');
+    } else {
+      // 당일 달력으로 스크롤
+      setYearMonth(today.getFullYear(), today.getMonth() + 1);
+      setSelectedDate(todayStr);
+      isAtTodayRef.current = true;
+    }
   }, [todayStr]);
 
   const renderItem = useCallback(({ item }: { item: number }) => {
