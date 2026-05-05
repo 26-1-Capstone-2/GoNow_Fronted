@@ -1,3 +1,4 @@
+import PersonalAllAlarmSheet from '@/src/screens/allAlarmManage/PersonalAllAlarmSheet';
 import AlarmSettingsSheet from '@/src/screens/main/AlarmSettingsSheet';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, Ionicons } from '@expo/vector-icons';
@@ -171,13 +172,6 @@ const CalendarMonth = memo(function CalendarMonth({
   );
 });
 
-const BOTTOM_TABS = [
-  { icon: 'user', label: '개인', route: '/(tabs)/personal' },
-  { icon: 'users', label: '그룹', route: '/(tabs)/group' },
-  { icon: 'navigation', label: '귀가', route: '/(tabs)/home-alarm' },
-  { icon: 'settings', label: '설정', route: '' },
-];
-
 export default function MainCalendarScreen() {
   const today = new Date();
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -187,13 +181,11 @@ export default function MainCalendarScreen() {
 
   const [containerHeight, setContainerHeight] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
+  const [showPersonalSheet, setShowPersonalSheet] = useState(false);
   const [events, setEvents] = useState<EventMap>({});
   const flatListRef = useRef<FlatList>(null);
   const isAtTodayRef = useRef(true);
-
-  // 마운트 여부 추적 — 첫 렌더시 scrollToIndex 방지
   const isMountedRef = useRef(false);
-  // YearCalendar에서 선택한 연/월로 이동 필요한지 추적
   const pendingScrollRef = useRef(false);
 
   const currentIndex = CENTER_INDEX + getOffsetFromBase(
@@ -203,18 +195,14 @@ export default function MainCalendarScreen() {
 
   const months = Array.from({ length: TOTAL_MONTHS }, (_, i) => i);
 
-  // YearCalendar에서 월 선택 시에만 스크롤 (마운트 시 제외)
   useEffect(() => {
     if (!isMountedRef.current) return;
     pendingScrollRef.current = true;
   }, [selectedYear, selectedMonth]);
 
-  // containerHeight 확정 후 pending 스크롤 실행
   useEffect(() => {
     if (containerHeight === 0) return;
-
     if (!isMountedRef.current) {
-      // 첫 마운트 — animated 없이 정확한 위치로 이동
       isMountedRef.current = true;
       const clampedIndex = Math.max(0, Math.min(TOTAL_MONTHS - 1, currentIndex));
       requestAnimationFrame(() => {
@@ -222,7 +210,6 @@ export default function MainCalendarScreen() {
       });
       return;
     }
-
     if (pendingScrollRef.current) {
       pendingScrollRef.current = false;
       const clampedIndex = Math.max(0, Math.min(TOTAL_MONTHS - 1, currentIndex));
@@ -230,7 +217,6 @@ export default function MainCalendarScreen() {
     }
   }, [containerHeight, selectedYear, selectedMonth]);
 
-  // 공휴일 불러오기
   useEffect(() => {
     fetchHolidays(selectedYear, selectedMonth).then((holidays) => {
       const map: EventMap = {};
@@ -331,23 +317,38 @@ export default function MainCalendarScreen() {
           <Text style={styles.todayBtnLabel}>오늘</Text>
         </TouchableOpacity>
         <View style={styles.rightBtns}>
-          {BOTTOM_TABS.map((item) => (
-            <TouchableOpacity
-              key={item.label}
-              style={styles.rightBtn}
-              onPress={() => item.label === '설정' ? setShowSettings(true) : router.push(item.route as any)}
-              activeOpacity={0.7}
-            >
-              <Feather name={item.icon as any} size={26} color="#444444" />
-              <Text style={styles.rightBtnLabel}>{item.label}</Text>
-            </TouchableOpacity>
-          ))}
+          {/* 개인 */}
+          <TouchableOpacity style={styles.rightBtn} onPress={() => setShowPersonalSheet(true)} activeOpacity={0.7}>
+            <Feather name="user" size={26} color="#444444" />
+            <Text style={styles.rightBtnLabel}>개인</Text>
+          </TouchableOpacity>
+          {/* 그룹 */}
+          <TouchableOpacity style={styles.rightBtn} onPress={() => {}} activeOpacity={0.7}>
+            <Feather name="users" size={26} color="#444444" />
+            <Text style={styles.rightBtnLabel}>그룹</Text>
+          </TouchableOpacity>
+          {/* 귀가 */}
+          <TouchableOpacity style={styles.rightBtn} onPress={() => {}} activeOpacity={0.7}>
+            <Feather name="navigation" size={26} color="#444444" />
+            <Text style={styles.rightBtnLabel}>귀가</Text>
+          </TouchableOpacity>
+          {/* 설정 */}
+          <TouchableOpacity style={styles.rightBtn} onPress={() => setShowSettings(true)} activeOpacity={0.7}>
+            <Feather name="settings" size={26} color="#444444" />
+            <Text style={styles.rightBtnLabel}>설정</Text>
+          </TouchableOpacity>
         </View>
       </View>
+
       {showSettings && (
         <AlarmSettingsSheet
           onClose={() => setShowSettings(false)}
           onSave={(s) => console.log(s)}
+        />
+      )}
+      {showPersonalSheet && (
+        <PersonalAllAlarmSheet
+          onClose={() => setShowPersonalSheet(false)}
         />
       )}
     </SafeAreaView>
