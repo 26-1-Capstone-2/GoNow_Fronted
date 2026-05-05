@@ -2,13 +2,13 @@ import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    FlatList,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  FlatList,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 interface AddressResult {
@@ -199,9 +199,10 @@ const styles = StyleSheet.create({
   currentBadgeText: { fontSize: 10, color: '#4CAF50', fontWeight: '500' },
   addressText: { fontSize: 13, color: '#888888' },
   footer: {
-    paddingHorizontal: 20,
-    paddingBottom: 32,
-    paddingTop: 12,
+    position: 'absolute',
+    bottom: 40,
+    left: 0,
+    right: 0,
     alignItems: 'center',
   },
   completeButton: {

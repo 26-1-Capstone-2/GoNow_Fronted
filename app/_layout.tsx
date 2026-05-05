@@ -20,12 +20,13 @@ export default function RootLayout() {
           <Stack.Screen name="index" options={{ animation: 'none' }} />
           <Stack.Screen name="(auth)" />
           <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="year-calendar" />
+          <Stack.Screen name="year-calendar" options={{ animation: 'fade' }} />
           <Stack.Screen name="home-address" />
           <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal', headerShown: true }} />
           <Stack.Screen name="profile-settings" />
           <Stack.Screen name="change-nickname" />
           <Stack.Screen name="change-password" />
+          <Stack.Screen name="daily-alarm" />
         </Stack>
         <StatusBar style="auto" />
       </ThemeProvider>

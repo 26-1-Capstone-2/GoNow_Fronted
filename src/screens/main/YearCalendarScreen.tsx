@@ -1,7 +1,7 @@
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { memo, useCallback, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   Dimensions,
   FlatList,
@@ -13,7 +13,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -42,21 +42,10 @@ function getCalendarWeeks(year: number, month: number) {
 }
 
 const MiniMonth = memo(function MiniMonth({
-  year,
-  month,
-  todayYear,
-  todayMonth,
-  todayDate,
-  daySize,
-  onPress,
+  year, month, todayYear, todayMonth, todayDate, daySize, onPress,
 }: {
-  year: number;
-  month: number;
-  todayYear: number;
-  todayMonth: number;
-  todayDate: number;
-  daySize: number;
-  onPress: () => void;
+  year: number; month: number; todayYear: number; todayMonth: number;
+  todayDate: number; daySize: number; onPress: () => void;
 }) {
   const weeks = getCalendarWeeks(year, month);
   const isCurrentMonth = year === todayYear && month === todayMonth;
@@ -108,19 +97,10 @@ const MiniMonth = memo(function MiniMonth({
 });
 
 const YearPage = memo(function YearPage({
-  year,
-  todayYear,
-  todayMonth,
-  todayDate,
-  containerHeight,
-  onMonthPress,
+  year, todayYear, todayMonth, todayDate, containerHeight, onMonthPress,
 }: {
-  year: number;
-  todayYear: number;
-  todayMonth: number;
-  todayDate: number;
-  containerHeight: number;
-  onMonthPress: (year: number, month: number) => void;
+  year: number; todayYear: number; todayMonth: number; todayDate: number;
+  containerHeight: number; onMonthPress: (year: number, month: number) => void;
 }) {
   const YEAR_TITLE_H = 60;
   const AVAILABLE_H = containerHeight - YEAR_TITLE_H;
@@ -161,24 +141,33 @@ export default function YearCalendarScreen() {
 
   const [currentIndex, setCurrentIndex] = useState(CENTER_INDEX);
   const [containerHeight, setContainerHeight] = useState(0);
+  const isAtTodayRef = useRef(true);
+  const isMountedRef = useRef(false);
   const flatListRef = useRef<FlatList>(null);
 
   const years = Array.from({ length: TOTAL_YEARS }, (_, i) => i);
 
+  // containerHeight 확정 후 정확한 위치로 이동
+  useEffect(() => {
+    if (containerHeight === 0) return;
+    if (!isMountedRef.current) {
+      isMountedRef.current = true;
+      requestAnimationFrame(() => {
+        flatListRef.current?.scrollToIndex({ index: CENTER_INDEX, animated: false });
+      });
+    }
+  }, [containerHeight]);
+
   const onLayout = useCallback((e: LayoutChangeEvent) => {
     const h = e.nativeEvent.layout.height;
-    setContainerHeight(h);
-    if (h > 0) {
-      setTimeout(() => {
-        flatListRef.current?.scrollToIndex({ index: CENTER_INDEX, animated: false });
-      }, 50);
-    }
+    if (h > 0) setContainerHeight(h);
   }, []);
 
   const onMomentumScrollEnd = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     if (containerHeight === 0) return;
     const index = Math.round(e.nativeEvent.contentOffset.y / containerHeight);
     setCurrentIndex(index);
+    isAtTodayRef.current = index === CENTER_INDEX;
   }, [containerHeight]);
 
   const handleMonthPress = useCallback((year: number, month: number) => {
@@ -187,8 +176,14 @@ export default function YearCalendarScreen() {
   }, []);
 
   const goToToday = useCallback(() => {
-    flatListRef.current?.scrollToIndex({ index: CENTER_INDEX, animated: true });
-    setCurrentIndex(CENTER_INDEX);
+    if (isAtTodayRef.current) {
+      setYearMonth(today.getFullYear(), today.getMonth() + 1);
+      router.back();
+    } else {
+      flatListRef.current?.scrollToIndex({ index: CENTER_INDEX, animated: true });
+      setCurrentIndex(CENTER_INDEX);
+      isAtTodayRef.current = true;
+    }
   }, []);
 
   const renderItem = useCallback(({ item }: { item: number }) => {

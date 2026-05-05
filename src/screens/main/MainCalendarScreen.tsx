@@ -14,7 +14,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -98,12 +98,13 @@ interface CalendarMonthProps {
   todayStr: string;
   selectedDate: string;
   onSelectDate: (date: string) => void;
+  onDayPress: (date: string) => void;
   containerHeight: number;
   events: EventMap;
 }
 
 const CalendarMonth = memo(function CalendarMonth({
-  year, month, todayStr, selectedDate, onSelectDate, containerHeight, events,
+  year, month, todayStr, selectedDate, onSelectDate, onDayPress, containerHeight, events,
 }: CalendarMonthProps) {
   const weeks = getCalendarWeeks(year, month);
   const MONTH_TITLE_H = 60;
@@ -135,7 +136,7 @@ const CalendarMonth = memo(function CalendarMonth({
                 <TouchableOpacity
                   key={di}
                   style={styles.dayCell}
-                  onPress={() => isCur && onSelectDate(day.fullDate)}
+                  onPress={() => { if (isCur) onDayPress(day.fullDate); }}
                   activeOpacity={0.7}
                 >
                   <View style={[
@@ -188,6 +189,12 @@ export default function MainCalendarScreen() {
   const [showSettings, setShowSettings] = useState(false);
   const [events, setEvents] = useState<EventMap>({});
   const flatListRef = useRef<FlatList>(null);
+  const isAtTodayRef = useRef(true);
+
+  // 마운트 여부 추적 — 첫 렌더시 scrollToIndex 방지
+  const isMountedRef = useRef(false);
+  // YearCalendar에서 선택한 연/월로 이동 필요한지 추적
+  const pendingScrollRef = useRef(false);
 
   const currentIndex = CENTER_INDEX + getOffsetFromBase(
     today.getFullYear(), today.getMonth() + 1,
@@ -196,13 +203,34 @@ export default function MainCalendarScreen() {
 
   const months = Array.from({ length: TOTAL_MONTHS }, (_, i) => i);
 
+  // YearCalendar에서 월 선택 시에만 스크롤 (마운트 시 제외)
   useEffect(() => {
-    if (containerHeight > 0 && flatListRef.current) {
-      const clampedIndex = Math.max(0, Math.min(TOTAL_MONTHS - 1, currentIndex));
-      flatListRef.current.scrollToIndex({ index: clampedIndex, animated: true });
-    }
-  }, [selectedYear, selectedMonth, containerHeight]);
+    if (!isMountedRef.current) return;
+    pendingScrollRef.current = true;
+  }, [selectedYear, selectedMonth]);
 
+  // containerHeight 확정 후 pending 스크롤 실행
+  useEffect(() => {
+    if (containerHeight === 0) return;
+
+    if (!isMountedRef.current) {
+      // 첫 마운트 — animated 없이 정확한 위치로 이동
+      isMountedRef.current = true;
+      const clampedIndex = Math.max(0, Math.min(TOTAL_MONTHS - 1, currentIndex));
+      requestAnimationFrame(() => {
+        flatListRef.current?.scrollToIndex({ index: clampedIndex, animated: false });
+      });
+      return;
+    }
+
+    if (pendingScrollRef.current) {
+      pendingScrollRef.current = false;
+      const clampedIndex = Math.max(0, Math.min(TOTAL_MONTHS - 1, currentIndex));
+      flatListRef.current?.scrollToIndex({ index: clampedIndex, animated: true });
+    }
+  }, [containerHeight, selectedYear, selectedMonth]);
+
+  // 공휴일 불러오기
   useEffect(() => {
     fetchHolidays(selectedYear, selectedMonth).then((holidays) => {
       const map: EventMap = {};
@@ -216,13 +244,7 @@ export default function MainCalendarScreen() {
 
   const onLayout = useCallback((e: LayoutChangeEvent) => {
     const h = e.nativeEvent.layout.height;
-    setContainerHeight(h);
-    if (h > 0) {
-      setTimeout(() => {
-        const clampedIndex = Math.max(0, Math.min(TOTAL_MONTHS - 1, currentIndex));
-        flatListRef.current?.scrollToIndex({ index: clampedIndex, animated: false });
-      }, 50);
-    }
+    if (h > 0) setContainerHeight(h);
   }, []);
 
   const onMomentumScrollEnd = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -230,11 +252,17 @@ export default function MainCalendarScreen() {
     const index = Math.round(e.nativeEvent.contentOffset.y / containerHeight);
     const { year, month } = getYearMonthFromIndex(today.getFullYear(), today.getMonth() + 1, index);
     setYearMonth(year, month);
+    isAtTodayRef.current = year === today.getFullYear() && month === today.getMonth() + 1;
   }, [containerHeight]);
 
   const goToToday = useCallback(() => {
-    setYearMonth(today.getFullYear(), today.getMonth() + 1);
-    setSelectedDate(todayStr);
+    if (isAtTodayRef.current) {
+      router.push('/daily-alarm');
+    } else {
+      setYearMonth(today.getFullYear(), today.getMonth() + 1);
+      setSelectedDate(todayStr);
+      isAtTodayRef.current = true;
+    }
   }, [todayStr]);
 
   const renderItem = useCallback(({ item }: { item: number }) => {
@@ -246,6 +274,7 @@ export default function MainCalendarScreen() {
         todayStr={todayStr}
         selectedDate={selectedDate}
         onSelectDate={setSelectedDate}
+        onDayPress={(date) => router.push('/daily-alarm')}
         containerHeight={containerHeight}
         events={events}
       />
@@ -334,10 +363,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
   },
-  yearNav: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  yearNav: { flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: '#F0F0F0', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
   yearText: { fontSize: 15, fontWeight: '500', color: '#1A1A1A' },
   headerIcons: { flexDirection: 'row', gap: 16 },
-  headerIcon: { padding: 4 },
+  headerIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center' },
   calendarArea: { flex: 1 },
   monthTitleRow: { paddingHorizontal: 20, justifyContent: 'flex-end', paddingBottom: 4 },
   monthTitle: { fontSize: 34, fontWeight: '800', color: '#1A1A1A' },
