@@ -167,7 +167,7 @@ export async function sendAlarm(
     await Notifications.scheduleNotificationAsync({
       content: {
         title,
-        body: stage === 4 ? `🚨 ${body} (${i + 1}/${repeatCount})` : body,
+        body: stage === 4 ? `${body} (${i + 1}/${repeatCount})` : body,
         sound: config.sound ? 'default' : false,
         vibrate: config.vibrate ? [0, 500, 200, 500, 200, 500] : undefined,
         priority: stage >= 3
