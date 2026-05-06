@@ -27,6 +27,7 @@ export default function RootLayout() {
           <Stack.Screen name="change-nickname" />
           <Stack.Screen name="change-password" />
           <Stack.Screen name="daily-alarm" />
+          <Stack.Screen name="alarm-test" options={{ animation: 'slide_from_bottom' }} />
         </Stack>
         <StatusBar style="auto" />
       </ThemeProvider>

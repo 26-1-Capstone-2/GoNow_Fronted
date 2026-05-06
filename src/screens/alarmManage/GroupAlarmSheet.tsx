@@ -1,6 +1,6 @@
 import AddressSearchView, { SearchResult } from '@/src/components/common/AddressSearchView';
 import { useCalendarStore } from '@/src/store/calendarStore';
-import { Feather } from '@expo/vector-icons';
+import { Feather, FontAwesome6 } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
@@ -19,22 +19,31 @@ interface Member { id: string; name: string; isMe: boolean; }
 interface GroupAlarm {
   id: string; ampm: string; hour: string; minute: string;
   place: string; enabled: boolean; members: Member[]; inviteCode: string;
+  isArrivalActive?: boolean;
 }
-interface Props { onClose: () => void; }
+
+interface Props {
+  onClose: () => void;
+  onArrivalPress?: (alarm: GroupAlarm) => void;
+}
 
 const SAMPLE_GROUP_ALARMS: GroupAlarm[] = [
-  { id: '1', ampm: '오후', hour: '7', minute: '00', place: '홍대역 2번 출구', enabled: true,
+  {
+    id: '1', ampm: '오후', hour: '7', minute: '00', place: '홍대역 2번 출구', enabled: true,
     members: [{ id: '1', name: '가가가(본인)', isMe: true }, { id: '2', name: '나나나', isMe: false }, { id: '3', name: '다다다', isMe: false }],
-    inviteCode: 'abcdeg' },
+    inviteCode: 'abcdeg', isArrivalActive: true,
+  },
 ];
+
 const DEFAULT_ALARM: GroupAlarm = {
   id: '', ampm: '오전', hour: '7', minute: '00', place: '', enabled: true,
   members: [{ id: 'me', name: '가가가(본인)', isMe: true }], inviteCode: '',
+  isArrivalActive: false,
 };
 
 type ViewType = 'list' | 'edit' | 'place';
 
-export default function GroupAlarmSheet({ onClose }: Props) {
+export default function GroupAlarmSheet({ onClose, onArrivalPress }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['85%'], []);
   const { selectedDate } = useCalendarStore();
@@ -47,7 +56,7 @@ export default function GroupAlarmSheet({ onClose }: Props) {
   const dateObj = new Date(selectedDate);
   const month = dateObj.getMonth() + 1;
   const date = dateObj.getDate();
-  const dayName = ['일','월','화','수','목','금','토'][dateObj.getDay()];
+  const dayName = DAY_NAMES[dateObj.getDay()];
 
   const handleSheetChange = useCallback((index: number) => { if (index === -1) onClose(); }, [onClose]);
   const openAdd = () => { setEditAlarm(DEFAULT_ALARM); setView('edit'); };
@@ -74,6 +83,8 @@ export default function GroupAlarmSheet({ onClose }: Props) {
     <BottomSheet ref={bottomSheetRef} index={0} snapPoints={snapPoints} onChange={handleSheetChange}
       onClose={onClose} enablePanDownToClose enableDynamicSizing={false}
       handleIndicatorStyle={styles.indicator} backgroundStyle={styles.background}>
+
+      {/* ── 목록 화면 ── */}
       {view === 'list' && (
         <>
           <View style={styles.header}>
@@ -94,14 +105,28 @@ export default function GroupAlarmSheet({ onClose }: Props) {
                   </View>
                   <Text style={styles.alarmPlace}>{alarm.place}</Text>
                 </View>
-                <Switch value={alarm.enabled} onValueChange={() => toggleAlarm(alarm.id)}
-                  trackColor={{ false: '#E0E0E0', true: '#4CAF50' }} thumbColor="#FFFFFF" />
+                <View style={styles.cardRight}>
+                  <TouchableOpacity
+                    onPress={() => onArrivalPress?.(alarm)}
+                    disabled={!alarm.isArrivalActive}
+                    style={[styles.arrivalBtn, alarm.isArrivalActive && styles.arrivalBtnActive]}
+                  >
+                    <FontAwesome6
+                      name="person-walking"
+                      size={14}
+                      color={alarm.isArrivalActive ? '#FFFFFF' : '#CCCCCC'}
+                    />
+                  </TouchableOpacity>
+                  <Switch value={alarm.enabled} onValueChange={() => toggleAlarm(alarm.id)}
+                    trackColor={{ false: '#E0E0E0', true: '#4CAF50' }} thumbColor="#FFFFFF" />
+                </View>
               </TouchableOpacity>
             ))}
           </BottomSheetScrollView>
         </>
       )}
 
+      {/* ── 수정/추가 화면 ── */}
       {view === 'edit' && (
         <>
           <View style={styles.header}>
@@ -162,6 +187,7 @@ export default function GroupAlarmSheet({ onClose }: Props) {
         </>
       )}
 
+      {/* ── 목적지 선택 화면 ── */}
       {view === 'place' && (
         <>
           <View style={styles.header}>
@@ -194,6 +220,9 @@ const styles = StyleSheet.create({
   ampmSmall: { fontSize: 14, color: '#1A1A1A', marginBottom: 8 },
   alarmTime: { fontSize: 48, fontWeight: '500', color: '#1A1A1A', letterSpacing: -1, lineHeight: 54 },
   alarmPlace: { fontSize: 12, color: '#888888', marginTop: 2 },
+  cardRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  arrivalBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center' },
+  arrivalBtnActive: { backgroundColor: '#92DEFE' },
   pickerContainer: { flexDirection: 'row', marginBottom: 24, backgroundColor: '#F5F5F5', borderRadius: 14, overflow: 'hidden', height: 200 },
   picker: { flex: 1 },
   pickerItem: { fontSize: 20, color: '#1A1A1A', height: 200 },
