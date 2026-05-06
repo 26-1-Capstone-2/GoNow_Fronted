@@ -1,4 +1,5 @@
 import AddressSearchView, { SearchResult } from '@/src/components/common/AddressSearchView';
+import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
 import { Feather, FontAwesome6 } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
@@ -162,39 +163,36 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
 
           <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             {alarms.map((alarm) => (
-              <TouchableOpacity
-                key={alarm.id}
-                style={styles.alarmCard}
-                onPress={() => openEdit(alarm)}
-                activeOpacity={0.7}
-              >
-                <View style={styles.alarmInfo}>
-                  <View style={styles.timeRow}>
-                    <Text style={styles.ampmSmall}>{alarm.ampm}</Text>
-                    <Text style={styles.alarmTime}>{alarm.hour}:{alarm.minute}</Text>
+              <SwipeableAlarmCard key={alarm.id} onDelete={() => setAlarms((prev) => prev.filter((a) => a.id !== alarm.id))}>
+                <TouchableOpacity style={styles.alarmCard} onPress={() => openEdit(alarm)} activeOpacity={0.7}>
+                  <View style={styles.alarmInfo}>
+                    <View style={styles.timeRow}>
+                      <Text style={styles.ampmSmall}>{alarm.ampm}</Text>
+                      <Text style={styles.alarmTime}>{alarm.hour}:{alarm.minute}</Text>
+                    </View>
+                    <Text style={styles.alarmPlace}>{alarm.place}</Text>
                   </View>
-                  <Text style={styles.alarmPlace}>{alarm.place}</Text>
-                </View>
-                <View style={styles.cardRight}>
-                  <TouchableOpacity
-                    onPress={() => onArrivalPress?.(alarm)}
-                    disabled={!alarm.isArrivalActive}
-                    style={[styles.arrivalBtn, alarm.isArrivalActive && styles.arrivalBtnActive]}
-                  >
-                    <FontAwesome6
-                      name="person-walking"
-                      size={14}
-                      color={alarm.isArrivalActive ? '#FFFFFF' : '#CCCCCC'}
+                  <View style={styles.cardRight}>
+                    <TouchableOpacity
+                      onPress={() => onArrivalPress?.(alarm)}
+                      disabled={!alarm.isArrivalActive}
+                      style={[styles.arrivalBtn, alarm.isArrivalActive && styles.arrivalBtnActive]}
+                    >
+                      <FontAwesome6
+                        name="person-walking"
+                        size={14}
+                        color={alarm.isArrivalActive ? '#FFFFFF' : '#CCCCCC'}
+                      />
+                    </TouchableOpacity>
+                    <Switch
+                      value={alarm.enabled}
+                      onValueChange={() => toggleAlarm(alarm.id)}
+                      trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                      thumbColor="#FFFFFF"
                     />
-                  </TouchableOpacity>
-                  <Switch
-                    value={alarm.enabled}
-                    onValueChange={() => toggleAlarm(alarm.id)}
-                    trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-                    thumbColor="#FFFFFF"
-                  />
-                </View>
-              </TouchableOpacity>
+                  </View>
+                </TouchableOpacity>
+              </SwipeableAlarmCard>
             ))}
           </BottomSheetScrollView>
         </>

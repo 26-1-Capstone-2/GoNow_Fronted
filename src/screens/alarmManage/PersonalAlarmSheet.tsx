@@ -1,4 +1,5 @@
 import AddressSearchView, { SearchResult } from '@/src/components/common/AddressSearchView';
+import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
@@ -162,26 +163,23 @@ export default function PersonalAlarmSheet({ onClose }: Props) {
 
           <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             {alarms.map((alarm) => (
-              <TouchableOpacity
-                key={alarm.id}
-                style={styles.alarmCard}
-                onPress={() => openEdit(alarm)}
-                activeOpacity={0.7}
-              >
-                <View style={styles.alarmInfo}>
-                  <View style={styles.timeRow}>
-                    <Text style={styles.ampmSmall}>{alarm.ampm}</Text>
-                    <Text style={styles.alarmTime}>{alarm.hour}:{alarm.minute}</Text>
+              <SwipeableAlarmCard key={alarm.id} onDelete={() => setAlarms((prev) => prev.filter((a) => a.id !== alarm.id))}>
+                <TouchableOpacity style={styles.alarmCard} onPress={() => openEdit(alarm)} activeOpacity={0.7}>
+                  <View style={styles.alarmInfo}>
+                    <View style={styles.timeRow}>
+                      <Text style={styles.ampmSmall}>{alarm.ampm}</Text>
+                      <Text style={styles.alarmTime}>{alarm.hour}:{alarm.minute}</Text>
+                    </View>
+                    <Text style={styles.alarmPlace}>{alarm.place}</Text>
                   </View>
-                  <Text style={styles.alarmPlace}>{alarm.place}</Text>
-                </View>
-                <Switch
-                  value={alarm.enabled}
-                  onValueChange={() => toggleAlarm(alarm.id)}
-                  trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-                  thumbColor="#FFFFFF"
-                />
-              </TouchableOpacity>
+                  <Switch
+                    value={alarm.enabled}
+                    onValueChange={() => toggleAlarm(alarm.id)}
+                    trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                    thumbColor="#FFFFFF"
+                  />
+                </TouchableOpacity>
+              </SwipeableAlarmCard>
             ))}
           </BottomSheetScrollView>
         </>
