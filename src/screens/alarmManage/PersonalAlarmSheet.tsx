@@ -1,16 +1,16 @@
+import AddressSearchView, { SearchResult } from '@/src/components/common/AddressSearchView';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
-    Platform,
-    StyleSheet,
-    Switch,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Platform,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
@@ -39,15 +39,16 @@ const SAMPLE_PERSONAL_ALARMS: Alarm[] = [
   },
 ];
 
-const SAMPLE_PLACES = [
-  { id: '1', name: '중앙대학교 후문 입구', address: '서울 어쩌고 저쩌고', isCurrent: true },
-  { id: '2', name: '홍대역 2번 출구', address: '서울 저쩌고 어쩌고', isCurrent: false },
-];
-
 const DEFAULT_ALARM: Alarm = {
   id: '', ampm: '오전', hour: '7', minute: '00',
   place: '', repeat: ['안함'], enabled: true,
 };
+
+// 최근 사용한 장소 (실제는 API에서 받아올 예정)
+const RECENT_PLACES: SearchResult[] = [
+  { id: '1', name: '중앙대학교 후문 입구', address: '서울 동작구 흑석로', isCurrent: false },
+  { id: '2', name: '홍대역 2번 출구', address: '서울 마포구 양화로', isCurrent: false },
+];
 
 type ViewType = 'list' | 'edit' | 'repeat' | 'place';
 
@@ -56,12 +57,9 @@ function getRepeatLabel(repeat: string[]): string {
   const weekdays = ['월요일마다', '화요일마다', '수요일마다', '목요일마다', '금요일마다'];
   const weekend = ['토요일마다', '일요일마다'];
   const all = [...weekdays, ...weekend];
-  const isWeekday = weekdays.every((d) => repeat.includes(d)) && repeat.length === weekdays.length;
-  const isWeekend = weekend.every((d) => repeat.includes(d)) && repeat.length === weekend.length;
-  const isEvery = all.every((d) => repeat.includes(d));
-  if (isEvery) return '매일';
-  if (isWeekday) return '주중';
-  if (isWeekend) return '주말';
+  if (all.every((d) => repeat.includes(d))) return '매일';
+  if (weekdays.every((d) => repeat.includes(d)) && repeat.length === weekdays.length) return '주중';
+  if (weekend.every((d) => repeat.includes(d)) && repeat.length === weekend.length) return '주말';
   return repeat.map((r) => r.replace('요일마다', '')).join(', ');
 }
 
@@ -71,8 +69,7 @@ export default function PersonalAlarmSheet({ onClose }: Props) {
   const { selectedDate } = useCalendarStore();
 
   const [view, setView] = useState<ViewType>('list');
-  const [placeQuery, setPlaceQuery] = useState('');
-  const [tempPlace, setTempPlace] = useState('');
+  const [tempPlace, setTempPlace] = useState<SearchResult | null>(null);
   const [alarms, setAlarms] = useState<Alarm[]>(SAMPLE_PERSONAL_ALARMS);
   const [editAlarm, setEditAlarm] = useState<Alarm>(DEFAULT_ALARM);
   const isEditMode = !!editAlarm.id;
@@ -87,8 +84,13 @@ export default function PersonalAlarmSheet({ onClose }: Props) {
   }, [onClose]);
 
   const openAdd = () => { setEditAlarm(DEFAULT_ALARM); setView('edit'); };
-  const openPlace = () => { setTempPlace(editAlarm.place); setView('place'); };
   const openEdit = (alarm: Alarm) => { setEditAlarm(alarm); setView('edit'); };
+  const openPlace = () => {
+    // 현재 선택된 장소를 tempPlace로 초기화
+    const current = RECENT_PLACES.find((p) => p.name === editAlarm.place);
+    setTempPlace(current ?? null);
+    setView('place');
+  };
 
   const handleSave = () => {
     if (isEditMode) {
@@ -102,6 +104,13 @@ export default function PersonalAlarmSheet({ onClose }: Props) {
   const handleDelete = () => {
     setAlarms((prev) => prev.filter((a) => a.id !== editAlarm.id));
     setView('list');
+  };
+
+  const handlePlaceConfirm = () => {
+    if (tempPlace) {
+      setEditAlarm((prev) => ({ ...prev, place: tempPlace.name }));
+    }
+    setView('edit');
   };
 
   const toggleAlarm = (id: string) => {
@@ -192,7 +201,6 @@ export default function PersonalAlarmSheet({ onClose }: Props) {
           </View>
 
           <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-            {/* 스크롤 피커 */}
             <View style={styles.pickerContainer}>
               <Picker
                 selectedValue={editAlarm.ampm}
@@ -221,7 +229,6 @@ export default function PersonalAlarmSheet({ onClose }: Props) {
               </Picker>
             </View>
 
-            {/* 목적지 / 반복 */}
             <View style={styles.section}>
               <View style={styles.optionBox}>
                 <TouchableOpacity style={styles.optionRow} onPress={openPlace}>
@@ -265,17 +272,13 @@ export default function PersonalAlarmSheet({ onClose }: Props) {
             <Text style={styles.title}>반복</Text>
             <View style={{ width: 36 }} />
           </View>
-
           <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             <View style={styles.optionBox}>
               {DAYS.map((day, index) => {
                 const selected = editAlarm.repeat.includes(day);
                 return (
                   <View key={day}>
-                    <TouchableOpacity
-                      style={styles.optionRow}
-                      onPress={() => toggleRepeat(day)}
-                    >
+                    <TouchableOpacity style={styles.optionRow} onPress={() => toggleRepeat(day)}>
                       <Text style={styles.optionLabel}>{day}</Text>
                       {selected && <Feather name="check" size={18} color="#F5A623" />}
                     </TouchableOpacity>
@@ -296,60 +299,15 @@ export default function PersonalAlarmSheet({ onClose }: Props) {
               <Feather name="chevron-left" size={22} color="#1A1A1A" />
             </TouchableOpacity>
             <Text style={styles.title}>목적지</Text>
-            <TouchableOpacity style={styles.saveBtn} onPress={() => { setEditAlarm((prev) => ({ ...prev, place: tempPlace })); setView('edit'); }}>
+            <TouchableOpacity style={styles.saveBtn} onPress={handlePlaceConfirm}>
               <Feather name="check" size={20} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
-
-          {/* 검색창 */}
-          <View style={styles.searchContainer}>
-            <Feather name="search" size={15} color="#AAAAAA" style={{ marginRight: 8 }} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="지번, 도로명, 건물명으로 검색"
-              placeholderTextColor="#BBBBBB"
-              value={placeQuery}
-              onChangeText={setPlaceQuery}
-            />
-            {placeQuery.length > 0 && (
-              <TouchableOpacity onPress={() => setPlaceQuery('')}>
-                <Feather name="x-circle" size={15} color="#AAAAAA" />
-              </TouchableOpacity>
-            )}
-          </View>
-
-          <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-            <View style={styles.optionBox}>
-              {SAMPLE_PLACES.map((place, index) => {
-                const isSelected = tempPlace === place.name;
-                return (
-                  <View key={place.id}>
-                    <TouchableOpacity
-                      style={styles.placeRow}
-                      onPress={() => setTempPlace(place.name)}
-                    >
-                      <View style={[styles.placeIconWrap, isSelected && { backgroundColor: '#1A1A1A' }]}>
-                        <Feather name="map-pin" size={18} color={isSelected ? '#FFFFFF' : '#AAAAAA'} />
-                      </View>
-                      <View style={styles.placeInfo}>
-                        <View style={styles.placeNameRow}>
-                          <Text style={styles.placeName}>{place.name}</Text>
-                          {place.isCurrent && (
-                            <View style={styles.currentBadge}>
-                              <Text style={styles.currentBadgeText}>현재 설정된 주소</Text>
-                            </View>
-                          )}
-                        </View>
-                        <Text style={styles.placeAddress}>{place.address}</Text>
-                      </View>
-                      {isSelected && <Feather name="check" size={18} color="#1A1A1A" />}
-                    </TouchableOpacity>
-                    {index < SAMPLE_PLACES.length - 1 && <View style={styles.separator} />}
-                  </View>
-                );
-              })}
-            </View>
-          </BottomSheetScrollView>
+          <AddressSearchView
+            initialResults={RECENT_PLACES}
+            selectedId={tempPlace?.id}
+            onSelect={(item) => setTempPlace(item)}
+          />
         </>
       )}
     </BottomSheet>
@@ -400,12 +358,9 @@ const styles = StyleSheet.create({
   alarmTime: { fontSize: 48, fontWeight: '500', color: '#1A1A1A', letterSpacing: -1, lineHeight: 54 },
   alarmPlace: { fontSize: 12, color: '#888888', marginTop: 2 },
   pickerContainer: {
-    flexDirection: 'row',
-    marginBottom: 24,
-    backgroundColor: '#F5F5F5',
-    borderRadius: 14,
-    overflow: 'hidden',
-    height: 200,
+    flexDirection: 'row', marginBottom: 24,
+    backgroundColor: '#F5F5F5', borderRadius: 14,
+    overflow: 'hidden', height: 200,
   },
   picker: { flex: 1 },
   pickerItem: { fontSize: 20, color: '#1A1A1A', height: 200 },
@@ -413,8 +368,7 @@ const styles = StyleSheet.create({
   optionBox: { backgroundColor: '#F5F5F5', borderRadius: 12, paddingHorizontal: 16 },
   optionRow: {
     flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between',
-    height: 50,
+    justifyContent: 'space-between', height: 50,
   },
   optionLabel: { fontSize: 15, color: '#1A1A1A' },
   rowRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
@@ -426,38 +380,4 @@ const styles = StyleSheet.create({
     paddingVertical: 14, paddingHorizontal: 48,
   },
   deleteButtonText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: 16,
-    marginBottom: 12,
-    backgroundColor: '#F5F5F5',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    height: 42,
-  },
-  searchInput: { flex: 1, fontSize: 14, color: '#1A1A1A' },
-  placeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-  },
-  placeIconWrap: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#EEEEEE',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  placeIconWrapSelected: {
-    backgroundColor: '#1A1A1A',
-  },
-  placeInfo: { flex: 1 },
-  placeNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
-  placeName: { fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
-  currentBadge: { backgroundColor: '#E8F5E9', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
-  currentBadgeText: { fontSize: 10, color: '#4CAF50', fontWeight: '500' },
-  placeAddress: { fontSize: 12, color: '#888888' },
 });
