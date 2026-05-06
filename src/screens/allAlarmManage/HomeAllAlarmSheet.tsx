@@ -1,15 +1,15 @@
+import AddressSearchView, { SearchResult } from '@/src/components/common/AddressSearchView';
 import { Feather } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
-    Platform,
-    StyleSheet,
-    Switch,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Platform,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 
 const DAYS = ['일요일마다', '월요일마다', '화요일마다', '수요일마다', '목요일마다', '금요일마다', '토요일마다', '안함'];
@@ -45,9 +45,9 @@ function getRepeatLabel(repeat: string[]): string {
   return repeat.map((r) => r.replace('요일마다', '')).join(', ');
 }
 
-const SAMPLE_HOME_PLACES = [
-  { id: '1', name: '우리집', address: '서울 어쩌고 저쩌고', isCurrent: true, isHome: true },
-  { id: '2', name: '서울 가가가', address: '서울 저쩌고 어쩌고', isCurrent: false, isHome: false },
+const HOME_PLACES: SearchResult[] = [
+  { id: 'home1', name: '우리집', address: '서울 어쩌고 저쩌고', isCurrent: true, isHome: true },
+  { id: 'home2', name: '서울 가가가', address: '서울 저쩌고 어쩌고', isCurrent: false, isHome: false },
 ];
 
 const SAMPLE_HOME_ALARMS: HomeAlarm[] = [
@@ -67,8 +67,7 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
   const [view, setView] = useState<ViewType>('list');
   const [alarms, setAlarms] = useState<HomeAlarm[]>(SAMPLE_HOME_ALARMS);
   const [editAlarm, setEditAlarm] = useState<HomeAlarm>(DEFAULT_ALARM);
-  const [tempPlace, setTempPlace] = useState('');
-  const [placeQuery, setPlaceQuery] = useState('');
+  const [tempPlace, setTempPlace] = useState<SearchResult | null>(null);
   const isEditMode = !!editAlarm.id;
 
   const handleSheetChange = useCallback((index: number) => {
@@ -77,7 +76,15 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
 
   const openAdd = () => { setEditAlarm(DEFAULT_ALARM); setView('edit'); };
   const openEdit = (alarm: HomeAlarm) => { setEditAlarm(alarm); setView('edit'); };
-  const openHomePlace = () => { setTempPlace(editAlarm.place); setView('homePlace'); };
+  const openHomePlace = () => {
+    const cur = HOME_PLACES.find((p) => p.name === editAlarm.place);
+    setTempPlace(cur ?? null);
+    setView('homePlace');
+  };
+  const handleHomePlaceConfirm = () => {
+    if (tempPlace) setEditAlarm((prev) => ({ ...prev, place: tempPlace.name }));
+    setView('edit');
+  };
 
   const handleSave = () => {
     if (isEditMode) {
@@ -303,61 +310,16 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
               <Feather name="chevron-left" size={22} color="#1A1A1A" />
             </TouchableOpacity>
             <Text style={styles.title}>귀가지</Text>
-            <TouchableOpacity style={styles.saveBtn} onPress={() => {
-              setEditAlarm((prev) => ({ ...prev, place: tempPlace }));
-              setView('edit');
-            }}>
+            <TouchableOpacity style={styles.saveBtn} onPress={handleHomePlaceConfirm}>
               <Feather name="check" size={20} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
-          <View style={styles.searchContainer}>
-            <Feather name="search" size={15} color="#AAAAAA" style={{ marginRight: 8 }} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="지번, 도로명, 건물명으로 검색"
-              placeholderTextColor="#BBBBBB"
-              value={placeQuery}
-              onChangeText={setPlaceQuery}
-            />
-            {placeQuery.length > 0 && (
-              <TouchableOpacity onPress={() => setPlaceQuery('')}>
-                <Feather name="x-circle" size={15} color="#AAAAAA" />
-              </TouchableOpacity>
-            )}
-          </View>
-          <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-            <View style={styles.optionBox}>
-              {SAMPLE_HOME_PLACES.map((place, index) => {
-                const isSelected = tempPlace === place.name;
-                return (
-                  <View key={place.id}>
-                    <TouchableOpacity style={styles.placeRow} onPress={() => setTempPlace(place.name)}>
-                      <View style={[styles.placeIconWrap, isSelected && { backgroundColor: '#1A1A1A' }]}>
-                        <Feather
-                          name={place.isHome ? 'home' : 'map-pin'}
-                          size={18}
-                          color={isSelected ? '#FFFFFF' : '#AAAAAA'}
-                        />
-                      </View>
-                      <View style={styles.placeInfo}>
-                        <View style={styles.placeNameRow}>
-                          <Text style={styles.placeName}>{place.name}</Text>
-                          {place.isCurrent && (
-                            <View style={styles.currentBadge}>
-                              <Text style={styles.currentBadgeText}>현재 설정된 주소</Text>
-                            </View>
-                          )}
-                        </View>
-                        <Text style={styles.placeAddress}>{place.address}</Text>
-                      </View>
-                      {isSelected && <Feather name="check" size={18} color="#1A1A1A" />}
-                    </TouchableOpacity>
-                    {index < SAMPLE_HOME_PLACES.length - 1 && <View style={styles.separator} />}
-                  </View>
-                );
-              })}
-            </View>
-          </BottomSheetScrollView>
+          <AddressSearchView
+            initialResults={HOME_PLACES}
+            selectedId={tempPlace?.id}
+            onSelect={(item) => setTempPlace(item)}
+            selectedIsHome
+          />
         </>
       )}
     </BottomSheet>
@@ -439,22 +401,4 @@ const styles = StyleSheet.create({
     paddingVertical: 14, paddingHorizontal: 48,
   },
   deleteButtonText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
-  searchContainer: {
-    flexDirection: 'row', alignItems: 'center',
-    marginHorizontal: 16, marginBottom: 12,
-    backgroundColor: '#F5F5F5', borderRadius: 10,
-    paddingHorizontal: 12, height: 42,
-  },
-  searchInput: { flex: 1, fontSize: 14, color: '#1A1A1A' },
-  placeRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14 },
-  placeIconWrap: {
-    width: 34, height: 34, borderRadius: 17,
-    backgroundColor: '#EEEEEE', alignItems: 'center', justifyContent: 'center', marginRight: 12,
-  },
-  placeInfo: { flex: 1 },
-  placeNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
-  placeName: { fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
-  currentBadge: { backgroundColor: '#E8F5E9', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
-  currentBadgeText: { fontSize: 10, color: '#4CAF50', fontWeight: '500' },
-  placeAddress: { fontSize: 12, color: '#888888' },
 });
