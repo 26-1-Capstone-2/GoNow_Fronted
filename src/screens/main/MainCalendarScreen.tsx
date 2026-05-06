@@ -281,6 +281,10 @@ export default function MainCalendarScreen() {
           <Ionicons name="chevron-back" size={18} color="#1A1A1A" />
           <Text style={styles.yearText}>{selectedYear}년</Text>
         </TouchableOpacity>
+        <TouchableOpacity style={styles.alarmTestBtn} onPress={() => router.push('/alarm-test' as any)}>
+          <Feather name="bell" size={14} color="#888888" />
+          <Text style={styles.alarmTestBtnText}>알람테스트</Text>
+        </TouchableOpacity>
         <View style={styles.headerIconPill}>
           <TouchableOpacity style={styles.headerIconBtn} onPress={() => router.push('/home-address')}>
             <Feather name="home" size={20} color="#1A1A1A" />
@@ -396,6 +400,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   yearNav: { flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: '#F0F0F0', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  alarmTestBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#F0F0F0', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20 },
+  alarmTestBtnText: { fontSize: 12, fontWeight: '500', color: '#888888' },
   yearText: { fontSize: 15, fontWeight: '500', color: '#1A1A1A' },
   headerIconPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0F0F0', borderRadius: 20, overflow: 'hidden' },
   headerIconBtn: { paddingHorizontal: 12, paddingVertical: 8 },
