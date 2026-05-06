@@ -5,7 +5,7 @@ import { Feather, FontAwesome6 } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { Clipboard, Platform, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { Clipboard, Platform, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
 const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));
@@ -42,7 +42,7 @@ const DEFAULT_ALARM: GroupAlarm = {
   isArrivalActive: false,
 };
 
-type ViewType = 'list' | 'edit' | 'place';
+type ViewType = 'list' | 'edit' | 'place' | 'addChoice' | 'join';
 
 export default function GroupAlarmSheet({ onClose, onArrivalPress }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
@@ -52,6 +52,8 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress }: Props) {
   const [alarms, setAlarms] = useState<GroupAlarm[]>(SAMPLE_GROUP_ALARMS);
   const [editAlarm, setEditAlarm] = useState<GroupAlarm>(DEFAULT_ALARM);
   const [tempPlace, setTempPlace] = useState<SearchResult | null>(null);
+  const [inviteCode, setInviteCode] = useState('');
+  const [inviteError, setInviteError] = useState('');
   const isEditMode = !!editAlarm.id;
 
   const dateObj = new Date(selectedDate);
@@ -61,6 +63,15 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress }: Props) {
 
   const handleSheetChange = useCallback((index: number) => { if (index === -1) onClose(); }, [onClose]);
   const openAdd = () => { setEditAlarm(DEFAULT_ALARM); setView('edit'); };
+  const openNewGroup = () => { setEditAlarm(DEFAULT_ALARM); setView('edit'); };
+  const handleJoin = () => {
+    if (inviteCode.trim().length === 0) { setInviteError('초대코드를 입력해주세요.'); return; }
+    // TODO: 백엔드 API 연결
+    console.log('그룹 참여:', inviteCode);
+    setInviteCode('');
+    setInviteError('');
+    setView('list');
+  };
   const openEdit = (alarm: GroupAlarm) => { setEditAlarm(alarm); setView('edit'); };
   const openPlace = () => {
     const cur = RECENT_PLACES.find((p) => p.name === editAlarm.place);
@@ -129,7 +140,9 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress }: Props) {
       {view === 'edit' && (
         <>
           <View style={styles.header}>
-            <TouchableOpacity style={styles.headerBtn} onPress={() => setView('list')}><Feather name="x" size={22} color="#1A1A1A" /></TouchableOpacity>
+            <TouchableOpacity style={styles.headerBtn} onPress={() => setView('list')}>
+              <Feather name="x" size={22} color="#1A1A1A" />
+            </TouchableOpacity>
             <Text style={styles.title}>{isEditMode ? '그룹 알람 수정' : '그룹 알람 추가'}</Text>
             <TouchableOpacity style={styles.saveBtn} onPress={handleSave}><Feather name="check" size={20} color="#FFFFFF" /></TouchableOpacity>
           </View>
@@ -182,6 +195,77 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress }: Props) {
                 <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}><Text style={styles.deleteButtonText}>알람삭제</Text></TouchableOpacity>
               </View>
             )}
+          </BottomSheetScrollView>
+        </>
+      )}
+
+      {/* ── 추가 선택 화면 ── */}
+      {view === 'addChoice' && (
+        <>
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.headerBtn} onPress={() => setView('list')}>
+              <Feather name="chevron-left" size={22} color="#1A1A1A" />
+            </TouchableOpacity>
+            <Text style={styles.title}>그룹 추가</Text>
+            <View style={{ width: 36 }} />
+          </View>
+          <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+            <View style={styles.choiceBox}>
+              <TouchableOpacity style={styles.choiceRow} onPress={openNewGroup}>
+                <View style={styles.choiceIcon}>
+                  <Feather name="plus-circle" size={22} color="#1A1A1A" />
+                </View>
+                <View style={styles.choiceInfo}>
+                  <Text style={styles.choiceTitle}>새 그룹 만들기</Text>
+                  <Text style={styles.choiceDesc}>새로운 그룹 알람을 만들어요</Text>
+                </View>
+                <Feather name="chevron-right" size={16} color="#AAAAAA" />
+              </TouchableOpacity>
+              <View style={styles.separator} />
+              <TouchableOpacity style={styles.choiceRow} onPress={() => setView('join')}>
+                <View style={styles.choiceIcon}>
+                  <Feather name="user-plus" size={22} color="#1A1A1A" />
+                </View>
+                <View style={styles.choiceInfo}>
+                  <Text style={styles.choiceTitle}>초대코드로 참여</Text>
+                  <Text style={styles.choiceDesc}>받은 초대코드로 그룹에 참여해요</Text>
+                </View>
+                <Feather name="chevron-right" size={16} color="#AAAAAA" />
+              </TouchableOpacity>
+            </View>
+          </BottomSheetScrollView>
+        </>
+      )}
+
+      {/* ── 초대코드 참여 화면 ── */}
+      {view === 'join' && (
+        <>
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.headerBtn} onPress={() => setView('addChoice')}>
+              <Feather name="chevron-left" size={22} color="#1A1A1A" />
+            </TouchableOpacity>
+            <Text style={styles.title}>초대코드로 참여</Text>
+            <TouchableOpacity style={styles.saveBtn} onPress={handleJoin}>
+              <Feather name="check" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+          <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+            <Text style={styles.joinLabel}>초대코드 입력</Text>
+            <View style={[styles.inviteInputBox, inviteError ? styles.inviteInputBoxError : null]}>
+              <TextInput
+                style={styles.inviteInput}
+                placeholder="초대코드를 입력하세요"
+                placeholderTextColor="#BBBBBB"
+                value={inviteCode}
+                onChangeText={(t) => { setInviteCode(t); setInviteError(''); }}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+            {inviteError !== '' && (
+              <Text style={styles.inviteError}>{inviteError}</Text>
+            )}
+            <Text style={styles.joinDesc}>방장에게 받은 6자리 초대코드를 입력해주세요.</Text>
           </BottomSheetScrollView>
         </>
       )}
@@ -239,4 +323,16 @@ const styles = StyleSheet.create({
   deleteContainer: { alignItems: 'center', marginTop: 8 },
   deleteButton: { backgroundColor: '#FF3B30', borderRadius: 24, paddingVertical: 14, paddingHorizontal: 48 },
   deleteButtonText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
+  choiceBox: { backgroundColor: '#F5F5F5', borderRadius: 12, paddingHorizontal: 16 },
+  choiceRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, gap: 12 },
+  choiceIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#E8E8E8', alignItems: 'center', justifyContent: 'center' },
+  choiceInfo: { flex: 1 },
+  choiceTitle: { fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
+  choiceDesc: { fontSize: 12, color: '#888888', marginTop: 2 },
+  joinLabel: { fontSize: 13, fontWeight: '600', color: '#888888', marginBottom: 8 },
+  inviteInputBox: { backgroundColor: '#F5F5F5', borderRadius: 12, paddingHorizontal: 16, height: 52, justifyContent: 'center', borderWidth: 1.5, borderColor: 'transparent' },
+  inviteInputBoxError: { borderColor: '#FF3B30' },
+  inviteInput: { fontSize: 16, color: '#1A1A1A', letterSpacing: 2 },
+  inviteError: { fontSize: 12, color: '#FF3B30', marginTop: 6 },
+  joinDesc: { fontSize: 13, color: '#AAAAAA', marginTop: 12, textAlign: 'center' },
 });
