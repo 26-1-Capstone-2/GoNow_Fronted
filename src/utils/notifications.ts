@@ -1,6 +1,6 @@
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
+import { Alert, Linking, Platform } from 'react-native';
 
 // 알림 표시 방식 설정
 Notifications.setNotificationHandler({
@@ -85,7 +85,14 @@ export async function requestNotificationPermission(): Promise<boolean> {
   }
 
   if (finalStatus !== 'granted') {
-    console.warn('알림 권한이 거부되었습니다.');
+    Alert.alert(
+      '알림 권한 필요',
+      'GoNow 알람을 받으려면 알림 권한이 필요해요. 설정에서 허용해주세요.',
+      [
+        { text: '취소', style: 'cancel' },
+        { text: '설정으로 이동', onPress: () => Linking.openSettings() },
+      ]
+    );
     return false;
   }
 
@@ -160,7 +167,7 @@ export async function sendAlarm(
     await Notifications.scheduleNotificationAsync({
       content: {
         title,
-        body: stage === 4 ? `${body} (${i + 1}/${repeatCount})` : body,
+        body: stage === 4 ? `🚨 ${body} (${i + 1}/${repeatCount})` : body,
         sound: config.sound ? 'default' : false,
         vibrate: config.vibrate ? [0, 500, 200, 500, 200, 500] : undefined,
         priority: stage >= 3
