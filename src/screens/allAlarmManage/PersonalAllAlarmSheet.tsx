@@ -15,7 +15,9 @@ const RECENT_PLACES: SearchResult[] = [
   { id: '2', name: '중앙대학교 후문 입구', address: '서울 동작구 흑석로', isCurrent: false },
 ];
 
-interface Alarm { id: string; ampm: string; hour: string; minute: string; place: string; repeat: string[]; enabled: boolean; }
+type Transport = 'public' | 'car';
+
+interface Alarm { id: string; ampm: string; hour: string; minute: string; place: string; repeat: string[]; enabled: boolean; transport: Transport; }
 interface Props { onClose: () => void; }
 
 function getRepeatLabel(repeat: string[]): string {
@@ -30,11 +32,11 @@ function getRepeatLabel(repeat: string[]): string {
 }
 
 const SAMPLE_ALARMS: Alarm[] = [
-  { id: '1', ampm: '오후', hour: '3', minute: '00', place: '중앙대학교 후문 입구', repeat: ['안함'], enabled: true },
-  { id: '2', ampm: '오전', hour: '9', minute: '00', place: '중앙대학교 후문 입구', repeat: ['금요일마다'], enabled: true },
+  { id: '1', ampm: '오후', hour: '3', minute: '00', place: '중앙대학교 후문 입구', repeat: ['안함'], enabled: true, transport: 'public' as Transport },
+  { id: '2', ampm: '오전', hour: '9', minute: '00', place: '중앙대학교 후문 입구', repeat: ['금요일마다'], enabled: true, transport: 'public' as Transport },
 ];
-const DEFAULT_ALARM: Alarm = { id: '', ampm: '오전', hour: '7', minute: '00', place: '', repeat: ['안함'], enabled: true };
-type ViewType = 'list' | 'edit' | 'repeat' | 'place';
+const DEFAULT_ALARM: Alarm = { id: '', ampm: '오전', hour: '7', minute: '00', place: '', repeat: ['안함'], enabled: true, transport: 'public' };
+type ViewType = 'list' | 'edit' | 'repeat' | 'place' | 'transport';
 
 export default function PersonalAllAlarmSheet({ onClose }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
@@ -137,6 +139,14 @@ export default function PersonalAllAlarmSheet({ onClose }: Props) {
                   </View>
                 </TouchableOpacity>
                 <View style={styles.separator} />
+                <TouchableOpacity style={styles.optionRow} onPress={() => setView('transport')}>
+                  <Text style={styles.optionLabel}>이동수단</Text>
+                  <View style={styles.rowRight}>
+                    <Text style={styles.rowValue}>{editAlarm.transport === 'public' ? '대중교통' : '자가용'}</Text>
+                    <Feather name="chevron-right" size={16} color="#AAAAAA" />
+                  </View>
+                </TouchableOpacity>
+                <View style={styles.separator} />
                 <TouchableOpacity style={styles.optionRow} onPress={() => setView('repeat')}>
                   <Text style={styles.optionLabel}>반복</Text>
                   <View style={styles.rowRight}>
@@ -151,6 +161,34 @@ export default function PersonalAllAlarmSheet({ onClose }: Props) {
                 <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}><Text style={styles.deleteButtonText}>알람삭제</Text></TouchableOpacity>
               </View>
             )}
+          </BottomSheetScrollView>
+        </>
+      )}
+
+      {/* ── 이동수단 선택 화면 ── */}
+      {view === 'transport' && (
+        <>
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.headerBtn} onPress={() => setView('edit')}>
+              <Feather name="chevron-left" size={22} color="#1A1A1A" />
+            </TouchableOpacity>
+            <Text style={styles.title}>이동수단</Text>
+            <TouchableOpacity style={styles.saveBtn} onPress={() => setView('edit')}>
+              <Feather name="check" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+          <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+            <View style={styles.optionBox}>
+              <TouchableOpacity style={styles.optionRow} onPress={() => setEditAlarm((prev) => ({ ...prev, transport: 'public' }))}>
+                <Text style={styles.optionLabel}>대중교통</Text>
+                {editAlarm.transport === 'public' && <Feather name="check" size={18} color="#F5A623" />}
+              </TouchableOpacity>
+              <View style={styles.separator} />
+              <TouchableOpacity style={styles.optionRow} onPress={() => setEditAlarm((prev) => ({ ...prev, transport: 'car' }))}>
+                <Text style={styles.optionLabel}>자가용</Text>
+                {editAlarm.transport === 'car' && <Feather name="check" size={18} color="#F5A623" />}
+              </TouchableOpacity>
+            </View>
           </BottomSheetScrollView>
         </>
       )}
@@ -226,4 +264,5 @@ const styles = StyleSheet.create({
   deleteContainer: { alignItems: 'center', marginTop: 8 },
   deleteButton: { backgroundColor: '#FF3B30', borderRadius: 24, paddingVertical: 14, paddingHorizontal: 48 },
   deleteButtonText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
+
 });
