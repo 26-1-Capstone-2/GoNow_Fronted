@@ -2,12 +2,12 @@ import { Feather } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
-    Platform,
-    StyleSheet,
-    Switch,
-    Text,
-    TouchableOpacity,
-    View,
+  Platform,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 interface Props {
@@ -15,14 +15,14 @@ interface Props {
   onSave: (settings: AlarmSettings) => void;
 }
 
+type RouteOption = 'fastest' | 'minTransfer';
+type TransportOption = 'subway' | 'bus' | 'any';
+type WalkOption = 'minWalk' | 'any';
+
 interface AlarmSettings {
-  fastestRoute: boolean;
-  subway: boolean;
-  bus: boolean;
-  anyTransport: boolean;
-  minWalk: boolean;
-  minTransfer: boolean;
-  anyWalk: boolean;
+  routeOption: RouteOption;
+  transportOption: TransportOption;
+  walkOption: WalkOption;
   leaveTime: number;
 }
 
@@ -31,13 +31,9 @@ export default function AlarmSettingsSheet({ onClose, onSave }: Props) {
   const snapPoints = useMemo(() => ['85%'], []);
 
   const [settings, setSettings] = useState<AlarmSettings>({
-    fastestRoute: false,
-    subway: false,
-    bus: false,
-    anyTransport: true,
-    minWalk: false,
-    minTransfer: false,
-    anyWalk: true,
+    routeOption: 'fastest',
+    transportOption: 'any',
+    walkOption: 'any',
     leaveTime: 10,
   });
 
@@ -47,10 +43,6 @@ export default function AlarmSettingsSheet({ onClose, onSave }: Props) {
 
   const handlePlus = () => {
     setSettings((prev) => ({ ...prev, leaveTime: Math.min(60, prev.leaveTime + 5) }));
-  };
-
-  const toggle = (key: keyof AlarmSettings) => {
-    setSettings((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   const handleSave = useCallback(() => {
@@ -111,19 +103,30 @@ export default function AlarmSettingsSheet({ onClose, onSave }: Props) {
             </View>
           </View>
         </View>
-        {/* 제일 빨리 집으로 */}
+
+        {/* 경로 옵션 */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>제일 빨리 집으로</Text>
+          <Text style={styles.sectionTitle}>경로 옵션</Text>
           <View style={styles.sectionBox}>
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>최단시간</Text>
-            <Switch
-              value={settings.fastestRoute}
-              onValueChange={() => toggle('fastestRoute')}
-              trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-              thumbColor="#FFFFFF"
-            />
-          </View>
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>최단시간</Text>
+              <Switch
+                value={settings.routeOption === 'fastest'}
+                onValueChange={() => setSettings((prev) => ({ ...prev, routeOption: 'fastest' }))}
+                trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+            <View style={styles.separator} />
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>최소환승</Text>
+              <Switch
+                value={settings.routeOption === 'minTransfer'}
+                onValueChange={() => setSettings((prev) => ({ ...prev, routeOption: 'minTransfer' }))}
+                trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
           </View>
         </View>
 
@@ -131,35 +134,35 @@ export default function AlarmSettingsSheet({ onClose, onSave }: Props) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>선호 대중교통</Text>
           <View style={styles.sectionBox}>
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>지하철</Text>
-            <Switch
-              value={settings.subway}
-              onValueChange={() => toggle('subway')}
-              trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-              thumbColor="#FFFFFF"
-            />
-          </View>
-          <View style={styles.separator} />
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>버스</Text>
-            <Switch
-              value={settings.bus}
-              onValueChange={() => toggle('bus')}
-              trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-              thumbColor="#FFFFFF"
-            />
-          </View>
-          <View style={styles.separator} />
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>상관없음</Text>
-            <Switch
-              value={settings.anyTransport}
-              onValueChange={() => toggle('anyTransport')}
-              trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-              thumbColor="#FFFFFF"
-            />
-          </View>
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>지하철</Text>
+              <Switch
+                value={settings.transportOption === 'subway'}
+                onValueChange={() => setSettings((prev) => ({ ...prev, transportOption: 'subway' }))}
+                trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+            <View style={styles.separator} />
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>버스</Text>
+              <Switch
+                value={settings.transportOption === 'bus'}
+                onValueChange={() => setSettings((prev) => ({ ...prev, transportOption: 'bus' }))}
+                trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+            <View style={styles.separator} />
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>상관없음</Text>
+              <Switch
+                value={settings.transportOption === 'any'}
+                onValueChange={() => setSettings((prev) => ({ ...prev, transportOption: 'any' }))}
+                trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
           </View>
         </View>
 
@@ -167,131 +170,68 @@ export default function AlarmSettingsSheet({ onClose, onSave }: Props) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>걷기싫어</Text>
           <View style={styles.sectionBox}>
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>최소 도보</Text>
-            <Switch
-              value={settings.minWalk}
-              onValueChange={() => toggle('minWalk')}
-              trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-              thumbColor="#FFFFFF"
-            />
-          </View>
-          <View style={styles.separator} />
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>최소 환승</Text>
-            <Switch
-              value={settings.minTransfer}
-              onValueChange={() => toggle('minTransfer')}
-              trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-              thumbColor="#FFFFFF"
-            />
-          </View>
-          <View style={styles.separator} />
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>상관없음</Text>
-            <Switch
-              value={settings.anyWalk}
-              onValueChange={() => toggle('anyWalk')}
-              trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-              thumbColor="#FFFFFF"
-            />
-          </View>
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>최소 도보</Text>
+              <Switch
+                value={settings.walkOption === 'minWalk'}
+                onValueChange={() => setSettings((prev) => ({ ...prev, walkOption: 'minWalk' }))}
+                trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
+            <View style={styles.separator} />
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>상관없음</Text>
+              <Switch
+                value={settings.walkOption === 'any'}
+                onValueChange={() => setSettings((prev) => ({ ...prev, walkOption: 'any' }))}
+                trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
           </View>
         </View>
+
       </BottomSheetScrollView>
     </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  indicator: {
-    backgroundColor: '#DDDDDD',
-    width: 40,
-  },
-  background: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-  },
-  content: {
-    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
-  },
+  indicator: { backgroundColor: '#DDDDDD', width: 40 },
+  background: { backgroundColor: '#FFFFFF', borderRadius: 20 },
+  content: { paddingBottom: Platform.OS === 'ios' ? 40 : 24 },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingVertical: 16,
   },
-  headerBtn: {
-    padding: 4,
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A1A1A',
-  },
+  headerBtn: { padding: 4 },
+  title: { fontSize: 16, fontWeight: '600', color: '#1A1A1A' },
   saveBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#F5A623',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: '#F5A623', alignItems: 'center', justifyContent: 'center',
   },
-  section: {
-    paddingHorizontal: 16,
-    marginBottom: 20,
-  },
+  section: { paddingHorizontal: 16, marginBottom: 20 },
   sectionTitle: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: '#888888',
-    marginBottom: 8,
-    marginTop: 4,
-    paddingLeft: 4,
+    fontSize: 13, fontWeight: '500', color: '#888888',
+    marginBottom: 8, marginTop: 4, paddingLeft: 4,
   },
-  sectionBox: {
-    backgroundColor: '#F5F5F5',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-  },
+  sectionBox: { backgroundColor: '#F5F5F5', borderRadius: 12, paddingHorizontal: 16 },
   row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
+    flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'space-between', paddingVertical: 12,
   },
-  rowLabel: {
-    fontSize: 15,
-    color: '#1A1A1A',
-    fontWeight: '400',
-  },
-  separator: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: '#DDDDDD',
-  },
-  timeControl: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
+  rowLabel: { fontSize: 15, color: '#1A1A1A', fontWeight: '400' },
+  separator: { height: StyleSheet.hairlineWidth, backgroundColor: '#DDDDDD' },
+  timeControl: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   timeBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#AAAAAA',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 28, height: 28, borderRadius: 14,
+    borderWidth: 1, borderColor: '#AAAAAA',
+    alignItems: 'center', justifyContent: 'center',
   },
-  timeBtnDisabled: {
-    borderColor: '#DDDDDD',
-  },
+  timeBtnDisabled: { borderColor: '#DDDDDD' },
   timeValue: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: '#555555',
-    minWidth: 36,
-    textAlign: 'center',
+    fontSize: 15, fontWeight: '500', color: '#555555',
+    minWidth: 36, textAlign: 'center',
   },
 });
