@@ -1,15 +1,17 @@
 import { AddressResult, PlaceResult, searchAll } from '@/src/api/kakao';
 import { Feather } from '@expo/vector-icons';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
-    ActivityIndicator,
-    FlatList,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Animated,
+  FlatList,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
+import { PanGestureHandler, PanGestureHandlerGestureEvent, State } from 'react-native-gesture-handler';
 
 export interface SearchResult {
   id: string;
@@ -20,11 +22,115 @@ export interface SearchResult {
 }
 
 interface Props {
-  initialResults?: SearchResult[];   // 초기 목록 (현재 설정된 주소 등)
-  selectedId?: string;               // 현재 선택된 항목 id
+  initialResults?: SearchResult[];
+  selectedId?: string;
   onSelect: (item: SearchResult) => void;
   placeholder?: string;
-  selectedIsHome?: boolean;          // 선택된 항목을 집 아이콘으로 표시
+  selectedIsHome?: boolean;
+}
+
+const DELETE_WIDTH = 70;
+const THRESHOLD = -50;
+
+function SwipeableResultItem({
+  item,
+  isSelected,
+  selectedIsHome,
+  onSelect,
+  onDelete,
+  canDelete,
+}: {
+  item: SearchResult;
+  isSelected: boolean;
+  selectedIsHome: boolean;
+  onSelect: () => void;
+  onDelete: () => void;
+  canDelete: boolean;
+}) {
+  const translateX = useRef(new Animated.Value(0)).current;
+  const isOpen = useRef(false);
+  const dragX = useRef(0);
+
+  const onGestureEvent = ({ nativeEvent }: PanGestureHandlerGestureEvent) => {
+    if (!canDelete) return;
+    const x = isOpen.current
+      ? Math.min(0, Math.max(-DELETE_WIDTH, -DELETE_WIDTH + nativeEvent.translationX))
+      : Math.min(0, Math.max(-DELETE_WIDTH, nativeEvent.translationX));
+    dragX.current = x;
+    translateX.setValue(x);
+  };
+
+  const onHandlerStateChange = ({ nativeEvent }: PanGestureHandlerGestureEvent) => {
+    if (!canDelete) return;
+    if (nativeEvent.state === State.END) {
+      const shouldOpen = dragX.current < THRESHOLD || nativeEvent.velocityX < -800;
+      if (shouldOpen) {
+        Animated.spring(translateX, { toValue: -DELETE_WIDTH, useNativeDriver: true, overshootClamping: true }).start();
+        isOpen.current = true;
+      } else {
+        Animated.spring(translateX, { toValue: 0, useNativeDriver: true, overshootClamping: true }).start();
+        isOpen.current = false;
+      }
+    }
+  };
+
+  const handleDelete = () => {
+    Animated.timing(translateX, { toValue: -300, duration: 200, useNativeDriver: true }).start(() => {
+      onDelete();
+    });
+  };
+
+  return (
+    <View style={{ position: 'relative' }}>
+      {canDelete && (
+        <Animated.View style={[
+          styles.deleteBackground,
+          {
+            opacity: translateX.interpolate({
+              inputRange: [-DELETE_WIDTH, 0],
+              outputRange: [1, 0],
+              extrapolate: 'clamp',
+            }),
+          },
+        ]}>
+          <TouchableOpacity style={styles.deleteBtn} onPress={handleDelete} activeOpacity={0.8}>
+            <Feather name="trash" size={18} color="#FFFFFF" />
+          </TouchableOpacity>
+        </Animated.View>
+      )}
+      <PanGestureHandler
+        onGestureEvent={onGestureEvent}
+        onHandlerStateChange={onHandlerStateChange}
+        activeOffsetX={[-8, 8]}
+        failOffsetY={[-12, 12]}
+        enabled={canDelete}
+      >
+        <Animated.View style={{ transform: [{ translateX }] }}>
+          <TouchableOpacity style={styles.resultItem} onPress={onSelect}>
+            <View style={[styles.iconWrap, isSelected && styles.iconWrapSelected]}>
+              <Feather
+                name={isSelected && selectedIsHome ? 'home' : (item.isHome ? 'home' : 'map-pin')}
+                size={16}
+                color={isSelected ? '#FFFFFF' : '#AAAAAA'}
+              />
+            </View>
+            <View style={styles.info}>
+              <View style={styles.nameRow}>
+                <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
+                {item.isCurrent && (
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>현재 설정된 주소</Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.address} numberOfLines={1}>{item.address}</Text>
+            </View>
+            {isSelected && <Feather name="check" size={18} color="#1A1A1A" />}
+          </TouchableOpacity>
+        </Animated.View>
+      </PanGestureHandler>
+    </View>
+  );
 }
 
 export default function AddressSearchView({
@@ -37,19 +143,17 @@ export default function AddressSearchView({
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>(initialResults);
   const [loading, setLoading] = useState(false);
+  const isSearching = query.trim().length > 0;
 
   const handleSearch = useCallback(async (text: string) => {
     setQuery(text);
-
     if (text.trim() === '') {
       setResults(initialResults);
       return;
     }
-
     setLoading(true);
     try {
       const { places, addresses } = await searchAll(text);
-
       const combined: SearchResult[] = [
         ...places.map((p: PlaceResult) => ({
           id: `place_${p.id}`,
@@ -62,7 +166,6 @@ export default function AddressSearchView({
           address: a.road_address?.address_name || a.address?.address_name || a.address_name,
         })),
       ].filter((r) => r.name);
-
       setResults(combined.length > 0 ? combined : []);
     } catch (e) {
       console.error('검색 오류:', e);
@@ -72,9 +175,12 @@ export default function AddressSearchView({
     }
   }, [initialResults]);
 
+  const handleDelete = (id: string) => {
+    setResults((prev) => prev.filter((r) => r.id !== id));
+  };
+
   return (
     <View style={styles.container}>
-      {/* 검색창 */}
       <View style={styles.searchContainer}>
         <Feather name="search" size={15} color="#AAAAAA" style={{ marginRight: 8 }} />
         <TextInput
@@ -93,7 +199,6 @@ export default function AddressSearchView({
         )}
       </View>
 
-      {/* 결과 리스트 */}
       <FlatList
         data={results}
         keyExtractor={(item) => item.id}
@@ -105,32 +210,16 @@ export default function AddressSearchView({
           </View>
         )}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
-        renderItem={({ item }) => {
-          const isSelected = selectedId === item.id;
-          return (
-            <TouchableOpacity style={styles.resultItem} onPress={() => onSelect(item)}>
-              <View style={[styles.iconWrap, isSelected && styles.iconWrapSelected]}>
-                <Feather
-                  name={isSelected && selectedIsHome ? 'home' : (item.isHome ? 'home' : 'map-pin')}
-                  size={16}
-                  color={isSelected ? '#FFFFFF' : '#AAAAAA'}
-                />
-              </View>
-              <View style={styles.info}>
-                <View style={styles.nameRow}>
-                  <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
-                  {item.isCurrent && (
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>현재 설정된 주소</Text>
-                    </View>
-                  )}
-                </View>
-                <Text style={styles.address} numberOfLines={1}>{item.address}</Text>
-              </View>
-              {isSelected && <Feather name="check" size={18} color="#1A1A1A" />}
-            </TouchableOpacity>
-          );
-        }}
+        renderItem={({ item }) => (
+          <SwipeableResultItem
+            item={item}
+            isSelected={selectedId === item.id}
+            selectedIsHome={selectedIsHome}
+            onSelect={() => onSelect(item)}
+            onDelete={() => handleDelete(item.id)}
+            canDelete={!isSearching}
+          />
+        )}
       />
     </View>
   );
@@ -139,30 +228,24 @@ export default function AddressSearchView({
 const styles = StyleSheet.create({
   container: { flex: 1 },
   searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: 16,
-    marginBottom: 12,
-    backgroundColor: '#F5F5F5',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    height: 42,
+    flexDirection: 'row', alignItems: 'center',
+    marginHorizontal: 16, marginBottom: 12,
+    backgroundColor: '#F5F5F5', borderRadius: 10,
+    paddingHorizontal: 12, height: 42,
   },
   searchInput: { flex: 1, fontSize: 14, color: '#1A1A1A' },
   emptyContainer: { paddingTop: 32, alignItems: 'center' },
   emptyText: { fontSize: 14, color: '#AAAAAA' },
   separator: { height: StyleSheet.hairlineWidth, backgroundColor: '#E0E0E0', marginHorizontal: 16 },
   resultItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 14,
+    backgroundColor: '#FFFFFF',
   },
   iconWrap: {
     width: 32, height: 32, borderRadius: 16,
     backgroundColor: '#EEEEEE',
-    alignItems: 'center', justifyContent: 'center',
-    marginRight: 12,
+    alignItems: 'center', justifyContent: 'center', marginRight: 12,
   },
   iconWrapSelected: { backgroundColor: '#1A1A1A' },
   info: { flex: 1 },
@@ -171,4 +254,15 @@ const styles = StyleSheet.create({
   address: { fontSize: 12, color: '#888888' },
   badge: { backgroundColor: '#E8F5E9', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
   badgeText: { fontSize: 10, color: '#4CAF50', fontWeight: '500' },
+  deleteBackground: {
+    position: 'absolute', right: 12,
+    top: '50%', marginTop: -24,
+    width: 48, height: 48,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  deleteBtn: {
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: '#FF3B30',
+    justifyContent: 'center', alignItems: 'center',
+  },
 });
