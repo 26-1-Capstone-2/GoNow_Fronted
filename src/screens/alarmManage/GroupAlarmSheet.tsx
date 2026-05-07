@@ -146,18 +146,18 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress }: Props) {
             <Text style={styles.title}>{isEditMode ? '그룹 알람 수정' : '그룹 알람 추가'}</Text>
             <TouchableOpacity style={styles.saveBtn} onPress={handleSave}><Feather name="check" size={20} color="#FFFFFF" /></TouchableOpacity>
           </View>
+          <View style={styles.pickerContainer}>
+            <Picker selectedValue={editAlarm.ampm} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, ampm: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
+              <Picker.Item label="오전" value="오전" /><Picker.Item label="오후" value="오후" />
+            </Picker>
+            <Picker selectedValue={editAlarm.hour} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, hour: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
+              {HOURS.map((h) => <Picker.Item key={h} label={h} value={h} />)}
+            </Picker>
+            <Picker selectedValue={editAlarm.minute} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, minute: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
+              {MINUTES.map((m) => <Picker.Item key={m} label={m} value={m} />)}
+            </Picker>
+          </View>
           <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-            <View style={styles.pickerContainer}>
-              <Picker selectedValue={editAlarm.ampm} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, ampm: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
-                <Picker.Item label="오전" value="오전" /><Picker.Item label="오후" value="오후" />
-              </Picker>
-              <Picker selectedValue={editAlarm.hour} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, hour: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
-                {HOURS.map((h) => <Picker.Item key={h} label={h} value={h} />)}
-              </Picker>
-              <Picker selectedValue={editAlarm.minute} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, minute: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
-                {MINUTES.map((m) => <Picker.Item key={m} label={m} value={m} />)}
-              </Picker>
-            </View>
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>멤버({editAlarm.members.length})</Text>
               <View style={styles.optionBox}>
@@ -306,7 +306,7 @@ const styles = StyleSheet.create({
   cardRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   arrivalBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center' },
   arrivalBtnActive: { backgroundColor: '#92DEFE' },
-  pickerContainer: { flexDirection: 'row', marginBottom: 24, backgroundColor: '#F5F5F5', borderRadius: 14, overflow: 'hidden', height: 200 },
+  pickerContainer: { flexDirection: 'row', backgroundColor: '#F5F5F5', borderRadius: 14, overflow: 'hidden', height: 200, marginHorizontal: 16, marginBottom: 8 },
   picker: { flex: 1 },
   pickerItem: { fontSize: 20, color: '#1A1A1A', height: 200 },
   section: { marginBottom: 16 },

@@ -267,7 +267,7 @@ export default function MainCalendarScreen() {
         todayStr={todayStr}
         selectedDate={selectedDate}
         onSelectDate={setSelectedDate}
-        onDayPress={(date) => router.push('/daily-alarm')}
+        onDayPress={(date) => { setSelectedDate(date); router.push('/daily-alarm'); }}
         containerHeight={containerHeight}
         events={events}
       />
