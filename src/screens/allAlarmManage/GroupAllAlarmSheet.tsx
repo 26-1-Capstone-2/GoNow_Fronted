@@ -7,6 +7,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Clipboard,
   Platform,
+  Share,
   StyleSheet,
   Switch,
   Text,
@@ -148,6 +149,15 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
 
   const copyInviteCode = () => {
     Clipboard.setString(editAlarm.inviteCode);
+  };
+  const shareInviteCode = async () => {
+    try {
+      await Share.share({
+        message: '[GoNow] 그룹 초대코드: ' + editAlarm.inviteCode + ' | 초대코드를 앱에 입력해 그룹에 참여하세요!',
+      });
+    } catch (e) {
+      console.error('공유 오류:', e);
+    }
   };
 
   return (
@@ -310,6 +320,9 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
                         <Text style={styles.rowValue}>{editAlarm.inviteCode}</Text>
                         <TouchableOpacity onPress={copyInviteCode} style={{ marginLeft: 8 }}>
                           <Feather name="copy" size={16} color="#AAAAAA" />
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={shareInviteCode} style={{ marginLeft: 8 }}>
+                          <Feather name="share" size={16} color="#AAAAAA" />
                         </TouchableOpacity>
                       </View>
                     </View>
