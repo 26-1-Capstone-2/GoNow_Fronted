@@ -1,7 +1,7 @@
 import AddressSearchView, { SearchResult } from '@/src/components/common/AddressSearchView';
 import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
 import { useCalendarStore } from '@/src/store/calendarStore';
-import { Feather, FontAwesome6 } from '@expo/vector-icons';
+import { Feather, FontAwesome5, FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
@@ -16,11 +16,15 @@ const RECENT_PLACES: SearchResult[] = [
   { id: '2', name: '중앙대학교 후문 입구', address: '서울 동작구 흑석로', isCurrent: false },
 ];
 
-interface Member { id: string; name: string; isMe: boolean; }
+type MemberTransport = 'public' | 'car';
+interface Member { id: string; name: string; isMe: boolean; transport?: MemberTransport; }
+type Transport = 'public' | 'car';
+
 interface GroupAlarm {
   id: string; ampm: string; hour: string; minute: string;
   place: string; enabled: boolean; members: Member[]; inviteCode: string;
   isArrivalActive?: boolean;
+  transport: Transport;
 }
 
 interface Props {
@@ -31,8 +35,8 @@ interface Props {
 const SAMPLE_GROUP_ALARMS: GroupAlarm[] = [
   {
     id: '1', ampm: '오후', hour: '7', minute: '00', place: '홍대역 2번 출구', enabled: true,
-    members: [{ id: '1', name: '가가가(본인)', isMe: true }, { id: '2', name: '나나나', isMe: false }, { id: '3', name: '다다다', isMe: false }],
-    inviteCode: 'abcdeg', isArrivalActive: true,
+    members: [{ id: '1', name: '가가가(본인)', isMe: true, transport: 'public' as MemberTransport }, { id: '2', name: '나나나', isMe: false, transport: 'public' as MemberTransport }, { id: '3', name: '다다다', isMe: false, transport: 'car' as MemberTransport }],
+    inviteCode: 'abcdeg', isArrivalActive: true, transport: 'public' as Transport,
   },
 ];
 
@@ -40,9 +44,10 @@ const DEFAULT_ALARM: GroupAlarm = {
   id: '', ampm: '오전', hour: '7', minute: '00', place: '', enabled: true,
   members: [{ id: 'me', name: '가가가(본인)', isMe: true }], inviteCode: '',
   isArrivalActive: false,
+  transport: 'public' as Transport,
 };
 
-type ViewType = 'list' | 'edit' | 'place' | 'addChoice' | 'join';
+type ViewType = 'list' | 'edit' | 'place' | 'addChoice' | 'join' | 'transport';
 
 export default function GroupAlarmSheet({ onClose, onArrivalPress }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
@@ -163,7 +168,15 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress }: Props) {
               <View style={styles.optionBox}>
                 {editAlarm.members.map((member, index) => (
                   <View key={member.id}>
-                    <View style={styles.memberRow}><Text style={styles.memberName}>{member.name}</Text></View>
+                    <View style={styles.memberRow}>
+                      <Text style={styles.memberName}>{member.name}</Text>
+                      {member.transport === 'public' && (
+                        <MaterialCommunityIcons name="bus-side" size={20} color="#4A90D9" />
+                      )}
+                      {member.transport === 'car' && (
+                        <FontAwesome5 name="car-side" size={18} color="#F5A623" />
+                      )}
+                    </View>
                     {index < editAlarm.members.length - 1 && <View style={styles.separator} />}
                   </View>
                 ))}
@@ -175,6 +188,14 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress }: Props) {
                   <Text style={styles.optionLabel}>목적지</Text>
                   <View style={styles.rowRight}>
                     <Text style={styles.rowValue} numberOfLines={1}>{editAlarm.place || '선택'}</Text>
+                    <Feather name="chevron-right" size={16} color="#AAAAAA" />
+                  </View>
+                </TouchableOpacity>
+                <View style={styles.separator} />
+                <TouchableOpacity style={styles.optionRow} onPress={() => setView('transport')}>
+                  <Text style={styles.optionLabel}>이동수단</Text>
+                  <View style={styles.rowRight}>
+                    <Text style={styles.rowValue}>{editAlarm.transport === 'public' ? '대중교통' : '자가용'}</Text>
                     <Feather name="chevron-right" size={16} color="#AAAAAA" />
                   </View>
                 </TouchableOpacity>
@@ -270,6 +291,34 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress }: Props) {
         </>
       )}
 
+      {/* ── 이동수단 선택 화면 ── */}
+      {view === 'transport' && (
+        <>
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.headerBtn} onPress={() => setView('edit')}>
+              <Feather name="chevron-left" size={22} color="#1A1A1A" />
+            </TouchableOpacity>
+            <Text style={styles.title}>이동수단</Text>
+            <TouchableOpacity style={styles.saveBtn} onPress={() => setView('edit')}>
+              <Feather name="check" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+          <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+            <View style={styles.optionBox}>
+              <TouchableOpacity style={styles.optionRow} onPress={() => setEditAlarm((prev) => ({ ...prev, transport: 'public' }))}>
+                <Text style={styles.optionLabel}>대중교통</Text>
+                {editAlarm.transport === 'public' && <Feather name="check" size={18} color="#F5A623" />}
+              </TouchableOpacity>
+              <View style={styles.separator} />
+              <TouchableOpacity style={styles.optionRow} onPress={() => setEditAlarm((prev) => ({ ...prev, transport: 'car' }))}>
+                <Text style={styles.optionLabel}>자가용</Text>
+                {editAlarm.transport === 'car' && <Feather name="check" size={18} color="#F5A623" />}
+              </TouchableOpacity>
+            </View>
+          </BottomSheetScrollView>
+        </>
+      )}
+
       {/* ── 목적지 선택 화면 ── */}
       {view === 'place' && (
         <>
@@ -317,12 +366,14 @@ const styles = StyleSheet.create({
   rowRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   rowValue: { fontSize: 14, color: '#AAAAAA' },
   inviteCode: { fontSize: 14, color: '#AAAAAA', letterSpacing: 1 },
-  memberRow: { height: 50, justifyContent: 'center' },
+  memberRow: { height: 50, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   memberName: { fontSize: 15, color: '#1A1A1A' },
   separator: { height: StyleSheet.hairlineWidth, backgroundColor: '#DDDDDD' },
   deleteContainer: { alignItems: 'center', marginTop: 8 },
   deleteButton: { backgroundColor: '#FF3B30', borderRadius: 24, paddingVertical: 14, paddingHorizontal: 48 },
   deleteButtonText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
+
+
   choiceBox: { backgroundColor: '#F5F5F5', borderRadius: 12, paddingHorizontal: 16 },
   choiceRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, gap: 12 },
   choiceIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#E8E8E8', alignItems: 'center', justifyContent: 'center' },
