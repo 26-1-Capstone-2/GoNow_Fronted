@@ -401,11 +401,12 @@ const styles = StyleSheet.create({
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: '#E0E0E0', marginVertical: 16 },
   pickerContainer: {
     flexDirection: 'row',
-    marginBottom: 8,
     backgroundColor: '#F5F5F5',
     borderRadius: 14,
     overflow: 'hidden',
     height: 200,
+    marginHorizontal: 16,
+    marginBottom: 8,
   },
   picker: { flex: 1 },
   pickerItem: { fontSize: 20, color: '#1A1A1A', height: 200 },

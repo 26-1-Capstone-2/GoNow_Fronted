@@ -115,18 +115,18 @@ export default function PersonalAllAlarmSheet({ onClose }: Props) {
             <Text style={styles.title}>{isEditMode ? '알람 수정' : '알람 추가'}</Text>
             <TouchableOpacity style={styles.saveBtn} onPress={handleSave}><Feather name="check" size={20} color="#FFFFFF" /></TouchableOpacity>
           </View>
+          <View style={styles.pickerContainer}>
+            <Picker selectedValue={editAlarm.ampm} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, ampm: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
+              <Picker.Item label="오전" value="오전" /><Picker.Item label="오후" value="오후" />
+            </Picker>
+            <Picker selectedValue={editAlarm.hour} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, hour: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
+              {HOURS.map((h) => <Picker.Item key={h} label={h} value={h} />)}
+            </Picker>
+            <Picker selectedValue={editAlarm.minute} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, minute: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
+              {MINUTES.map((m) => <Picker.Item key={m} label={m} value={m} />)}
+            </Picker>
+          </View>
           <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-            <View style={styles.pickerContainer}>
-              <Picker selectedValue={editAlarm.ampm} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, ampm: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
-                <Picker.Item label="오전" value="오전" /><Picker.Item label="오후" value="오후" />
-              </Picker>
-              <Picker selectedValue={editAlarm.hour} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, hour: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
-                {HOURS.map((h) => <Picker.Item key={h} label={h} value={h} />)}
-              </Picker>
-              <Picker selectedValue={editAlarm.minute} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, minute: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
-                {MINUTES.map((m) => <Picker.Item key={m} label={m} value={m} />)}
-              </Picker>
-            </View>
             <View style={styles.section}>
               <View style={styles.optionBox}>
                 <TouchableOpacity style={styles.optionRow} onPress={openPlace}>
@@ -213,7 +213,7 @@ const styles = StyleSheet.create({
   ampmSmall: { fontSize: 14, color: '#1A1A1A', marginBottom: 8 },
   alarmTime: { fontSize: 48, fontWeight: '500', color: '#1A1A1A', letterSpacing: -1, lineHeight: 54 },
   alarmPlace: { fontSize: 12, color: '#888888', marginTop: 2 },
-  pickerContainer: { flexDirection: 'row', marginBottom: 24, backgroundColor: '#F5F5F5', borderRadius: 14, overflow: 'hidden', height: 200 },
+  pickerContainer: { flexDirection: 'row', backgroundColor: '#F5F5F5', borderRadius: 14, overflow: 'hidden', height: 200, marginHorizontal: 16, marginBottom: 8 },
   picker: { flex: 1 },
   pickerItem: { fontSize: 20, color: '#1A1A1A', height: 200 },
   section: { marginBottom: 20 },

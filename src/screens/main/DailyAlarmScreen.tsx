@@ -39,7 +39,9 @@ interface Props {
 
 export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHomePress, onArrivalPress, isArrivalActive = false }: Props) {
   const router = useRouter();
-  const { selectedDate, selectedMonth } = useCalendarStore();
+  const { selectedDate, selectedMonth, setSelectedDate } = useCalendarStore();
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   const [alarms, setAlarms] = useState(SAMPLE_ALARMS);
 
   const dateObj = new Date(selectedDate);
@@ -60,7 +62,7 @@ export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHome
     <View style={styles.container}>
       {/* 헤더 */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.backButton} onPress={() => { setSelectedDate(todayStr); router.back(); }}>
           <Feather name="chevron-left" size={20} color="#1A1A1A" />
           <Text style={styles.backMonth}>{selectedMonth}월</Text>
         </TouchableOpacity>
