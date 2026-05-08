@@ -10,6 +10,10 @@ import { ROUTES } from './routes';
 export function useAppNavigation() {
   const router = useRouter();
 
+  const goToLogin = useCallback(() => {
+    router.replace(ROUTES.login);
+  }, [router]);
+
   const goToSignUp = useCallback(() => {
     router.push(ROUTES.signUp);
   }, [router]);
@@ -61,6 +65,7 @@ export function useAppNavigation() {
   return useMemo(
     () => ({
       routes: ROUTES,
+      goToLogin,
       goToSignUp,
       goToHomeAddressSetup,
       goToLeaveTimeSetup,
@@ -70,6 +75,6 @@ export function useAppNavigation() {
       replace,
       push,
     }),
-    [goToSignUp, goToHomeAddressSetup, goToLeaveTimeSetup, goToYearCalendar, goToMainTabs, goBack, replace, push],
+    [goToLogin, goToSignUp, goToHomeAddressSetup, goToLeaveTimeSetup, goToYearCalendar, goToMainTabs, goBack, replace, push],
   );
 }

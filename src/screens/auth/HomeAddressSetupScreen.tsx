@@ -61,7 +61,7 @@ export default function HomeAddressSetupScreen({ isOnboarding = false }: Props) 
           onPress={handleComplete}
           disabled={!selected}
         >
-          <Text style={styles.completeButtonText}>완료</Text>
+          <Text style={styles.completeButtonText}>{isOnboarding ? '다음' : '완료'}</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>

@@ -10,7 +10,7 @@ import {
 import { useAppNavigation } from '@/src/navigation';
 
 export default function LeaveTimeSetupScreen() {
-  const { goBack, goToMainTabs } = useAppNavigation();
+  const { goBack, goToLogin } = useAppNavigation();
   const [minutes, setMinutes] = useState(10);
 
   const handleMinus = () => {
@@ -24,7 +24,7 @@ export default function LeaveTimeSetupScreen() {
   const handleComplete = () => {
     // TODO: 여유시간 저장 API 연동
     console.log('여유시간 설정:', minutes);
-    goToMainTabs();
+    goToLogin();
   };
   return (
     <SafeAreaView style={styles.container}>

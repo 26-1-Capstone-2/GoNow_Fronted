@@ -1,7 +1,7 @@
 import AddressSearchView, { SearchResult } from '@/src/components/common/AddressSearchView';
 import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
 import { useCalendarStore } from '@/src/store/calendarStore';
-import { Feather } from '@expo/vector-icons';
+import { Feather, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
@@ -20,7 +20,8 @@ const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));
 const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
 
 type AlarmMode = 'lastTrain' | 'deadline';
-type ViewType = 'list' | 'edit' | 'repeat' | 'homePlace';
+type Transport = 'public' | 'car';
+type ViewType = 'list' | 'edit' | 'repeat' | 'homePlace' | 'transport';
 
 interface HomeAlarm {
   id: string;
@@ -31,6 +32,7 @@ interface HomeAlarm {
   place: string;
   repeat: string[];
   enabled: boolean;
+  transport: Transport;
 }
 
 interface Props {
@@ -54,13 +56,13 @@ function getRepeatLabel(repeat: string[]): string {
 }
 
 const SAMPLE_HOME_ALARMS: HomeAlarm[] = [
-  { id: '1', mode: 'lastTrain', ampm: '오후', hour: '11', minute: '00', place: '우리집', repeat: ['안함'], enabled: true },
-  { id: '2', mode: 'deadline', ampm: '오후', hour: '11', minute: '00', place: '우리집', repeat: ['주중'], enabled: false },
+  { id: '1', mode: 'lastTrain', ampm: '오후', hour: '11', minute: '00', place: '우리집', repeat: ['안함'], enabled: true, transport: 'public' },
+  { id: '2', mode: 'deadline', ampm: '오후', hour: '11', minute: '00', place: '우리집', repeat: ['주중'], enabled: false, transport: 'public' },
 ];
 
 const DEFAULT_ALARM: HomeAlarm = {
   id: '', mode: 'lastTrain', ampm: '오후', hour: '11', minute: '00',
-  place: '우리집', repeat: ['안함'], enabled: true,
+  place: '우리집', repeat: ['안함'], enabled: true, transport: 'public',
 };
 
 export default function HomeAlarmSheet({ onClose }: Props) {
@@ -159,22 +161,29 @@ export default function HomeAlarmSheet({ onClose }: Props) {
               <SwipeableAlarmCard key={alarm.id} onDelete={() => setAlarms((prev) => prev.filter((a) => a.id !== alarm.id))}>
                 <TouchableOpacity style={styles.alarmCard} onPress={() => openEdit(alarm)} activeOpacity={0.7}>
                   <View style={styles.alarmInfo}>
-                    {alarm.mode === 'lastTrain' ? (
-                      <Text style={styles.lastTrainText}>막차</Text>
-                    ) : (
-                      <View style={styles.timeRow}>
-                        <Text style={styles.ampmSmall}>{alarm.ampm}</Text>
-                        <Text style={styles.alarmTime}>{alarm.hour}:{alarm.minute}</Text>
-                      </View>
-                    )}
-                    <Text style={styles.alarmPlace}>{alarm.place}, {getRepeatLabel(alarm.repeat)}</Text>
+                    <Text style={styles.alarmPlace}>{alarm.place}</Text>
+                    <View style={styles.alarmMeta}>
+                      {alarm.mode === 'lastTrain'
+                        ? <Text style={styles.alarmDeadline}>막차 기준</Text>
+                        : <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.hour}:{alarm.minute} 까지</Text>
+                      }
+                      {alarm.transport === 'public'
+                        ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
+                        : <FontAwesome5 name="car-side" size={13} color="#F5A623" />
+                      }
+                      {getRepeatLabel(alarm.repeat) !== '안함' && (
+                        <Text style={styles.repeatLabel}>· {getRepeatLabel(alarm.repeat)}</Text>
+                      )}
+                    </View>
                   </View>
-                  <Switch
-                    value={alarm.enabled}
-                    onValueChange={() => toggleAlarm(alarm.id)}
-                    trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-                    thumbColor="#FFFFFF"
-                  />
+                  <View style={styles.cardRight}>
+                    <Switch
+                      value={alarm.enabled}
+                      onValueChange={() => toggleAlarm(alarm.id)}
+                      trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                      thumbColor="#FFFFFF"
+                    />
+                  </View>
                 </TouchableOpacity>
               </SwipeableAlarmCard>
             ))}
@@ -250,7 +259,7 @@ export default function HomeAlarmSheet({ onClose }: Props) {
 
             <View style={styles.divider} />
 
-{/* 귀가지 + 반복 */}
+{/* 귀가지 + 이동수단(데드라인) + 반복 */}
             <View style={styles.section}>
               <View style={styles.optionBox}>
                 <TouchableOpacity style={styles.optionRow} onPress={openHomePlace}>
@@ -260,6 +269,18 @@ export default function HomeAlarmSheet({ onClose }: Props) {
                     <Feather name="chevron-right" size={16} color="#AAAAAA" />
                   </View>
                 </TouchableOpacity>
+                {editAlarm.mode === 'deadline' && (
+                  <>
+                    <View style={styles.separator} />
+                    <TouchableOpacity style={styles.optionRow} onPress={() => setView('transport')}>
+                      <Text style={styles.optionLabel}>이동수단</Text>
+                      <View style={styles.rowRight}>
+                        <Text style={styles.rowValue}>{editAlarm.transport === 'public' ? '대중교통' : '자가용'}</Text>
+                        <Feather name="chevron-right" size={16} color="#AAAAAA" />
+                      </View>
+                    </TouchableOpacity>
+                  </>
+                )}
                 <View style={styles.separator} />
                 <TouchableOpacity style={styles.optionRow} onPress={() => setView('repeat')}>
                   <Text style={styles.optionLabel}>반복</Text>
@@ -278,6 +299,34 @@ export default function HomeAlarmSheet({ onClose }: Props) {
                 </TouchableOpacity>
               </View>
             )}
+          </BottomSheetScrollView>
+        </>
+      )}
+
+      {/* ── 이동수단 선택 화면 ── */}
+      {view === 'transport' && (
+        <>
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.headerBtn} onPress={() => setView('edit')}>
+              <Feather name="chevron-left" size={22} color="#1A1A1A" />
+            </TouchableOpacity>
+            <Text style={styles.title}>이동수단</Text>
+            <TouchableOpacity style={styles.saveBtn} onPress={() => setView('edit')}>
+              <Feather name="check" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+          <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+            <View style={styles.optionBox}>
+              <TouchableOpacity style={styles.optionRow} onPress={() => setEditAlarm((prev) => ({ ...prev, transport: 'public' }))}>
+                <Text style={styles.optionLabel}>대중교통</Text>
+                {editAlarm.transport === 'public' && <Feather name="check" size={18} color="#F5A623" />}
+              </TouchableOpacity>
+              <View style={styles.separator} />
+              <TouchableOpacity style={styles.optionRow} onPress={() => setEditAlarm((prev) => ({ ...prev, transport: 'car' }))}>
+                <Text style={styles.optionLabel}>자가용</Text>
+                {editAlarm.transport === 'car' && <Feather name="check" size={18} color="#F5A623" />}
+              </TouchableOpacity>
+            </View>
           </BottomSheetScrollView>
         </>
       )}
@@ -311,7 +360,9 @@ export default function HomeAlarmSheet({ onClose }: Props) {
               <Feather name="chevron-left" size={22} color="#1A1A1A" />
             </TouchableOpacity>
             <Text style={styles.title}>반복</Text>
-            <View style={{ width: 36 }} />
+            <TouchableOpacity style={styles.saveBtn} onPress={() => setView('edit')}>
+              <Feather name="check" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
           </View>
           <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             <View style={styles.optionBox}>
@@ -384,16 +435,16 @@ const styles = StyleSheet.create({
   tabTextActive: { color: '#1A1A1A', fontWeight: '600' },
   content: { paddingHorizontal: 16, paddingBottom: Platform.OS === 'ios' ? 40 : 24 },
   alarmCard: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 16, paddingHorizontal: 16,
+    flexDirection: 'row', alignItems: 'stretch', justifyContent: 'space-between',
+    paddingVertical: 14, paddingHorizontal: 16,
     backgroundColor: '#F5F5F5', borderRadius: 12, marginBottom: 8,
   },
-  alarmInfo: { flex: 1 },
-  timeRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
-  ampmSmall: { fontSize: 14, color: '#1A1A1A', marginBottom: 8 },
-  alarmTime: { fontSize: 48, fontWeight: '500', color: '#1A1A1A', letterSpacing: -1, lineHeight: 54 },
-  lastTrainText: { fontSize: 36, fontWeight: '600', color: '#1A1A1A', lineHeight: 44 },
-  alarmPlace: { fontSize: 12, color: '#888888', marginTop: 2 },
+  alarmInfo: { flex: 1, marginRight: 8, justifyContent: 'center' },
+  cardRight: { justifyContent: 'center' },
+  alarmPlace: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 5 },
+  alarmMeta: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
+  alarmDeadline: { fontSize: 13, fontWeight: '500', color: '#555555' },
+  repeatLabel: { fontSize: 12, color: '#888888' },
   separator: { height: StyleSheet.hairlineWidth, backgroundColor: '#DDDDDD' },
   lastTrainInfo: { alignItems: 'center', paddingVertical: 32 },
   lastTrainBig: { fontSize: 40, fontWeight: '700', color: '#1A1A1A', marginBottom: 12 },

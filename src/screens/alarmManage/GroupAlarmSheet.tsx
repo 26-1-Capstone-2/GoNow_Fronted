@@ -126,13 +126,20 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress }: Props) {
               <SwipeableAlarmCard key={alarm.id} onDelete={() => setAlarms((prev) => prev.filter((a) => a.id !== alarm.id))}>
                 <TouchableOpacity style={styles.alarmCard} onPress={() => openEdit(alarm)} activeOpacity={0.7}>
                   <View style={styles.alarmInfo}>
-                    <View style={styles.timeRow}>
-                      <Text style={styles.ampmSmall}>{alarm.ampm}</Text>
-                      <Text style={styles.alarmTime}>{alarm.hour}:{alarm.minute}</Text>
-                    </View>
                     <Text style={styles.alarmPlace}>{alarm.place}</Text>
+                    <View style={styles.alarmMeta}>
+                      <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.hour}:{alarm.minute} 까지</Text>
+                      {alarm.transport === 'public'
+                        ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
+                        : <FontAwesome5 name="car-side" size={13} color="#F5A623" />
+                      }
+                    </View>
                   </View>
                   <View style={styles.cardRight}>
+                    <View style={styles.memberBadge}>
+                      <Feather name="users" size={11} color="#555555" />
+                      <Text style={styles.memberCount}>{alarm.members.length}명</Text>
+                    </View>
                     <TouchableOpacity
                       onPress={() => onArrivalPress?.(alarm)}
                       disabled={!alarm.isArrivalActive}
@@ -356,13 +363,14 @@ const styles = StyleSheet.create({
   datePill: { backgroundColor: '#E8E8E8', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 6 },
   datePillText: { fontSize: 13, fontWeight: '500', color: '#FF3B30' },
   content: { paddingHorizontal: 16, paddingBottom: Platform.OS === 'ios' ? 40 : 24 },
-  alarmCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 16, paddingHorizontal: 16, backgroundColor: '#F5F5F5', borderRadius: 12, marginBottom: 8 },
-  alarmInfo: { flex: 1 },
-  timeRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
-  ampmSmall: { fontSize: 14, color: '#1A1A1A', marginBottom: 8 },
-  alarmTime: { fontSize: 48, fontWeight: '500', color: '#1A1A1A', letterSpacing: -1, lineHeight: 54 },
-  alarmPlace: { fontSize: 12, color: '#888888', marginTop: 2 },
-  cardRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  alarmCard: { flexDirection: 'row', alignItems: 'stretch', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: 16, backgroundColor: '#F5F5F5', borderRadius: 12, marginBottom: 8 },
+  alarmInfo: { flex: 1, marginRight: 8, justifyContent: 'center' },
+  alarmPlace: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 5 },
+  alarmMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  alarmDeadline: { fontSize: 13, fontWeight: '500', color: '#555555' },
+  cardRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  memberBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#E8E8E8', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 10 },
+  memberCount: { fontSize: 11, color: '#555555', fontWeight: '500' },
   arrivalBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center' },
   arrivalBtnActive: { backgroundColor: '#92DEFE' },
   pickerContainer: { flexDirection: 'row', backgroundColor: '#F5F5F5', borderRadius: 14, overflow: 'hidden', height: 200, marginHorizontal: 16, marginBottom: 8 },

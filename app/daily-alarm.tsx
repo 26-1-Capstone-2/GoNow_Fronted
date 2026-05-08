@@ -42,11 +42,12 @@ export default function DailyAlarmPage() {
           alarmTime={selectedGroupAlarm ? selectedGroupAlarm.ampm + ' ' + selectedGroupAlarm.hour + '시' : '오후 7시'}
           members={selectedGroupAlarm?.members.map((m: any) => ({
             ...m,
-            arrivalTime: m.isMe ? undefined : '오후 7시 3분',
+            transport: m.transport ?? 'public',
+            arrivalTime: m.isMe ? '오후 7시 2분' : '오후 7시 3분',
           })) ?? [
-            { id: '1', name: '가가가(본인)', isMe: true },
-            { id: '2', name: '나나나', isMe: false, arrivalTime: '오후 7시 3분' },
-            { id: '3', name: '다다다', isMe: false, arrivalTime: '오후 6시 58분' },
+            { id: '1', name: '가가가(본인)', isMe: true, transport: 'public', arrivalTime: '오후 7시 2분' },
+            { id: '2', name: '나나나', isMe: false, transport: 'public', arrivalTime: '오후 7시 3분' },
+            { id: '3', name: '다다다', isMe: false, transport: 'car', arrivalTime: '오후 6시 58분' },
           ]}
         />
       )}
