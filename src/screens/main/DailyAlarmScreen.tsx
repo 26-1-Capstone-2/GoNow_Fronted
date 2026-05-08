@@ -25,7 +25,7 @@ const SAMPLE_ALARMS = {
     },
   ],
   home: [
-    { id: '3', time: '막차', place: '우리집, 막차모드, 4/7', enabled: true },
+    { id: '3', ampm: '', time: '막차', place: '우리집', enabled: true },
   ],
 };
 
@@ -88,18 +88,17 @@ export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHome
           {alarms.personal.map((alarm) => (
             <View key={alarm.id} style={styles.alarmCard}>
               <View style={styles.alarmInfo}>
-                <View style={styles.timeRow}>
-                  <Text style={styles.ampm}>{alarm.ampm}</Text>
-                  <Text style={styles.alarmTime}>{alarm.time}</Text>
-                </View>
                 <Text style={styles.alarmPlace}>{alarm.place}</Text>
+                <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.time} 까지</Text>
               </View>
-              <Switch
-                value={alarm.enabled}
-                onValueChange={() => toggleAlarm('personal', alarm.id)}
-                trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-                thumbColor="#FFFFFF"
-              />
+              <View style={styles.cardRight}>
+                <Switch
+                  value={alarm.enabled}
+                  onValueChange={() => toggleAlarm('personal', alarm.id)}
+                  trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
             </View>
           ))}
         </View>
@@ -115,13 +114,14 @@ export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHome
           {alarms.group.map((alarm) => (
             <View key={alarm.id} style={styles.alarmCard}>
               <View style={styles.alarmInfo}>
-                <View style={styles.timeRow}>
-                  <Text style={styles.ampm}>{alarm.ampm}</Text>
-                  <Text style={styles.alarmTime}>{alarm.time}</Text>
-                </View>
                 <Text style={styles.alarmPlace}>{alarm.place}</Text>
+                <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.time} 까지</Text>
               </View>
-              <View style={styles.groupCardRight}>
+              <View style={styles.cardRight}>
+                <View style={styles.memberBadge}>
+                  <Feather name="users" size={11} color="#555555" />
+                  <Text style={styles.memberCount}>{alarm.members.length}명</Text>
+                </View>
                 <TouchableOpacity
                   onPress={onArrivalPress}
                   disabled={!isArrivalActive}
@@ -151,15 +151,19 @@ export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHome
           {alarms.home.map((alarm) => (
             <View key={alarm.id} style={styles.alarmCard}>
               <View style={styles.alarmInfo}>
-                <Text style={styles.alarmTimeHome}>{alarm.time}</Text>
                 <Text style={styles.alarmPlace}>{alarm.place}</Text>
+                <Text style={styles.alarmDeadline}>
+                  {alarm.time === '막차' ? '막차 기준' : `${alarm.ampm ?? ''} ${alarm.time} 까지`}
+                </Text>
               </View>
-              <Switch
-                value={alarm.enabled}
-                onValueChange={() => toggleAlarm('home', alarm.id)}
-                trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-                thumbColor="#FFFFFF"
-              />
+              <View style={styles.cardRight}>
+                <Switch
+                  value={alarm.enabled}
+                  onValueChange={() => toggleAlarm('home', alarm.id)}
+                  trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
             </View>
           ))}
         </View>
@@ -234,7 +238,7 @@ const styles = StyleSheet.create({
 
   alarmCard: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'stretch',
     justifyContent: 'space-between',
     paddingVertical: 14,
     paddingHorizontal: 16,
@@ -242,46 +246,14 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     marginBottom: 8,
   },
-  alarmInfo: { flex: 1 },
-  timeRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 4,
-  },
-  ampm: {
-    fontSize: 14,
-    fontWeight: '400',
-    color: '#1A1A1A',
-    marginBottom: 6,
-  },
-  alarmTime: {
-    fontSize: 44,
-    fontWeight: '500',
-    color: '#1A1A1A',
-    letterSpacing: -1,
-    lineHeight: 50,
-  },
-  alarmTimeHome: {
-    fontSize: 32,
-    fontWeight: '500',
-    color: '#1A1A1A',
-    lineHeight: 38,
-  },
-  alarmPlace: {
-    fontSize: 12,
-    color: '#888888',
-    marginTop: 2,
-  },
-  groupCardRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  groupActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
+  alarmInfo: { flex: 1, marginRight: 8, justifyContent: 'center' },
+  cardRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  alarmPlace: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 5 },
+  alarmDeadline: { fontSize: 13, fontWeight: '500', color: '#555555' },
+  alarmMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  cardPlaceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 },
+  memberBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#E8E8E8', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 10 },
+  memberCount: { fontSize: 11, color: '#555555', fontWeight: '500' },
   arrivalBtn: {
     width: 30,
     height: 30,

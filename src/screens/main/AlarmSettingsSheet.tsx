@@ -17,12 +17,11 @@ interface Props {
 
 type RouteOption = 'fastest' | 'minTransfer';
 type TransportOption = 'subway' | 'bus' | 'any';
-type WalkOption = 'minWalk' | 'any';
 
 interface AlarmSettings {
   routeOption: RouteOption;
   transportOption: TransportOption;
-  walkOption: WalkOption;
+  minWalk: boolean;
   leaveTime: number;
 }
 
@@ -33,7 +32,7 @@ export default function AlarmSettingsSheet({ onClose, onSave }: Props) {
   const [settings, setSettings] = useState<AlarmSettings>({
     routeOption: 'fastest',
     transportOption: 'any',
-    walkOption: 'any',
+    minWalk: false,
     leaveTime: 10,
   });
 
@@ -62,6 +61,7 @@ export default function AlarmSettingsSheet({ onClose, onSave }: Props) {
       onChange={handleSheetChange}
       onClose={onClose}
       enablePanDownToClose
+      enableDynamicSizing={false}
       handleIndicatorStyle={styles.indicator}
       backgroundStyle={styles.background}
     >
@@ -127,6 +127,16 @@ export default function AlarmSettingsSheet({ onClose, onSave }: Props) {
                 thumbColor="#FFFFFF"
               />
             </View>
+            <View style={styles.separator} />
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>최소 도보</Text>
+              <Switch
+                value={settings.minWalk}
+                onValueChange={(v) => setSettings((prev) => ({ ...prev, minWalk: v }))}
+                trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                thumbColor="#FFFFFF"
+              />
+            </View>
           </View>
         </View>
 
@@ -159,32 +169,6 @@ export default function AlarmSettingsSheet({ onClose, onSave }: Props) {
               <Switch
                 value={settings.transportOption === 'any'}
                 onValueChange={() => setSettings((prev) => ({ ...prev, transportOption: 'any' }))}
-                trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-                thumbColor="#FFFFFF"
-              />
-            </View>
-          </View>
-        </View>
-
-        {/* 걷기싫어 */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>걷기싫어</Text>
-          <View style={styles.sectionBox}>
-            <View style={styles.row}>
-              <Text style={styles.rowLabel}>최소 도보</Text>
-              <Switch
-                value={settings.walkOption === 'minWalk'}
-                onValueChange={() => setSettings((prev) => ({ ...prev, walkOption: 'minWalk' }))}
-                trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-                thumbColor="#FFFFFF"
-              />
-            </View>
-            <View style={styles.separator} />
-            <View style={styles.row}>
-              <Text style={styles.rowLabel}>상관없음</Text>
-              <Switch
-                value={settings.walkOption === 'any'}
-                onValueChange={() => setSettings((prev) => ({ ...prev, walkOption: 'any' }))}
                 trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
                 thumbColor="#FFFFFF"
               />

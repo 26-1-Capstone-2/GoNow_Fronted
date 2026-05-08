@@ -9,12 +9,12 @@ import {
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
-  SafeAreaView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const COL_GAP = 12;
@@ -139,34 +139,34 @@ export default function YearCalendarScreen() {
   const router = useRouter();
   const { setYearMonth } = useCalendarStore();
 
-  const [currentIndex, setCurrentIndex] = useState(CENTER_INDEX);
   const [containerHeight, setContainerHeight] = useState(0);
   const isAtTodayRef = useRef(true);
   const isMountedRef = useRef(false);
+  const containerHeightRef = useRef(0);
   const flatListRef = useRef<FlatList>(null);
 
   const years = Array.from({ length: TOTAL_YEARS }, (_, i) => i);
 
-  // containerHeight 확정 후 정확한 위치로 이동
   useEffect(() => {
-    if (containerHeight === 0) return;
-    if (!isMountedRef.current) {
-      isMountedRef.current = true;
-      requestAnimationFrame(() => {
-        flatListRef.current?.scrollToIndex({ index: CENTER_INDEX, animated: false });
-      });
-    }
+    if (containerHeight === 0 || isMountedRef.current) return;
+    isMountedRef.current = true;
+    requestAnimationFrame(() => {
+      const h = containerHeightRef.current;
+      if (h > 0) flatListRef.current?.scrollToOffset({ offset: CENTER_INDEX * h, animated: false });
+    });
   }, [containerHeight]);
 
   const onLayout = useCallback((e: LayoutChangeEvent) => {
     const h = e.nativeEvent.layout.height;
-    if (h > 0) setContainerHeight(h);
+    if (h > 0) {
+      containerHeightRef.current = h;
+      setContainerHeight(h);
+    }
   }, []);
 
   const onMomentumScrollEnd = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
     if (containerHeight === 0) return;
     const index = Math.round(e.nativeEvent.contentOffset.y / containerHeight);
-    setCurrentIndex(index);
     isAtTodayRef.current = index === CENTER_INDEX;
   }, [containerHeight]);
 
@@ -180,11 +180,10 @@ export default function YearCalendarScreen() {
       setYearMonth(today.getFullYear(), today.getMonth() + 1);
       router.back();
     } else {
-      flatListRef.current?.scrollToIndex({ index: CENTER_INDEX, animated: true });
-      setCurrentIndex(CENTER_INDEX);
+      flatListRef.current?.scrollToOffset({ offset: CENTER_INDEX * containerHeightRef.current, animated: true });
       isAtTodayRef.current = true;
     }
-  }, []);
+  }, [containerHeight]);
 
   const renderItem = useCallback(({ item }: { item: number }) => {
     const y = today.getFullYear() - CENTER_INDEX + item;
@@ -230,9 +229,6 @@ export default function YearCalendarScreen() {
               index,
             })}
             onMomentumScrollEnd={onMomentumScrollEnd}
-            decelerationRate="fast"
-            snapToInterval={containerHeight}
-            snapToAlignment="start"
             renderItem={renderItem}
             initialNumToRender={3}
             maxToRenderPerBatch={3}

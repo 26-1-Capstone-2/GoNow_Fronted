@@ -1,7 +1,7 @@
 import AddressSearchView, { SearchResult } from '@/src/components/common/AddressSearchView';
 import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
 import { useCalendarStore } from '@/src/store/calendarStore';
-import { Feather } from '@expo/vector-icons';
+import { Feather, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
@@ -169,18 +169,26 @@ export default function PersonalAlarmSheet({ onClose }: Props) {
               <SwipeableAlarmCard key={alarm.id} onDelete={() => setAlarms((prev) => prev.filter((a) => a.id !== alarm.id))}>
                 <TouchableOpacity style={styles.alarmCard} onPress={() => openEdit(alarm)} activeOpacity={0.7}>
                   <View style={styles.alarmInfo}>
-                    <View style={styles.timeRow}>
-                      <Text style={styles.ampmSmall}>{alarm.ampm}</Text>
-                      <Text style={styles.alarmTime}>{alarm.hour}:{alarm.minute}</Text>
-                    </View>
                     <Text style={styles.alarmPlace}>{alarm.place}</Text>
+                    <View style={styles.alarmMeta}>
+                      <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.hour}:{alarm.minute} 까지</Text>
+                      {alarm.transport === 'public'
+                        ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
+                        : <FontAwesome5 name="car-side" size={13} color="#F5A623" />
+                      }
+                      {getRepeatLabel(alarm.repeat) !== '안함' && (
+                        <Text style={styles.repeatLabel}>· {getRepeatLabel(alarm.repeat)}</Text>
+                      )}
+                    </View>
                   </View>
-                  <Switch
-                    value={alarm.enabled}
-                    onValueChange={() => toggleAlarm(alarm.id)}
-                    trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-                    thumbColor="#FFFFFF"
-                  />
+                  <View style={styles.cardRight}>
+                    <Switch
+                      value={alarm.enabled}
+                      onValueChange={() => toggleAlarm(alarm.id)}
+                      trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                      thumbColor="#FFFFFF"
+                    />
+                  </View>
                 </TouchableOpacity>
               </SwipeableAlarmCard>
             ))}
@@ -307,7 +315,9 @@ export default function PersonalAlarmSheet({ onClose }: Props) {
               <Feather name="chevron-left" size={22} color="#1A1A1A" />
             </TouchableOpacity>
             <Text style={styles.title}>반복</Text>
-            <View style={{ width: 36 }} />
+            <TouchableOpacity style={styles.saveBtn} onPress={() => setView('edit')}>
+              <Feather name="check" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
           </View>
           <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             <View style={styles.optionBox}>
@@ -385,15 +395,16 @@ const styles = StyleSheet.create({
   datePillText: { fontSize: 13, fontWeight: '500', color: '#FF3B30' },
   content: { paddingHorizontal: 16, paddingBottom: Platform.OS === 'ios' ? 40 : 24 },
   alarmCard: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 16, paddingHorizontal: 16,
+    flexDirection: 'row', alignItems: 'stretch', justifyContent: 'space-between',
+    paddingVertical: 14, paddingHorizontal: 16,
     backgroundColor: '#F5F5F5', borderRadius: 12, marginBottom: 8,
   },
-  alarmInfo: { flex: 1 },
-  timeRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
-  ampmSmall: { fontSize: 14, color: '#1A1A1A', marginBottom: 8 },
-  alarmTime: { fontSize: 48, fontWeight: '500', color: '#1A1A1A', letterSpacing: -1, lineHeight: 54 },
-  alarmPlace: { fontSize: 12, color: '#888888', marginTop: 2 },
+  alarmInfo: { flex: 1, marginRight: 8, justifyContent: 'center' },
+  cardRight: { justifyContent: 'center' },
+  alarmPlace: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 5 },
+  alarmMeta: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
+  alarmDeadline: { fontSize: 13, fontWeight: '500', color: '#555555' },
+  repeatLabel: { fontSize: 12, color: '#888888' },
   pickerContainer: {
     flexDirection: 'row',
     backgroundColor: '#F5F5F5', borderRadius: 14,

@@ -194,6 +194,7 @@ export default function MainCalendarScreen() {
   const isAtTodayRef = useRef(true);
   const isMountedRef = useRef(false);
   const pendingScrollRef = useRef(false);
+  const containerHeightRef = useRef(0);
 
   const currentIndex = CENTER_INDEX + getOffsetFromBase(
     today.getFullYear(), today.getMonth() + 1,
@@ -213,14 +214,15 @@ export default function MainCalendarScreen() {
       isMountedRef.current = true;
       const clampedIndex = Math.max(0, Math.min(TOTAL_MONTHS - 1, currentIndex));
       requestAnimationFrame(() => {
-        flatListRef.current?.scrollToIndex({ index: clampedIndex, animated: false });
+        const h = containerHeightRef.current;
+        if (h > 0) flatListRef.current?.scrollToOffset({ offset: clampedIndex * h, animated: false });
       });
       return;
     }
     if (pendingScrollRef.current) {
       pendingScrollRef.current = false;
       const clampedIndex = Math.max(0, Math.min(TOTAL_MONTHS - 1, currentIndex));
-      flatListRef.current?.scrollToIndex({ index: clampedIndex, animated: true });
+      flatListRef.current?.scrollToOffset({ offset: clampedIndex * containerHeightRef.current, animated: true });
     }
   }, [containerHeight, selectedYear, selectedMonth]);
 
@@ -237,7 +239,10 @@ export default function MainCalendarScreen() {
 
   const onLayout = useCallback((e: LayoutChangeEvent) => {
     const h = e.nativeEvent.layout.height;
-    if (h > 0) setContainerHeight(h);
+    if (h > 0) {
+      containerHeightRef.current = h;
+      setContainerHeight(h);
+    }
   }, []);
 
   const onMomentumScrollEnd = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -311,9 +316,6 @@ export default function MainCalendarScreen() {
               index,
             })}
             onMomentumScrollEnd={onMomentumScrollEnd}
-            decelerationRate="fast"
-            snapToInterval={containerHeight}
-            snapToAlignment="start"
             renderItem={renderItem}
             initialNumToRender={3}
             maxToRenderPerBatch={3}
@@ -382,7 +384,8 @@ export default function MainCalendarScreen() {
           alarmTime={selectedGroupAlarm.ampm + ' ' + selectedGroupAlarm.hour + '시'}
           members={selectedGroupAlarm.members.map((m: any) => ({
             ...m,
-            arrivalTime: m.isMe ? undefined : '오후 7시 3분',
+            transport: m.transport ?? 'public',
+            arrivalTime: m.isMe ? '오후 7시 2분' : '오후 7시 3분',
           }))}
         />
       )}

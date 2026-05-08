@@ -87,27 +87,17 @@ export default function ArrivalDashboardSheet({ onClose, destination, alarmTime,
         {/* 멤버 목록 */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>멤버({members.length})</Text>
-          <View style={styles.memberBox}>
-            {members.map((member, index) => (
-              <View key={member.id}>
-                <View style={styles.memberRow}>
-                  {/* 왼쪽: 이름 + 도착시간 */}
-                  <View style={styles.memberLeft}>
-                    <Text style={styles.memberName}>{member.name}</Text>
-                    {member.arrivalTime && (
-                      <Text style={styles.arrivalTime}>{member.arrivalTime} 도착예정</Text>
-                    )}
-                    {member.isMe && !member.arrivalTime && (
-                      <Text style={styles.meLabel}>본인</Text>
-                    )}
-                  </View>
-                  {/* 오른쪽: 이동수단 뱃지 */}
-                  <TransportBadge transport={member.transport} />
-                </View>
-                {index < members.length - 1 && <View style={styles.separator} />}
+          {members.map((member) => (
+            <View key={member.id} style={styles.memberCard}>
+              <View style={styles.memberCardTop}>
+                <Text style={styles.memberName}>{member.name}</Text>
+                <TransportBadge transport={member.transport} />
               </View>
-            ))}
-          </View>
+              <Text style={styles.arrivalTime}>
+                {member.arrivalTime ? `${member.arrivalTime} 도착예정` : '계산 중…'}
+              </Text>
+            </View>
+          ))}
         </View>
       </BottomSheetScrollView>
     </BottomSheet>
@@ -135,15 +125,16 @@ const styles = StyleSheet.create({
   destinationText: { fontSize: 14, fontWeight: '500', color: '#1A1A1A' },
   section: { marginBottom: 16 },
   sectionTitle: { fontSize: 15, fontWeight: '600', color: '#1A1A1A', marginBottom: 8 },
-  memberBox: { backgroundColor: '#F5F5F5', borderRadius: 12, paddingHorizontal: 16 },
-  memberRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 14, gap: 12,
+  memberCard: {
+    backgroundColor: '#F5F5F5', borderRadius: 14,
+    paddingHorizontal: 16, paddingVertical: 14,
+    marginBottom: 8, alignItems: 'center',
   },
-  memberLeft: { flex: 1 },
-  memberName: { fontSize: 15, fontWeight: '600', color: '#1A1A1A', marginBottom: 2 },
-  arrivalTime: { fontSize: 12, color: '#888888' },
-  meLabel: { fontSize: 12, color: '#AAAAAA' },
-  separator: { height: StyleSheet.hairlineWidth, backgroundColor: '#DDDDDD' },
+  memberCardTop: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    width: '100%', marginBottom: 10,
+  },
+  memberName: { fontSize: 13, color: '#888888' },
+  arrivalTime: { fontSize: 22, fontWeight: '700', color: '#1A1A1A', textAlign: 'center' },
 
 });

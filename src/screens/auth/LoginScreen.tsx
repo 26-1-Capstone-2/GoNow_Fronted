@@ -13,14 +13,14 @@ import {
 import { useAppNavigation } from '@/src/navigation';
 
 export default function LoginScreen() {
-  const { goToHomeAddressSetup, goToSignUp } = useAppNavigation();
+  const { goToMainTabs, goToSignUp } = useAppNavigation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
   const handleLogin = () => {
-    // TODO: API 연동 성공 후에만 귀가지 설정으로 이동
+    // TODO: API 연동
     console.log('로그인:', email, password);
-    goToHomeAddressSetup();
+    goToMainTabs();
   };
 
   return (

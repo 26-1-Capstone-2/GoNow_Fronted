@@ -1,4 +1,5 @@
 import AddressSearchView, { SearchResult } from '@/src/components/common/AddressSearchView';
+import MiniCalendar from '@/src/components/common/MiniCalendar';
 import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
 import { Feather, FontAwesome5, FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
@@ -18,6 +19,16 @@ import {
 
 const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));
 const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
+
+const DAY_LABEL = ['일', '월', '화', '수', '목', '금', '토'];
+function formatDateLabel(dateStr: string): string {
+  const d = new Date(dateStr + 'T00:00:00');
+  return `${d.getFullYear()}년 ${String(d.getMonth() + 1).padStart(2, '0')}월 ${String(d.getDate()).padStart(2, '0')}일 ${DAY_LABEL[d.getDay()]}요일`;
+}
+function formatCardDate(dateStr: string): string {
+  const d = new Date(dateStr + 'T00:00:00');
+  return `${d.getMonth() + 1}월 ${d.getDate()}일 ${DAY_LABEL[d.getDay()]}요일`;
+}
 
 type MemberTransport = 'public' | 'car';
 interface Member {
@@ -40,6 +51,7 @@ interface GroupAlarm {
   inviteCode: string;
   isArrivalActive?: boolean;
   transport: Transport;
+  date: string;
 }
 
 interface Props {
@@ -64,16 +76,18 @@ const SAMPLE_GROUP_ALARMS: GroupAlarm[] = [
     inviteCode: 'abcdeg',
     isArrivalActive: true,
     transport: 'public' as Transport,
+    date: '2026-05-10',
   },
   {
     id: '2', ampm: '오후', hour: '6', minute: '00',
     place: '용산역', enabled: true,
     members: [
-      { id: '1', name: '가가가(본인)', isMe: true },
+      { id: '1', name: '가가가(본인)', isMe: true, transport: 'car' as MemberTransport },
     ],
     inviteCode: 'xyzabc',
     isArrivalActive: false,
-    transport: 'public' as Transport,
+    transport: 'car' as Transport,
+    date: '2026-05-15',
   },
 ];
 
@@ -84,9 +98,10 @@ const DEFAULT_ALARM: GroupAlarm = {
   inviteCode: '',
   isArrivalActive: false,
   transport: 'public' as Transport,
+  date: '',
 };
 
-type ViewType = 'list' | 'edit' | 'place' | 'addChoice' | 'join' | 'transport';
+type ViewType = 'list' | 'edit' | 'place' | 'addChoice' | 'join' | 'transport' | 'date';
 
 export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
@@ -98,6 +113,7 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
   const [tempPlace, setTempPlace] = useState<SearchResult | null>(null);
   const [inviteCode, setInviteCode] = useState('');
   const [inviteError, setInviteError] = useState('');
+  const [joinTransport, setJoinTransport] = useState<Transport>('public');
   const isEditMode = !!editAlarm.id;
 
   const handleSheetChange = useCallback((index: number) => {
@@ -109,9 +125,10 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
   const handleJoin = () => {
     if (inviteCode.trim().length === 0) { setInviteError('초대코드를 입력해주세요.'); return; }
     // TODO: 백엔드 API 연결
-    console.log('그룹 참여:', inviteCode);
+    console.log('그룹 참여:', inviteCode, joinTransport);
     setInviteCode('');
     setInviteError('');
+    setJoinTransport('public');
     setView('list');
   };
   const openEdit = (alarm: GroupAlarm) => { setEditAlarm(alarm); setView('edit'); };
@@ -192,21 +209,33 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
           </View>
 
           <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-            {alarms.map((alarm) => (
+            {[...alarms].sort((a, b) => {
+              if (!a.date) return 1;
+              if (!b.date) return -1;
+              return a.date.localeCompare(b.date);
+            }).map((alarm) => (
               <SwipeableAlarmCard key={alarm.id} onDelete={() => setAlarms((prev) => prev.filter((a) => a.id !== alarm.id))}>
                 <TouchableOpacity style={styles.alarmCard} onPress={() => openEdit(alarm)} activeOpacity={0.7}>
                   <View style={styles.alarmInfo}>
-                    <View style={styles.timeRow}>
-                      <Text style={styles.ampmSmall}>{alarm.ampm}</Text>
-                      <Text style={styles.alarmTime}>{alarm.hour}:{alarm.minute}</Text>
-                    </View>
+                    {alarm.date ? <Text style={styles.alarmDate}>{formatCardDate(alarm.date)}</Text> : null}
                     <Text style={styles.alarmPlace}>{alarm.place}</Text>
+                    <View style={styles.alarmMeta}>
+                      <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.hour}:{alarm.minute} 까지</Text>
+                      {alarm.transport === 'public'
+                        ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
+                        : <FontAwesome5 name="car-side" size={13} color="#F5A623" />
+                      }
+                    </View>
                   </View>
                   <View style={styles.cardRight}>
+                    <View style={styles.memberBadge}>
+                      <Feather name="users" size={11} color="#555555" />
+                      <Text style={styles.memberCount}>{alarm.members.length}명</Text>
+                    </View>
                     <TouchableOpacity
+                      style={[styles.dashboardBtn, alarm.isArrivalActive && styles.dashboardBtnActive]}
                       onPress={() => onArrivalPress?.(alarm)}
                       disabled={!alarm.isArrivalActive}
-                      style={[styles.arrivalBtn, alarm.isArrivalActive && styles.arrivalBtnActive]}
                     >
                       <FontAwesome6
                         name="person-walking"
@@ -240,6 +269,14 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
               <Feather name="check" size={20} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
+
+          <TouchableOpacity style={styles.editDatePillContainer} onPress={() => setView('date')} activeOpacity={0.7}>
+            <View style={styles.editDatePill}>
+              <Text style={editAlarm.date ? styles.editDatePillText : styles.editDatePillPlaceholder}>
+                {editAlarm.date ? formatDateLabel(editAlarm.date) : '날짜 선택'}
+              </Text>
+            </View>
+          </TouchableOpacity>
 
           <View style={styles.pickerContainer}>
             <Picker
@@ -409,6 +446,41 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
               <Text style={styles.inviteError}>{inviteError}</Text>
             )}
             <Text style={styles.joinDesc}>방장에게 받은 6자리 초대코드를 입력해주세요.</Text>
+
+            <Text style={[styles.joinLabel, { marginTop: 24 }]}>이동수단</Text>
+            <View style={styles.optionBox}>
+              <TouchableOpacity style={styles.optionRow} onPress={() => setJoinTransport('public')}>
+                <Text style={styles.optionLabel}>대중교통</Text>
+                {joinTransport === 'public' && <Feather name="check" size={18} color="#F5A623" />}
+              </TouchableOpacity>
+              <View style={styles.separator} />
+              <TouchableOpacity style={styles.optionRow} onPress={() => setJoinTransport('car')}>
+                <Text style={styles.optionLabel}>자가용</Text>
+                {joinTransport === 'car' && <Feather name="check" size={18} color="#F5A623" />}
+              </TouchableOpacity>
+            </View>
+          </BottomSheetScrollView>
+        </>
+      )}
+
+      {/* ── 날짜 선택 화면 ── */}
+      {view === 'date' && (
+        <>
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.headerBtn} onPress={() => setView('edit')}>
+              <Feather name="chevron-left" size={22} color="#1A1A1A" />
+            </TouchableOpacity>
+            <Text style={styles.title}>날짜 선택</Text>
+            <View style={{ width: 36 }} />
+          </View>
+          <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+            <MiniCalendar
+              selectedDate={editAlarm.date}
+              onSelectDate={(date) => {
+                setEditAlarm((prev) => ({ ...prev, date }));
+                setView('edit');
+              }}
+            />
           </BottomSheetScrollView>
         </>
       )}
@@ -493,21 +565,20 @@ const styles = StyleSheet.create({
   datePillText: { fontSize: 13, fontWeight: '500', color: '#FF3B30' },
   content: { paddingHorizontal: 16, paddingBottom: Platform.OS === 'ios' ? 40 : 24 },
   alarmCard: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 16, paddingHorizontal: 16,
+    flexDirection: 'row', alignItems: 'stretch', justifyContent: 'space-between',
+    paddingVertical: 14, paddingHorizontal: 16,
     backgroundColor: '#F5F5F5', borderRadius: 12, marginBottom: 8,
   },
-  alarmInfo: { flex: 1 },
-  timeRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
-  ampmSmall: { fontSize: 14, color: '#1A1A1A', marginBottom: 8 },
-  alarmTime: { fontSize: 48, fontWeight: '500', color: '#1A1A1A', letterSpacing: -1, lineHeight: 54 },
-  alarmPlace: { fontSize: 12, color: '#888888', marginTop: 2 },
-  cardRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  arrivalBtn: {
-    width: 30, height: 30, borderRadius: 15,
-    backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center',
-  },
-  arrivalBtnActive: { backgroundColor: '#92DEFE' },
+  alarmInfo: { flex: 1, marginRight: 8, justifyContent: 'center' },
+  alarmDate: { fontSize: 11, fontWeight: '500', color: '#FF3B30', marginBottom: 3 },
+  alarmPlace: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 5 },
+  alarmMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  alarmDeadline: { fontSize: 13, fontWeight: '500', color: '#555555' },
+  cardRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  memberBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#E8E8E8', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 10 },
+  memberCount: { fontSize: 11, color: '#555555', fontWeight: '500' },
+  dashboardBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center' },
+  dashboardBtnActive: { backgroundColor: '#92DEFE' },
   pickerContainer: {
     flexDirection: 'row',
     backgroundColor: '#F5F5F5', borderRadius: 14,
@@ -549,4 +620,8 @@ const styles = StyleSheet.create({
   inviteInput: { fontSize: 16, color: '#1A1A1A', letterSpacing: 2 },
   inviteError: { fontSize: 12, color: '#FF3B30', marginTop: 6 },
   joinDesc: { fontSize: 13, color: '#AAAAAA', marginTop: 12, textAlign: 'center' },
+  editDatePillContainer: { alignItems: 'center', marginBottom: 12 },
+  editDatePill: { backgroundColor: '#E8E8E8', borderRadius: 20, paddingHorizontal: 20, paddingVertical: 7 },
+  editDatePillText: { fontSize: 13, fontWeight: '600', color: '#FF3B30' },
+  editDatePillPlaceholder: { fontSize: 13, fontWeight: '500', color: '#AAAAAA' },
 });

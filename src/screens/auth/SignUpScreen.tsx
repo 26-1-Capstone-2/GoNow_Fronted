@@ -14,28 +14,16 @@ import {
 import { useAppNavigation } from '@/src/navigation';
 
 export default function SignUpScreen() {
-  const { goBack } = useAppNavigation();
+  const { goBack, goToHomeAddressSetup } = useAppNavigation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
-  const [name, setName] = useState('');
   const [nickname, setNickname] = useState('');
-  const [phone, setPhone] = useState('');
 
-  const formatPhone = (text: string) => {
-    const cleaned = text.replace(/\D/g, '');
-    if (cleaned.length <= 3) return cleaned;
-    if (cleaned.length <= 7) return `${cleaned.slice(0, 3)}-${cleaned.slice(3)}`;
-    return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 7)}-${cleaned.slice(7, 11)}`;
-  };
-
-  const handlePhoneChange = (text: string) => {
-    setPhone(formatPhone(text));
-  };
-
-  const handleSignUp = () => {
-    // TODO: API 연동 후 성공 시 로그인으로 이동 등
-    console.log({ email, password, passwordConfirm, name, nickname, phone });
+  const handleNext = () => {
+    // TODO: API 연동
+    console.log({ email, password, nickname });
+    goToHomeAddressSetup();
   };
 
   return (
@@ -98,15 +86,6 @@ export default function SignUpScreen() {
               <Text style={styles.errorText}>비밀번호가 일치하지 않습니다.</Text>
             )}
 
-            <Text style={styles.label}>이름</Text>
-            <TextInput
-              style={styles.input}
-              placeholder=""
-              placeholderTextColor="#BBBBBB"
-              value={name}
-              onChangeText={setName}
-            />
-
             <Text style={styles.label}>닉네임</Text>
             <TextInput
               style={styles.input}
@@ -116,22 +95,11 @@ export default function SignUpScreen() {
               onChangeText={(t) => t.length <= 12 && setNickname(t)}
               maxLength={12}
             />
-
-            <Text style={styles.label}>전화번호</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="'-' 없이 입력하세요."
-              placeholderTextColor="#BBBBBB"
-              value={phone}
-              onChangeText={handlePhoneChange}
-              keyboardType="numeric"
-              maxLength={13}
-            />
           </View>
 
-          {/* 가입하기 버튼 */}
-          <TouchableOpacity style={styles.signUpButton} onPress={handleSignUp}>
-            <Text style={styles.signUpButtonText}>가입하기</Text>
+          {/* 다음 버튼 */}
+          <TouchableOpacity style={styles.signUpButton} onPress={handleNext}>
+            <Text style={styles.signUpButtonText}>다음</Text>
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
