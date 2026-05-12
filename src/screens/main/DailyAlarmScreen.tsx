@@ -1,5 +1,5 @@
 import { useCalendarStore } from '@/src/store/calendarStore';
-import { Feather, FontAwesome6 } from '@expo/vector-icons';
+import { Feather, FontAwesome5, FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
@@ -16,16 +16,17 @@ const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
 
 const SAMPLE_ALARMS = {
   personal: [
-    { id: '1', ampm: '오후', time: '3:00', place: '중앙대학교 후문 입구, 4/7', enabled: true },
+    { id: '1', ampm: '오후', time: '3:00', place: '중앙대학교 후문 입구, 4/7', enabled: true, transport: 'public' as 'public' | 'car' },
   ],
   group: [
     {
       id: '2', ampm: '오후', time: '7:00', place: '홍대역 2번 출구, 4/7', enabled: true,
       members: [{ active: true }, { active: false }],
+      transport: 'public' as 'public' | 'car',
     },
   ],
   home: [
-    { id: '3', ampm: '', time: '막차', place: '우리집', enabled: true },
+    { id: '3', ampm: '', time: '막차', place: '우리집', enabled: true, transport: 'public' as 'public' | 'car' },
   ],
 };
 
@@ -89,7 +90,13 @@ export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHome
             <View key={alarm.id} style={styles.alarmCard}>
               <View style={styles.alarmInfo}>
                 <Text style={styles.alarmPlace}>{alarm.place}</Text>
-                <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.time} 까지</Text>
+                <View style={styles.alarmMeta}>
+                  <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.time} 까지</Text>
+                  {alarm.transport === 'public'
+                    ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
+                    : <FontAwesome5 name="car-side" size={13} color="#F5A623" />
+                  }
+                </View>
               </View>
               <View style={styles.cardRight}>
                 <Switch
@@ -115,7 +122,13 @@ export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHome
             <View key={alarm.id} style={styles.alarmCard}>
               <View style={styles.alarmInfo}>
                 <Text style={styles.alarmPlace}>{alarm.place}</Text>
-                <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.time} 까지</Text>
+                <View style={styles.alarmMeta}>
+                  <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.time} 까지</Text>
+                  {alarm.transport === 'public'
+                    ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
+                    : <FontAwesome5 name="car-side" size={13} color="#F5A623" />
+                  }
+                </View>
               </View>
               <View style={styles.cardRight}>
                 <View style={styles.memberBadge}>
@@ -152,9 +165,15 @@ export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHome
             <View key={alarm.id} style={styles.alarmCard}>
               <View style={styles.alarmInfo}>
                 <Text style={styles.alarmPlace}>{alarm.place}</Text>
-                <Text style={styles.alarmDeadline}>
-                  {alarm.time === '막차' ? '막차 기준' : `${alarm.ampm ?? ''} ${alarm.time} 까지`}
-                </Text>
+                <View style={styles.alarmMeta}>
+                  <Text style={styles.alarmDeadline}>
+                    {alarm.time === '막차' ? '막차 기준' : `${alarm.ampm ?? ''} ${alarm.time} 까지`}
+                  </Text>
+                  {alarm.time === '막차' || alarm.transport === 'public'
+                    ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
+                    : <FontAwesome5 name="car-side" size={13} color="#F5A623" />
+                  }
+                </View>
               </View>
               <View style={styles.cardRight}>
                 <Switch

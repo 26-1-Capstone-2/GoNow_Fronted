@@ -167,7 +167,7 @@ export default function HomeAlarmSheet({ onClose }: Props) {
                         ? <Text style={styles.alarmDeadline}>막차 기준</Text>
                         : <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.hour}:{alarm.minute} 까지</Text>
                       }
-                      {alarm.transport === 'public'
+                      {alarm.mode === 'lastTrain' || alarm.transport === 'public'
                         ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
                         : <FontAwesome5 name="car-side" size={13} color="#F5A623" />
                       }
