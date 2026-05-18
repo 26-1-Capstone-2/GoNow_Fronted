@@ -48,11 +48,6 @@ const DEFAULT_ALARM: Alarm = {
   place: '', repeat: ['안함'], enabled: true, transport: 'public',
 };
 
-// 최근 사용한 장소 (실제는 API에서 받아올 예정)
-const RECENT_PLACES: SearchResult[] = [
-  { id: '1', name: '중앙대학교 후문 입구', address: '서울 동작구 흑석로', isCurrent: false },
-  { id: '2', name: '홍대역 2번 출구', address: '서울 마포구 양화로', isCurrent: false },
-];
 
 type ViewType = 'list' | 'edit' | 'repeat' | 'place' | 'transport';
 
@@ -351,7 +346,7 @@ export default function PersonalAlarmSheet({ onClose }: Props) {
             </TouchableOpacity>
           </View>
           <AddressSearchView
-            initialResults={RECENT_PLACES}
+            initialResults={[]}
             selectedId={tempPlace?.id}
             onSelect={(item) => setTempPlace(item)}
           />

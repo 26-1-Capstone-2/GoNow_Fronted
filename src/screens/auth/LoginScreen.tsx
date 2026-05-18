@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
@@ -10,17 +12,31 @@ import {
   View,
 } from 'react-native';
 
+import { createAuthApi } from '@/src/api/auth';
 import { useAppNavigation } from '@/src/navigation';
+import { useAuthStore } from '@/src/store/authStore';
+
+const authApi = createAuthApi();
 
 export default function LoginScreen() {
   const { goToMainTabs, goToSignUp } = useAppNavigation();
+  const setToken = useAuthStore((s) => s.setToken);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = () => {
-    // TODO: API 연동
-    console.log('로그인:', email, password);
-    goToMainTabs();
+  const handleLogin = async () => {
+    if (!email || !password) return;
+    setLoading(true);
+    try {
+      const res = await authApi.login({ email, password });
+      setToken(res.data.access_token);
+      goToMainTabs();
+    } catch (e: any) {
+      Alert.alert('로그인 실패', '이메일 또는 비밀번호를 확인해주세요.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -61,8 +77,15 @@ export default function LoginScreen() {
           />
 
           {/* 로그인 버튼 */}
-          <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
-            <Text style={styles.loginButtonText}>로그인</Text>
+          <TouchableOpacity
+            style={[styles.loginButton, loading && { backgroundColor: '#888888' }]}
+            onPress={handleLogin}
+            disabled={loading}
+          >
+            {loading
+              ? <ActivityIndicator color="#FFFFFF" />
+              : <Text style={styles.loginButtonText}>로그인</Text>
+            }
           </TouchableOpacity>
         </View>
 

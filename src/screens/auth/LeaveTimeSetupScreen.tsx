@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   SafeAreaView,
   StyleSheet,
   Text,
@@ -8,10 +10,25 @@ import {
 } from 'react-native';
 
 import { useAppNavigation } from '@/src/navigation';
+import { createAuthApi } from '@/src/api/auth';
+import { useSignUpStore } from '@/src/store/signUpStore';
+import { useAuthStore } from '@/src/store/authStore';
+
+const authApi = createAuthApi();
 
 export default function LeaveTimeSetupScreen() {
-  const { goBack, goToLogin } = useAppNavigation();
+  const { goBack, goToMainTabs } = useAppNavigation();
+  const email = useSignUpStore((s) => s.email);
+  const password = useSignUpStore((s) => s.password);
+  const nickname = useSignUpStore((s) => s.nickname);
+  const home_name = useSignUpStore((s) => s.home_name);
+  const home_address = useSignUpStore((s) => s.home_address);
+  const home_lat = useSignUpStore((s) => s.home_lat);
+  const home_lng = useSignUpStore((s) => s.home_lng);
+  const resetSignUp = useSignUpStore((s) => s.reset);
+  const setToken = useAuthStore((s) => s.setToken);
   const [minutes, setMinutes] = useState(10);
+  const [loading, setLoading] = useState(false);
 
   const handleMinus = () => {
     if (minutes > 5) setMinutes((prev) => prev - 5);
@@ -21,10 +38,21 @@ export default function LeaveTimeSetupScreen() {
     if (minutes < 60) setMinutes((prev) => prev + 5);
   };
 
-  const handleComplete = () => {
-    // TODO: 여유시간 저장 API 연동
-    console.log('여유시간 설정:', minutes);
-    goToLogin();
+  const handleComplete = async () => {
+    setLoading(true);
+    try {
+      await authApi.signUp({ email, password, nickname, home_name, home_address, home_lat, home_lng, preparation_time: minutes });
+
+      const loginRes = await authApi.login({ email, password });
+      setToken(loginRes.data.access_token);
+
+      resetSignUp();
+      goToMainTabs();
+    } catch (e: any) {
+      Alert.alert('회원가입 실패', e?.message ?? '다시 시도해주세요.');
+    } finally {
+      setLoading(false);
+    }
   };
   return (
     <SafeAreaView style={styles.container}>
@@ -93,8 +121,15 @@ export default function LeaveTimeSetupScreen() {
 
       {/* 완료 버튼 */}
       <View style={styles.footer}>
-        <TouchableOpacity style={styles.completeButton} onPress={handleComplete}>
-          <Text style={styles.completeButtonText}>완료</Text>
+        <TouchableOpacity
+          style={[styles.completeButton, loading && styles.completeButtonDisabled]}
+          onPress={handleComplete}
+          disabled={loading}
+        >
+          {loading
+            ? <ActivityIndicator color="#FFFFFF" />
+            : <Text style={styles.completeButtonText}>완료</Text>
+          }
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -233,6 +268,11 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     paddingVertical: 14,
     paddingHorizontal: 48,
+    minWidth: 140,
+    alignItems: 'center',
+  },
+  completeButtonDisabled: {
+    backgroundColor: '#AAAAAA',
   },
   completeButtonText: {
     fontSize: 16,

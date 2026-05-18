@@ -1,7 +1,10 @@
+import { createMembersApi, PriorityType, TransitType } from '@/src/api/members';
 import { Feather } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   Platform,
   StyleSheet,
   Switch,
@@ -10,44 +13,50 @@ import {
   View,
 } from 'react-native';
 
+const membersApi = createMembersApi();
+
 interface Props {
   onClose: () => void;
-  onSave: (settings: AlarmSettings) => void;
-}
-
-type RouteOption = 'fastest' | 'minTransfer';
-type TransportOption = 'subway' | 'bus' | 'any';
-
-interface AlarmSettings {
-  routeOption: RouteOption;
-  transportOption: TransportOption;
-  minWalk: boolean;
-  leaveTime: number;
+  onSave: () => void;
 }
 
 export default function AlarmSettingsSheet({ onClose, onSave }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['85%'], []);
 
-  const [settings, setSettings] = useState<AlarmSettings>({
-    routeOption: 'fastest',
-    transportOption: 'any',
-    minWalk: false,
-    leaveTime: 10,
-  });
+  const [priorityType, setPriorityType] = useState<PriorityType>('MIN_TIME');
+  const [transitType, setTransitType] = useState<TransitType>('ALL');
+  const [leaveTime, setLeaveTime] = useState(10);
+  const [fetching, setFetching] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-  const handleMinus = () => {
-    setSettings((prev) => ({ ...prev, leaveTime: Math.max(5, prev.leaveTime - 5) }));
-  };
+  useEffect(() => {
+    membersApi.getMyProfile()
+      .then((res) => {
+        setPriorityType(res.data.priority_type);
+        setTransitType(res.data.transit_type);
+        setLeaveTime(res.data.preparation_time);
+      })
+      .catch(() => {})
+      .finally(() => setFetching(false));
+  }, []);
 
-  const handlePlus = () => {
-    setSettings((prev) => ({ ...prev, leaveTime: Math.min(60, prev.leaveTime + 5) }));
-  };
-
-  const handleSave = useCallback(() => {
-    onSave(settings);
-    onClose();
-  }, [settings]);
+  const handleSave = useCallback(async () => {
+    setSaving(true);
+    try {
+      await membersApi.updateSetting({
+        preparation_time: leaveTime,
+        priority_type: priorityType,
+        transit_type: transitType,
+      });
+      onSave();
+      onClose();
+    } catch {
+      Alert.alert('저장 실패', '다시 시도해주세요.');
+    } finally {
+      setSaving(false);
+    }
+  }, [leaveTime, priorityType, transitType, onSave, onClose]);
 
   const handleSheetChange = useCallback((index: number) => {
     if (index === -1) onClose();
@@ -72,110 +81,94 @@ export default function AlarmSettingsSheet({ onClose, onSave }: Props) {
             <Feather name="x" size={22} color="#1A1A1A" />
           </TouchableOpacity>
           <Text style={styles.title}>개인설정</Text>
-          <TouchableOpacity onPress={handleSave} style={styles.saveBtn}>
-            <Feather name="check" size={20} color="#FFFFFF" />
+          <TouchableOpacity onPress={handleSave} style={styles.saveBtn} disabled={saving || fetching}>
+            {saving
+              ? <ActivityIndicator size="small" color="#FFFFFF" />
+              : <Feather name="check" size={20} color="#FFFFFF" />
+            }
           </TouchableOpacity>
         </View>
 
-        {/* 여유시간 */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>여유시간</Text>
-          <View style={styles.sectionBox}>
-            <View style={styles.row}>
-              <Text style={styles.rowLabel}>준비 및 여유시간</Text>
-              <View style={styles.timeControl}>
-                <TouchableOpacity
-                  onPress={handleMinus}
-                  style={[styles.timeBtn, settings.leaveTime <= 5 && styles.timeBtnDisabled]}
-                  disabled={settings.leaveTime <= 5}
-                >
-                  <Feather name="minus" size={16} color={settings.leaveTime <= 5 ? '#CCCCCC' : '#888888'} />
-                </TouchableOpacity>
-                <Text style={styles.timeValue}>{settings.leaveTime}분</Text>
-                <TouchableOpacity
-                  onPress={handlePlus}
-                  style={[styles.timeBtn, settings.leaveTime >= 60 && styles.timeBtnDisabled]}
-                  disabled={settings.leaveTime >= 60}
-                >
-                  <Feather name="plus" size={16} color={settings.leaveTime >= 60 ? '#CCCCCC' : '#888888'} />
-                </TouchableOpacity>
+        {fetching ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator color="#888888" />
+          </View>
+        ) : (
+          <>
+            {/* 여유시간 */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>여유시간</Text>
+              <View style={styles.sectionBox}>
+                <View style={styles.row}>
+                  <Text style={styles.rowLabel}>준비 및 여유시간</Text>
+                  <View style={styles.timeControl}>
+                    <TouchableOpacity
+                      onPress={() => setLeaveTime((p) => Math.max(5, p - 5))}
+                      style={[styles.timeBtn, leaveTime <= 5 && styles.timeBtnDisabled]}
+                      disabled={leaveTime <= 5}
+                    >
+                      <Feather name="minus" size={16} color={leaveTime <= 5 ? '#CCCCCC' : '#888888'} />
+                    </TouchableOpacity>
+                    <Text style={styles.timeValue}>{leaveTime}분</Text>
+                    <TouchableOpacity
+                      onPress={() => setLeaveTime((p) => Math.min(60, p + 5))}
+                      style={[styles.timeBtn, leaveTime >= 60 && styles.timeBtnDisabled]}
+                      disabled={leaveTime >= 60}
+                    >
+                      <Feather name="plus" size={16} color={leaveTime >= 60 ? '#CCCCCC' : '#888888'} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
               </View>
             </View>
-          </View>
-        </View>
 
-        {/* 경로 옵션 */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>경로 옵션</Text>
-          <View style={styles.sectionBox}>
-            <View style={styles.row}>
-              <Text style={styles.rowLabel}>최단시간</Text>
-              <Switch
-                value={settings.routeOption === 'fastest'}
-                onValueChange={() => setSettings((prev) => ({ ...prev, routeOption: 'fastest' }))}
-                trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-                thumbColor="#FFFFFF"
-              />
+            {/* 경로 옵션 */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>경로 옵션</Text>
+              <View style={styles.sectionBox}>
+                {(['MIN_TIME', 'MIN_TRANSFER', 'MIN_WALK'] as PriorityType[]).map((type, i, arr) => (
+                  <View key={type}>
+                    <View style={styles.row}>
+                      <Text style={styles.rowLabel}>
+                        {type === 'MIN_TIME' ? '최단시간' : type === 'MIN_TRANSFER' ? '최소환승' : '최소도보'}
+                      </Text>
+                      <Switch
+                        value={priorityType === type}
+                        onValueChange={() => setPriorityType(type)}
+                        trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                        thumbColor="#FFFFFF"
+                      />
+                    </View>
+                    {i < arr.length - 1 && <View style={styles.separator} />}
+                  </View>
+                ))}
+              </View>
             </View>
-            <View style={styles.separator} />
-            <View style={styles.row}>
-              <Text style={styles.rowLabel}>최소환승</Text>
-              <Switch
-                value={settings.routeOption === 'minTransfer'}
-                onValueChange={() => setSettings((prev) => ({ ...prev, routeOption: 'minTransfer' }))}
-                trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-                thumbColor="#FFFFFF"
-              />
-            </View>
-            <View style={styles.separator} />
-            <View style={styles.row}>
-              <Text style={styles.rowLabel}>최소 도보</Text>
-              <Switch
-                value={settings.minWalk}
-                onValueChange={(v) => setSettings((prev) => ({ ...prev, minWalk: v }))}
-                trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-                thumbColor="#FFFFFF"
-              />
-            </View>
-          </View>
-        </View>
 
-        {/* 선호 대중교통 */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>선호 대중교통</Text>
-          <View style={styles.sectionBox}>
-            <View style={styles.row}>
-              <Text style={styles.rowLabel}>지하철</Text>
-              <Switch
-                value={settings.transportOption === 'subway'}
-                onValueChange={() => setSettings((prev) => ({ ...prev, transportOption: 'subway' }))}
-                trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-                thumbColor="#FFFFFF"
-              />
+            {/* 선호 대중교통 */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>선호 대중교통</Text>
+              <View style={styles.sectionBox}>
+                {(['SUBWAY', 'BUS', 'ALL'] as TransitType[]).map((type, i, arr) => (
+                  <View key={type}>
+                    <View style={styles.row}>
+                      <Text style={styles.rowLabel}>
+                        {type === 'SUBWAY' ? '지하철' : type === 'BUS' ? '버스' : '상관없음'}
+                      </Text>
+                      <Switch
+                        value={transitType === type}
+                        onValueChange={() => setTransitType(type)}
+                        trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                        thumbColor="#FFFFFF"
+                      />
+                    </View>
+                    {i < arr.length - 1 && <View style={styles.separator} />}
+                  </View>
+                ))}
+              </View>
             </View>
-            <View style={styles.separator} />
-            <View style={styles.row}>
-              <Text style={styles.rowLabel}>버스</Text>
-              <Switch
-                value={settings.transportOption === 'bus'}
-                onValueChange={() => setSettings((prev) => ({ ...prev, transportOption: 'bus' }))}
-                trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-                thumbColor="#FFFFFF"
-              />
-            </View>
-            <View style={styles.separator} />
-            <View style={styles.row}>
-              <Text style={styles.rowLabel}>상관없음</Text>
-              <Switch
-                value={settings.transportOption === 'any'}
-                onValueChange={() => setSettings((prev) => ({ ...prev, transportOption: 'any' }))}
-                trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-                thumbColor="#FFFFFF"
-              />
-            </View>
-          </View>
-        </View>
-
+          </>
+        )}
       </BottomSheetScrollView>
     </BottomSheet>
   );
@@ -185,6 +178,7 @@ const styles = StyleSheet.create({
   indicator: { backgroundColor: '#DDDDDD', width: 40 },
   background: { backgroundColor: '#FFFFFF', borderRadius: 20 },
   content: { paddingBottom: Platform.OS === 'ios' ? 40 : 24 },
+  loadingContainer: { flex: 1, alignItems: 'center', paddingTop: 60 },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 20, paddingVertical: 16,

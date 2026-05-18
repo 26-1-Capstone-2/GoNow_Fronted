@@ -357,7 +357,7 @@ export default function MainCalendarScreen() {
       {showSettings && (
         <AlarmSettingsSheet
           onClose={() => setShowSettings(false)}
-          onSave={(s) => console.log(s)}
+          onSave={() => {}}
         />
       )}
       {showPersonalSheet && (

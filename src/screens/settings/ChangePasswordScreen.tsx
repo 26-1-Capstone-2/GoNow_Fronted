@@ -1,7 +1,10 @@
+import { createMembersApi } from '@/src/api/members';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
+    ActivityIndicator,
+    Alert,
     Platform,
     SafeAreaView,
     StyleSheet,
@@ -11,19 +14,29 @@ import {
     View,
 } from 'react-native';
 
+const membersApi = createMembersApi();
+
 export default function ChangePasswordScreen() {
   const router = useRouter();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const isValid = currentPassword.trim() && newPassword.trim() && confirmPassword.trim();
   const isMismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!isValid || isMismatch) return;
-    // TODO: 비밀번호 변경 API 연결
-    router.back();
+    setLoading(true);
+    try {
+      await membersApi.updatePassword(currentPassword, newPassword);
+      router.back();
+    } catch (e: any) {
+      Alert.alert('변경 실패', '현재 비밀번호를 확인해주세요.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -78,12 +91,15 @@ export default function ChangePasswordScreen() {
       {/* 저장 버튼 */}
       <View style={styles.footer}>
         <TouchableOpacity
-          style={[styles.saveButton, (!isValid || isMismatch) && styles.saveButtonDisabled]}
+          style={[styles.saveButton, (!isValid || isMismatch || loading) && styles.saveButtonDisabled]}
           onPress={handleSave}
-          disabled={!isValid || isMismatch}
+          disabled={!isValid || isMismatch || loading}
           activeOpacity={0.7}
         >
-          <Text style={styles.saveButtonText}>저장</Text>
+          {loading
+            ? <ActivityIndicator color="#FFFFFF" />
+            : <Text style={styles.saveButtonText}>저장</Text>
+          }
         </TouchableOpacity>
       </View>
     </SafeAreaView>

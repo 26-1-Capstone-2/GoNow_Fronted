@@ -1,16 +1,13 @@
 import AddressSearchView, { SearchResult } from '@/src/components/common/AddressSearchView';
+import { createMembersApi } from '@/src/api/members';
+import { usePlaces } from '@/src/hooks/usePlaces';
+import { useSignUpStore } from '@/src/store/signUpStore';
 import { Feather } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
-import { SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useState } from 'react';
+import { ActivityIndicator, Alert, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-const CURRENT_HOME: SearchResult = {
-  id: 'current',
-  name: '우리집',
-  address: '서울 어쩌고 저쩌고',
-  isCurrent: true,
-  isHome: true,
-};
+const membersApi = createMembersApi();
 
 interface Props {
   isOnboarding?: boolean;
@@ -18,20 +15,87 @@ interface Props {
 
 export default function HomeAddressSetupScreen({ isOnboarding = false }: Props) {
   const router = useRouter();
-  const [selected, setSelected] = useState<SearchResult | null>(CURRENT_HOME);
+  const setHomeInfo = useSignUpStore((s) => s.setHomeInfo);
 
-  const handleComplete = () => {
+  const { places, searchKey, loadPlaces, savePlace, deletePlace, resetSearch } = usePlaces('HOME');
+
+  const [currentHome, setCurrentHome] = useState<SearchResult | null>(null);
+  const [selected, setSelected] = useState<SearchResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const loadAll = useCallback(async () => {
+    const [profile] = await Promise.all([
+      membersApi.getMyProfile(),
+      loadPlaces(),
+    ]);
+    const home: SearchResult = {
+      id: 'current',
+      name: profile.data.home_name,
+      address: profile.data.home_address,
+      lat: profile.data.home_lat,
+      lng: profile.data.home_lng,
+      isCurrent: true,
+      isHome: true,
+    };
+    setCurrentHome(home);
+    setSelected(home);
+  }, [loadPlaces]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (isOnboarding) return;
+      setSaved(false);
+      loadAll().catch(() => {});
+    }, [isOnboarding, loadAll]),
+  );
+
+  // 현재 귀가지 + 저장된 HOME 장소 (중복 제거)
+  const combinedPlaces = currentHome
+    ? [currentHome, ...places.filter((p) => p.name !== currentHome.name)]
+    : places;
+
+  const handleComplete = async () => {
     if (!selected) return;
+
     if (isOnboarding) {
+      if (!selected.lat || !selected.lng) {
+        Alert.alert('주소 오류', '검색을 통해 주소를 선택해주세요.');
+        return;
+      }
+      setHomeInfo({
+        home_name: selected.name,
+        home_address: selected.address,
+        home_lat: selected.lat,
+        home_lng: selected.lng,
+      });
       router.push('/(auth)/leave-time-setup');
     } else {
-      if (router.canGoBack()) {
-        router.back();
-      } else {
-        router.replace('/(tabs)');
+      if (!selected.lat || !selected.lng) {
+        Alert.alert('주소 오류', '검색을 통해 주소를 선택해주세요.');
+        return;
+      }
+      setLoading(true);
+      try {
+        await membersApi.updateHome({
+          name: selected.name,
+          address: selected.address,
+          lat: String(selected.lat),
+          lng: String(selected.lng),
+        });
+        await savePlace(selected);
+        await loadAll();
+        resetSearch();
+        setSaved(true);
+      } catch (e: any) {
+        Alert.alert('저장 실패', e?.message ?? '다시 시도해주세요.');
+      } finally {
+        setLoading(false);
       }
     }
   };
+
+  const isDisabled = !selected || loading;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -48,20 +112,27 @@ export default function HomeAddressSetupScreen({ isOnboarding = false }: Props) 
 
       {/* 주소 검색 공통 컴포넌트 */}
       <AddressSearchView
-        initialResults={[CURRENT_HOME]}
+        key={searchKey}
+        initialResults={combinedPlaces}
         selectedId={selected?.id}
-        onSelect={(item) => setSelected(item)}
+        onSelect={(item) => { setSelected(item); setSaved(false); }}
+        onDeleteServerPlace={deletePlace}
         selectedIsHome
       />
 
       {/* 완료 버튼 */}
       <View style={styles.footer}>
         <TouchableOpacity
-          style={[styles.completeButton, !selected && styles.completeButtonDisabled]}
+          style={[styles.completeButton, isDisabled && styles.completeButtonDisabled]}
           onPress={handleComplete}
-          disabled={!selected}
+          disabled={isDisabled}
         >
-          <Text style={styles.completeButtonText}>{isOnboarding ? '다음' : '완료'}</Text>
+          {loading
+            ? <ActivityIndicator color="#FFFFFF" />
+            : saved
+              ? <Feather name="check" size={20} color="#FFFFFF" />
+              : <Text style={styles.completeButtonText}>{isOnboarding ? '다음' : '완료'}</Text>
+          }
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -85,6 +156,7 @@ const styles = StyleSheet.create({
   completeButton: {
     backgroundColor: '#4CAF50', borderRadius: 24,
     paddingVertical: 14, paddingHorizontal: 48,
+    minWidth: 140, alignItems: 'center',
   },
   completeButtonDisabled: { backgroundColor: '#CCCCCC' },
   completeButtonText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
