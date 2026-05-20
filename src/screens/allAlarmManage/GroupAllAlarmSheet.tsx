@@ -2,13 +2,16 @@ import AddressSearchView, { SearchResult } from '@/src/components/common/Address
 import MiniCalendar from '@/src/components/common/MiniCalendar';
 import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
 import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
+import { createAppointmentsApi } from '@/src/api/appointments';
 import { targetTimeToAmpmHourMinute } from '@/src/api/journeys';
+import { createMembersApi } from '@/src/api/members';
+import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, FontAwesome5, FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Clipboard,
+  Alert,
   Platform,
   Share,
   StyleSheet,
@@ -20,6 +23,8 @@ import {
 } from 'react-native';
 
 const alarmsApi = createAlarmsApi();
+const appointmentsApi = createAppointmentsApi();
+const membersApi = createMembersApi();
 
 const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));
 const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
@@ -39,6 +44,7 @@ interface Member {
   id: string;
   name: string;
   isMe: boolean;
+  isHost?: boolean;
   transport?: MemberTransport;
 }
 
@@ -51,12 +57,23 @@ interface GroupAlarm {
   hour: string;
   minute: string;
   place: string;
+  place_address?: string;
+  place_lat?: number;
+  place_lng?: number;
   enabled: boolean;
   members: Member[];
   inviteCode: string;
   isArrivalActive?: boolean;
   transport: Transport;
   date: string;
+  isCurrentUserHost?: boolean;
+}
+
+function toTargetTime(date: string, ampm: string, hour: string, minute: string): string {
+  let h = parseInt(hour, 10);
+  if (ampm === '오후' && h !== 12) h += 12;
+  if (ampm === '오전' && h === 12) h = 0;
+  return `${date}T${String(h).padStart(2, '0')}:${minute}:00`;
 }
 
 function fromAlarmItem(item: AlarmItem): GroupAlarm {
@@ -101,13 +118,34 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['85%'], []);
 
+  const { bumpAlarmVersion } = useCalendarStore();
   const [view, setView] = useState<ViewType>('list');
   const [alarms, setAlarms] = useState<GroupAlarm[]>([]);
 
   const loadAlarms = useCallback(async () => {
     try {
-      const res = await alarmsApi.getAlarmsByType('GROUP');
-      setAlarms((res.data ?? []).map(fromAlarmItem));
+      const [alarmsRes, profileRes] = await Promise.all([
+        alarmsApi.getAlarmsByType('GROUP'),
+        membersApi.getMyProfile(),
+      ]);
+      const items = alarmsRes.data ?? [];
+      const myMemberId = profileRes.data?.member_id;
+      const resolved = await Promise.all(
+        items.map(async (item) => {
+          const base = fromAlarmItem(item);
+          if (!item.appointment_id || myMemberId == null) return { ...base, isCurrentUserHost: true };
+          try {
+            const detail = await appointmentsApi.getAppointment(item.appointment_id);
+            const isHost = detail.success && detail.data
+              ? detail.data.participants.some((p) => p.member_id === myMemberId && p.is_host)
+              : true;
+            return { ...base, isCurrentUserHost: isHost };
+          } catch {
+            return { ...base, isCurrentUserHost: true };
+          }
+        }),
+      );
+      setAlarms(resolved);
     } catch {}
   }, []);
 
@@ -125,58 +163,220 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
 
   const openAdd = () => { setView('addChoice'); };
   const openNewGroup = () => { setEditAlarm(DEFAULT_ALARM); setView('edit'); };
-  const handleJoin = () => {
+  const handleJoin = async () => {
     if (inviteCode.trim().length === 0) { setInviteError('초대코드를 입력해주세요.'); return; }
-    // TODO: 백엔드 API 연결
-    console.log('그룹 참여:', inviteCode, joinTransport);
-    setInviteCode('');
-    setInviteError('');
-    setJoinTransport('public');
-    setView('list');
+    try {
+      const res = await appointmentsApi.joinAppointment(
+        inviteCode.trim(),
+        joinTransport === 'public' ? 'TRANSIT' : 'DRIVING',
+      );
+      if (res.success) {
+        setInviteCode('');
+        setInviteError('');
+        setJoinTransport('public');
+        await loadAlarms();
+        bumpAlarmVersion();
+        setView('list');
+      } else {
+        setInviteError(res.message ?? '참여에 실패했습니다.');
+      }
+    } catch {
+      setInviteError('네트워크 오류가 발생했습니다.');
+    }
   };
-  const openEdit = (alarm: GroupAlarm) => { setEditAlarm(alarm); setView('edit'); };
+  const openEdit = async (alarm: GroupAlarm) => {
+    setEditAlarm(alarm);
+    setView('edit');
+    if (!alarm.appointmentId) return;
+    try {
+      const [detailRes, profileRes] = await Promise.all([
+        appointmentsApi.getAppointment(alarm.appointmentId),
+        membersApi.getMyProfile(),
+      ]);
+      if (detailRes.success && detailRes.data) {
+        const d = detailRes.data;
+        const myMemberId = profileRes.data?.member_id;
+        const isCurrentUserHost = d.participants.some(
+          (p) => p.member_id === myMemberId && p.is_host
+        );
+        const { ampm, hour, minute } = targetTimeToAmpmHourMinute(d.target_time);
+        setEditAlarm({
+          ...alarm,
+          ampm, hour, minute,
+          place: d.dest_name,
+          place_address: d.dest_address,
+          place_lat: d.dest_lat,
+          place_lng: d.dest_lng,
+          inviteCode: d.invite_code,
+          date: d.plan_date,
+          isCurrentUserHost,
+          members: d.participants.map((p) => ({
+            id: String(p.member_id),
+            name: p.nickname,
+            isMe: p.member_id === myMemberId,
+            isHost: p.is_host,
+            transport: p.transport_type === 'TRANSIT' ? 'public' : 'car',
+          })),
+        });
+      }
+    } catch {}
+  };
   const openPlace = () => {
     setTempPlace(null);
     setView('place');
   };
   const handlePlaceConfirm = () => {
-    if (tempPlace) setEditAlarm((prev) => ({ ...prev, place: tempPlace.name }));
+    if (tempPlace) {
+      setEditAlarm((prev) => ({
+        ...prev,
+        place: tempPlace.name,
+        place_address: tempPlace.address,
+        place_lat: tempPlace.lat,
+        place_lng: tempPlace.lng,
+      }));
+    }
     setView('edit');
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (isEditMode) {
-      setAlarms((prev) => prev.map((a) => a.id === editAlarm.id ? editAlarm : a));
-    } else {
-      setAlarms((prev) => [...prev, {
-        ...editAlarm,
-        id: String(Date.now()),
-        inviteCode: Math.random().toString(36).slice(2, 8),
-      }]);
+      if (!editAlarm.appointmentId) { Alert.alert('수정 실패', '약속 정보를 찾을 수 없습니다.'); return; }
+      try {
+        const transportType = editAlarm.transport === 'public' ? 'TRANSIT' : 'DRIVING';
+        let res: { success: boolean; message: string; data: null };
+        if (editAlarm.isCurrentUserHost === false) {
+          res = await appointmentsApi.updateParticipantTransport(editAlarm.appointmentId, transportType);
+        } else {
+          if (!editAlarm.date) { Alert.alert('날짜를 선택해주세요.'); return; }
+          res = await appointmentsApi.updateAppointment(editAlarm.appointmentId, {
+            plan_date: editAlarm.date,
+            target_time: toTargetTime(editAlarm.date, editAlarm.ampm, editAlarm.hour, editAlarm.minute),
+            dest_name: editAlarm.place,
+            dest_address: editAlarm.place_address ?? '',
+            dest_lat: editAlarm.place_lat ?? 0,
+            dest_lng: editAlarm.place_lng ?? 0,
+            transport_type: transportType,
+          });
+        }
+        if (res.success) {
+          await loadAlarms();
+          bumpAlarmVersion();
+          setView('list');
+        } else {
+          Alert.alert('수정 실패', res.message ?? '다시 시도해주세요.');
+        }
+      } catch {
+        Alert.alert('수정 실패', '네트워크 오류가 발생했습니다.');
+      }
+      return;
     }
-    setView('list');
+    if (!editAlarm.date) { Alert.alert('날짜를 선택해주세요.'); return; }
+    if (!editAlarm.place) { Alert.alert('목적지를 선택해주세요.'); return; }
+    if (!editAlarm.place_lat || !editAlarm.place_lng) { Alert.alert('목적지를 다시 선택해주세요.'); return; }
+    try {
+      const res = await appointmentsApi.createAppointment({
+        plan_date: editAlarm.date,
+        target_time: toTargetTime(editAlarm.date, editAlarm.ampm, editAlarm.hour, editAlarm.minute),
+        dest_name: editAlarm.place,
+        dest_address: editAlarm.place_address ?? '',
+        dest_lat: editAlarm.place_lat,
+        dest_lng: editAlarm.place_lng,
+        transport_type: editAlarm.transport === 'public' ? 'TRANSIT' : 'DRIVING',
+      });
+      if (res.success && res.data) {
+        await loadAlarms();
+        bumpAlarmVersion();
+        setView('list');
+      } else {
+        Alert.alert('저장 실패', res.message ?? '다시 시도해주세요.');
+      }
+    } catch {
+      Alert.alert('저장 실패', '네트워크 오류가 발생했습니다.');
+    }
   };
 
-  const handleDelete = () => {
-    setAlarms((prev) => prev.filter((a) => a.id !== editAlarm.id));
-    setView('list');
+  const handleKickMember = async (member: Member) => {
+    if (!editAlarm.appointmentId) return;
+    Alert.alert('참가자 추방', `${member.name}님을 추방하시겠습니까?`, [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '추방', style: 'destructive', onPress: async () => {
+          try {
+            const res = await appointmentsApi.removeParticipant(editAlarm.appointmentId!, parseInt(member.id));
+            if (res.status) {
+              const detailRes = await appointmentsApi.getAppointment(editAlarm.appointmentId!);
+              if (detailRes.success && detailRes.data) {
+                const myMemberId = editAlarm.members.find((m) => m.isMe)?.id;
+                setEditAlarm((prev) => ({
+                  ...prev,
+                  members: detailRes.data!.participants.map((p) => ({
+                    id: String(p.member_id),
+                    name: p.nickname,
+                    isMe: String(p.member_id) === myMemberId,
+                    isHost: p.is_host,
+                    transport: p.transport_type === 'TRANSIT' ? 'public' : 'car',
+                  })),
+                }));
+              }
+              await loadAlarms();
+              bumpAlarmVersion();
+            }
+          } catch {}
+        },
+      },
+    ]);
+  };
+  const handleLeave = async () => {
+    if (!editAlarm.appointmentId) return;
+    const myMember = editAlarm.members.find((m) => m.isMe);
+    if (!myMember) return;
+    Alert.alert('그룹 탈퇴', '그룹에서 탈퇴하시겠습니까?', [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '탈퇴', style: 'destructive', onPress: async () => {
+          try {
+            const res = await appointmentsApi.removeParticipant(editAlarm.appointmentId!, parseInt(myMember.id));
+            if (res.status) {
+              await loadAlarms();
+              bumpAlarmVersion();
+              setView('list');
+            }
+          } catch {}
+        },
+      },
+    ]);
+  };
+  const handleDelete = async () => {
+    if (!editAlarm.appointmentId) return;
+    try {
+      const res = await appointmentsApi.deleteAppointment(editAlarm.appointmentId);
+      if (res.success) {
+        await loadAlarms();
+        bumpAlarmVersion();
+        setView('list');
+      } else {
+        Alert.alert('삭제 실패', res.message ?? '다시 시도해주세요.');
+      }
+    } catch {
+      Alert.alert('삭제 실패', '네트워크 오류가 발생했습니다.');
+    }
   };
 
   const toggleAlarm = (id: string) => {
     setAlarms((prev) => prev.map((a) => a.id === id ? { ...a, enabled: !a.enabled } : a));
   };
 
-  const copyInviteCode = () => {
-    Clipboard.setString(editAlarm.inviteCode);
+  const copyInviteCode = async () => {
+    try {
+      await Share.share({ message: editAlarm.inviteCode });
+    } catch {}
   };
   const shareInviteCode = async () => {
     try {
       await Share.share({
         message: '[GoNow] 그룹 초대코드: ' + editAlarm.inviteCode + ' | 초대코드를 앱에 입력해 그룹에 참여하세요!',
       });
-    } catch (e) {
-      console.error('공유 오류:', e);
-    }
+    } catch {}
   };
 
   return (
@@ -216,7 +416,27 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
               if (!b.date) return -1;
               return a.date.localeCompare(b.date);
             }).map((alarm) => (
-              <SwipeableAlarmCard key={alarm.id} onDelete={() => setAlarms((prev) => prev.filter((a) => a.id !== alarm.id))}>
+              <SwipeableAlarmCard key={alarm.id} icon={alarm.isCurrentUserHost === false ? 'log-out' : 'trash'} onDelete={async () => {
+                if (!alarm.appointmentId) return;
+                try {
+                  const [detailRes, profileRes] = await Promise.all([
+                    appointmentsApi.getAppointment(alarm.appointmentId),
+                    membersApi.getMyProfile(),
+                  ]);
+                  if (!detailRes.success || !detailRes.data || !profileRes.data) return;
+                  const myMemberId = profileRes.data.member_id;
+                  const isHost = detailRes.data.participants.some(
+                    (p) => p.member_id === myMemberId && p.is_host,
+                  );
+                  if (isHost) {
+                    const res = await appointmentsApi.deleteAppointment(alarm.appointmentId);
+                    if (res.success) { await loadAlarms(); bumpAlarmVersion(); }
+                  } else {
+                    const res = await appointmentsApi.removeParticipant(alarm.appointmentId, myMemberId);
+                    if (res.status) { await loadAlarms(); bumpAlarmVersion(); }
+                  }
+                } catch {}
+              }}>
                 <TouchableOpacity style={styles.alarmCard} onPress={() => openEdit(alarm)} activeOpacity={0.7}>
                   <View style={styles.alarmInfo}>
                     {alarm.date ? <Text style={styles.alarmDate}>{formatCardDate(alarm.date)}</Text> : null}
@@ -266,13 +486,21 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
             <TouchableOpacity style={styles.headerBtn} onPress={() => setView('list')}>
               <Feather name="x" size={22} color="#1A1A1A" />
             </TouchableOpacity>
-            <Text style={styles.title}>{isEditMode ? '그룹 알람 수정' : '그룹 알람 추가'}</Text>
+            <Text style={styles.title}>
+              {isEditMode
+                ? editAlarm.isCurrentUserHost === false ? '그룹 알람 (참여)' : '그룹 알람 수정'
+                : '그룹 알람 추가'}
+            </Text>
             <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
               <Feather name="check" size={20} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity style={styles.editDatePillContainer} onPress={() => setView('date')} activeOpacity={0.7}>
+          <TouchableOpacity
+            style={styles.editDatePillContainer}
+            onPress={() => editAlarm.isCurrentUserHost !== false && setView('date')}
+            activeOpacity={editAlarm.isCurrentUserHost !== false ? 0.7 : 1}
+          >
             <View style={styles.editDatePill}>
               <Text style={editAlarm.date ? styles.editDatePillText : styles.editDatePillPlaceholder}>
                 {editAlarm.date ? formatDateLabel(editAlarm.date) : '날짜 선택'}
@@ -280,7 +508,10 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
             </View>
           </TouchableOpacity>
 
-          <View style={styles.pickerContainer}>
+          <View
+            style={[styles.pickerContainer, editAlarm.isCurrentUserHost === false && styles.pickerDisabled]}
+            pointerEvents={editAlarm.isCurrentUserHost === false ? 'none' : 'auto'}
+          >
             <Picker
               selectedValue={editAlarm.ampm}
               onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, ampm: v }))}
@@ -316,13 +547,25 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
                 {editAlarm.members.map((member, index) => (
                   <View key={member.id}>
                     <View style={styles.memberRow}>
-                      <Text style={styles.memberName}>{member.name}</Text>
-                      {member.transport === 'public' && (
-                        <MaterialCommunityIcons name="bus-side" size={20} color="#4A90D9" />
-                      )}
-                      {member.transport === 'car' && (
-                        <FontAwesome5 name="car-side" size={18} color="#F5A623" />
-                      )}
+                      <View style={styles.memberLeft}>
+                        <Text style={styles.memberName}>{member.name}</Text>
+                        {member.isHost && (
+                          <MaterialCommunityIcons name="crown" size={14} color="#F5A623" style={{ marginLeft: 5 }} />
+                        )}
+                      </View>
+                      <View style={styles.memberRight}>
+                        {member.transport === 'public' && (
+                          <MaterialCommunityIcons name="bus-side" size={20} color="#4A90D9" />
+                        )}
+                        {member.transport === 'car' && (
+                          <FontAwesome5 name="car-side" size={18} color="#F5A623" />
+                        )}
+                        {editAlarm.isCurrentUserHost && !member.isHost && (
+                          <TouchableOpacity onPress={() => handleKickMember(member)} style={{ marginLeft: 8 }}>
+                            <Feather name="user-x" size={16} color="#FF3B30" />
+                          </TouchableOpacity>
+                        )}
+                      </View>
                     </View>
                     {index < editAlarm.members.length - 1 && <View style={styles.separator} />}
                   </View>
@@ -333,13 +576,19 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
             {/* 목적지 / 초대코드 */}
             <View style={styles.section}>
               <View style={styles.optionBox}>
-                <TouchableOpacity style={styles.optionRow} onPress={openPlace}>
-                  <Text style={styles.optionLabel}>목적지</Text>
+                <TouchableOpacity
+                  style={styles.optionRow}
+                  onPress={openPlace}
+                  disabled={editAlarm.isCurrentUserHost === false}
+                >
+                  <Text style={[styles.optionLabel, editAlarm.isCurrentUserHost === false && { color: '#AAAAAA' }]}>목적지</Text>
                   <View style={styles.rowRight}>
                     <Text style={styles.rowValue} numberOfLines={1}>
                       {editAlarm.place || '선택'}
                     </Text>
-                    <Feather name="chevron-right" size={16} color="#AAAAAA" />
+                    {editAlarm.isCurrentUserHost !== false && (
+                      <Feather name="chevron-right" size={16} color="#AAAAAA" />
+                    )}
                   </View>
                 </TouchableOpacity>
                 <View style={styles.separator} />
@@ -370,10 +619,17 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
               </View>
             </View>
 
-            {isEditMode && (
+            {isEditMode && editAlarm.isCurrentUserHost !== false && (
               <View style={styles.deleteContainer}>
                 <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
                   <Text style={styles.deleteButtonText}>알람삭제</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            {isEditMode && editAlarm.isCurrentUserHost === false && (
+              <View style={styles.deleteContainer}>
+                <TouchableOpacity style={styles.deleteButton} onPress={handleLeave}>
+                  <Text style={styles.deleteButtonText}>그룹 탈퇴</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -447,7 +703,7 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
             {inviteError !== '' && (
               <Text style={styles.inviteError}>{inviteError}</Text>
             )}
-            <Text style={styles.joinDesc}>방장에게 받은 6자리 초대코드를 입력해주세요.</Text>
+            <Text style={styles.joinDesc}>방장에게 받은 8자리 초대코드를 입력해주세요.</Text>
 
             <Text style={[styles.joinLabel, { marginTop: 24 }]}>이동수단</Text>
             <View style={styles.optionBox}>
@@ -587,6 +843,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden', height: 200,
     marginHorizontal: 16, marginBottom: 8,
   },
+  pickerDisabled: { opacity: 0.4 },
   picker: { flex: 1 },
   pickerItem: { fontSize: 20, color: '#1A1A1A', height: 200 },
   section: { marginBottom: 16 },
@@ -600,6 +857,8 @@ const styles = StyleSheet.create({
   rowRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   rowValue: { fontSize: 14, color: '#AAAAAA' },
   memberRow: { height: 50, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  memberLeft: { flexDirection: 'row', alignItems: 'center' },
+  memberRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   memberName: { fontSize: 15, color: '#1A1A1A' },
   separator: { height: StyleSheet.hairlineWidth, backgroundColor: '#DDDDDD' },
   deleteContainer: { alignItems: 'center', marginTop: 8 },

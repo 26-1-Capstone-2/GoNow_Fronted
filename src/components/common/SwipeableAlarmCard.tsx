@@ -9,9 +9,11 @@ const THRESHOLD = -50;
 interface Props {
   children: React.ReactNode;
   onDelete: () => void;
+  icon?: string;
+  btnColor?: string;
 }
 
-export default function SwipeableAlarmCard({ children, onDelete }: Props) {
+export default function SwipeableAlarmCard({ children, onDelete, icon = 'trash', btnColor = '#FF3B30' }: Props) {
   const translateX = useRef(new Animated.Value(0)).current;
   const isOpen = useRef(false);
   const dragX = useRef(0);
@@ -82,8 +84,8 @@ export default function SwipeableAlarmCard({ children, onDelete }: Props) {
           },
         ]}
       >
-        <TouchableOpacity style={styles.deleteBtn} onPress={handleDelete} activeOpacity={0.8}>
-          <Feather name="trash" size={22} color="#FFFFFF" />
+        <TouchableOpacity style={[styles.deleteBtn, { backgroundColor: btnColor, shadowColor: btnColor }]} onPress={handleDelete} activeOpacity={0.8}>
+          <Feather name={icon as any} size={22} color="#FFFFFF" />
         </TouchableOpacity>
       </Animated.View>
 
