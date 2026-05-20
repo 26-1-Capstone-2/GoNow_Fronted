@@ -1,10 +1,12 @@
 import AddressSearchView, { SearchResult } from '@/src/components/common/AddressSearchView';
 import MiniCalendar from '@/src/components/common/MiniCalendar';
 import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
+import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
+import { targetTimeToAmpmHourMinute } from '@/src/api/journeys';
 import { Feather, FontAwesome5, FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Clipboard,
   Platform,
@@ -16,6 +18,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+
+const alarmsApi = createAlarmsApi();
 
 const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));
 const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
@@ -42,6 +46,7 @@ type Transport = 'public' | 'car';
 
 interface GroupAlarm {
   id: string;
+  appointmentId?: number;
   ampm: string;
   hour: string;
   minute: string;
@@ -54,42 +59,31 @@ interface GroupAlarm {
   date: string;
 }
 
+function fromAlarmItem(item: AlarmItem): GroupAlarm {
+  const { ampm, hour, minute } = targetTimeToAmpmHourMinute(item.target_time);
+  return {
+    id: String(item.appointment_id),
+    appointmentId: item.appointment_id ?? undefined,
+    ampm, hour, minute,
+    place: item.dest_name,
+    enabled: item.is_active,
+    members: Array.from({ length: item.participant_count ?? 1 }, (_, i) => ({
+      id: String(i),
+      name: i === 0 ? '나' : `멤버${i}`,
+      isMe: i === 0,
+    })),
+    inviteCode: '',
+    isArrivalActive: item.appointment_status === 'IN_PROGRESS',
+    transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
+    date: item.plan_date,
+  };
+}
+
 interface Props {
   onClose: () => void;
   onArrivalPress?: (alarm: GroupAlarm) => void;
 }
 
-const RECENT_PLACES: SearchResult[] = [
-  { id: '1', name: '홍대역 2번 출구', address: '서울 마포구 양화로', isCurrent: true },
-  { id: '2', name: '중앙대학교 후문 입구', address: '서울 동작구 흑석로', isCurrent: false },
-];
-
-const SAMPLE_GROUP_ALARMS: GroupAlarm[] = [
-  {
-    id: '1', ampm: '오후', hour: '7', minute: '00',
-    place: '홍대역 2번 출구', enabled: true,
-    members: [
-      { id: '1', name: '가가가(본인)', isMe: true, transport: 'public' as MemberTransport },
-      { id: '2', name: '나나나', isMe: false, transport: 'public' as MemberTransport },
-      { id: '3', name: '다다다', isMe: false, transport: 'car' as MemberTransport },
-    ],
-    inviteCode: 'abcdeg',
-    isArrivalActive: true,
-    transport: 'public' as Transport,
-    date: '2026-05-10',
-  },
-  {
-    id: '2', ampm: '오후', hour: '6', minute: '00',
-    place: '용산역', enabled: true,
-    members: [
-      { id: '1', name: '가가가(본인)', isMe: true, transport: 'car' as MemberTransport },
-    ],
-    inviteCode: 'xyzabc',
-    isArrivalActive: false,
-    transport: 'car' as Transport,
-    date: '2026-05-15',
-  },
-];
 
 const DEFAULT_ALARM: GroupAlarm = {
   id: '', ampm: '오전', hour: '7', minute: '00',
@@ -108,7 +102,16 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
   const snapPoints = useMemo(() => ['85%'], []);
 
   const [view, setView] = useState<ViewType>('list');
-  const [alarms, setAlarms] = useState<GroupAlarm[]>(SAMPLE_GROUP_ALARMS);
+  const [alarms, setAlarms] = useState<GroupAlarm[]>([]);
+
+  const loadAlarms = useCallback(async () => {
+    try {
+      const res = await alarmsApi.getAlarmsByType('GROUP');
+      setAlarms((res.data ?? []).map(fromAlarmItem));
+    } catch {}
+  }, []);
+
+  useEffect(() => { loadAlarms(); }, [loadAlarms]);
   const [editAlarm, setEditAlarm] = useState<GroupAlarm>(DEFAULT_ALARM);
   const [tempPlace, setTempPlace] = useState<SearchResult | null>(null);
   const [inviteCode, setInviteCode] = useState('');
@@ -133,8 +136,7 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
   };
   const openEdit = (alarm: GroupAlarm) => { setEditAlarm(alarm); setView('edit'); };
   const openPlace = () => {
-    const cur = RECENT_PLACES.find((p) => p.name === editAlarm.place);
-    setTempPlace(cur ?? null);
+    setTempPlace(null);
     setView('place');
   };
   const handlePlaceConfirm = () => {
@@ -526,7 +528,7 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
             </TouchableOpacity>
           </View>
           <AddressSearchView
-            initialResults={RECENT_PLACES}
+            initialResults={[]}
             selectedId={tempPlace?.id}
             onSelect={(item) => setTempPlace(item)}
           />

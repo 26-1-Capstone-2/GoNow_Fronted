@@ -1,11 +1,16 @@
 import AddressSearchView, { SearchResult } from '@/src/components/common/AddressSearchView';
 import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
+import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
+import { createJourneysApi, ensureFutureDateTime, HomeJourneyPayload, JourneyDetail, maskToRepeatDays, repeatDaysToMask, targetTimeToAmpmHourMinute, toTargetTime } from '@/src/api/journeys';
+import { usePlaces } from '@/src/hooks/usePlaces';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   Platform,
   StyleSheet,
   Switch,
@@ -13,6 +18,41 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+
+const journeysApi = createJourneysApi();
+const alarmsApi = createAlarmsApi();
+
+function fromAlarmItem(item: AlarmItem): HomeAlarm {
+  const { ampm, hour, minute } = targetTimeToAmpmHourMinute(item.target_time);
+  return {
+    id: String(item.journey_id),
+    journeyId: item.journey_id ?? undefined,
+    mode: item.is_last_mode ? 'lastTrain' : 'deadline',
+    ampm, hour, minute,
+    home_name: item.dest_name,
+    home_address: '',
+    repeat: maskToRepeatDays(item.repeat_days ?? 0),
+    enabled: item.is_active,
+    transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
+  };
+}
+
+function fromJourneyDetail(d: JourneyDetail): HomeAlarm {
+  const { ampm, hour, minute } = targetTimeToAmpmHourMinute(d.target_time);
+  return {
+    id: String(d.journey_id),
+    journeyId: d.journey_id,
+    mode: d.is_last_mode ? 'lastTrain' : 'deadline',
+    ampm, hour, minute,
+    home_name: d.dest_name,
+    home_address: d.dest_address,
+    home_lat: d.dest_lat,
+    home_lng: d.dest_lng,
+    repeat: maskToRepeatDays(d.repeat_days),
+    enabled: d.is_active,
+    transport: d.transport_type === 'TRANSIT' ? 'public' : 'car',
+  };
+}
 
 const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
 const DAYS = ['일요일마다', '월요일마다', '화요일마다', '수요일마다', '목요일마다', '금요일마다', '토요일마다', '안함'];
@@ -25,11 +65,15 @@ type ViewType = 'list' | 'edit' | 'repeat' | 'homePlace' | 'transport';
 
 interface HomeAlarm {
   id: string;
+  journeyId?: number;
   mode: AlarmMode;
   ampm: string;
   hour: string;
   minute: string;
-  place: string;
+  home_name: string;
+  home_address: string;
+  home_lat?: number;
+  home_lng?: number;
   repeat: string[];
   enabled: boolean;
   transport: Transport;
@@ -38,11 +82,6 @@ interface HomeAlarm {
 interface Props {
   onClose: () => void;
 }
-
-const HOME_PLACES: SearchResult[] = [
-  { id: 'home1', name: '우리집', address: '서울 어쩌고 저쩌고', isCurrent: true, isHome: true },
-  { id: 'home2', name: '서울 가가가', address: '서울 저쩌고 어쩌고', isCurrent: false, isHome: false },
-];
 
 function getRepeatLabel(repeat: string[]): string {
   if (repeat.includes('안함') || repeat.length === 0) return '안함';
@@ -55,26 +94,40 @@ function getRepeatLabel(repeat: string[]): string {
   return repeat.map((r) => r.replace('요일마다', '')).join(', ');
 }
 
-const SAMPLE_HOME_ALARMS: HomeAlarm[] = [
-  { id: '1', mode: 'lastTrain', ampm: '오후', hour: '11', minute: '00', place: '우리집', repeat: ['안함'], enabled: true, transport: 'public' },
-  { id: '2', mode: 'deadline', ampm: '오후', hour: '11', minute: '00', place: '우리집', repeat: ['주중'], enabled: false, transport: 'public' },
-];
-
 const DEFAULT_ALARM: HomeAlarm = {
   id: '', mode: 'lastTrain', ampm: '오후', hour: '11', minute: '00',
-  place: '우리집', repeat: ['안함'], enabled: true, transport: 'public',
+  home_name: '', home_address: '', home_lat: undefined, home_lng: undefined,
+  repeat: ['안함'], enabled: true, transport: 'public',
 };
 
 export default function HomeAlarmSheet({ onClose }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['85%'], []);
-  const { selectedDate } = useCalendarStore();
+  const { selectedDate, bumpAlarmVersion } = useCalendarStore();
+
+  const { places, searchKey, loadPlaces, savePlace, deletePlace } = usePlaces('HOME');
 
   const [view, setView] = useState<ViewType>('list');
-  const [alarms, setAlarms] = useState<HomeAlarm[]>(SAMPLE_HOME_ALARMS);
+  const [alarms, setAlarms] = useState<HomeAlarm[]>([]);
   const [editAlarm, setEditAlarm] = useState<HomeAlarm>(DEFAULT_ALARM);
   const [tempPlace, setTempPlace] = useState<SearchResult | null>(null);
+  const [saving, setSaving] = useState(false);
   const isEditMode = !!editAlarm.id;
+
+  useEffect(() => {
+    loadPlaces().catch(() => {});
+  }, [loadPlaces]);
+
+  const loadAlarms = useCallback(async () => {
+    try {
+      const res = await alarmsApi.getAlarms(selectedDate);
+      setAlarms((res.data ?? []).filter((a) => a.alarm_type === 'HOME').map(fromAlarmItem));
+    } catch {}
+  }, [selectedDate]);
+
+  useEffect(() => {
+    loadAlarms();
+  }, [loadAlarms]);
 
   const dateObj = new Date(selectedDate);
   const month = dateObj.getMonth() + 1;
@@ -87,32 +140,133 @@ export default function HomeAlarmSheet({ onClose }: Props) {
 
   const openAdd = () => { setEditAlarm(DEFAULT_ALARM); setView('edit'); };
   const openHomePlace = () => {
-    const cur = HOME_PLACES.find((p) => p.name === editAlarm.place);
-    setTempPlace(cur ?? null);
+    if (editAlarm.home_name) {
+      const match = places.find((p) => p.name === editAlarm.home_name);
+      setTempPlace(match ?? {
+        id: 'current_home',
+        name: editAlarm.home_name,
+        address: editAlarm.home_address,
+        lat: editAlarm.home_lat,
+        lng: editAlarm.home_lng,
+        isHome: true,
+        isCurrent: true,
+      });
+    } else {
+      setTempPlace(null);
+    }
     setView('homePlace');
   };
   const handleHomePlaceConfirm = () => {
-    if (tempPlace) setEditAlarm((prev) => ({ ...prev, place: tempPlace.name }));
+    if (tempPlace?.lat && tempPlace?.lng) {
+      setEditAlarm((prev) => ({
+        ...prev,
+        home_name: tempPlace.name,
+        home_address: tempPlace.address,
+        home_lat: tempPlace.lat,
+        home_lng: tempPlace.lng,
+      }));
+      savePlace(tempPlace).catch(() => {});
+    }
     setView('edit');
   };
-  const openEdit = (alarm: HomeAlarm) => { setEditAlarm(alarm); setView('edit'); };
-
-  const handleSave = () => {
-    if (isEditMode) {
-      setAlarms((prev) => prev.map((a) => a.id === editAlarm.id ? editAlarm : a));
+  const openEdit = async (alarm: HomeAlarm) => {
+    if (alarm.journeyId) {
+      try {
+        const res = await journeysApi.getJourney(alarm.journeyId);
+        let detail = fromJourneyDetail(res.data);
+        if (!detail.home_lat || !detail.home_lng) {
+          const match = places.find((p) => p.name === detail.home_name);
+          if (match?.lat && match?.lng) {
+            detail = { ...detail, home_lat: match.lat, home_lng: match.lng };
+          }
+        }
+        setEditAlarm(detail);
+      } catch {
+        const match = places.find((p) => p.name === alarm.home_name);
+        setEditAlarm(match?.lat && match?.lng
+          ? { ...alarm, home_lat: match.lat, home_lng: match.lng }
+          : alarm
+        );
+      }
     } else {
-      setAlarms((prev) => [...prev, { ...editAlarm, id: String(Date.now()) }]);
+      setEditAlarm(alarm);
     }
-    setView('list');
+    setView('edit');
   };
 
-  const handleDelete = () => {
+  const handleSave = async () => {
+    if (!editAlarm.home_name || !editAlarm.home_lat || !editAlarm.home_lng) {
+      Alert.alert('귀가지를 선택해주세요.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const rawTime = editAlarm.mode === 'lastTrain'
+        ? `${selectedDate}T00:00:00`
+        : toTargetTime(selectedDate, editAlarm.ampm, editAlarm.hour, editAlarm.minute);
+      const isPast = new Date(rawTime) <= new Date();
+      const hasRepeat = !editAlarm.repeat.includes('안함') && editAlarm.repeat.length > 0;
+      if (isPast && !hasRepeat && editAlarm.mode === 'deadline') {
+        Alert.alert('시간 오류', '이미 지난 시간입니다. 시간을 다시 설정해주세요.');
+        setSaving(false);
+        return;
+      }
+      const { plan_date, target_time } = (isPast && hasRepeat) || editAlarm.mode === 'lastTrain'
+        ? ensureFutureDateTime(selectedDate, rawTime)
+        : { plan_date: selectedDate, target_time: rawTime };
+
+      const payload: HomeJourneyPayload = {
+        is_last_mode: editAlarm.mode === 'lastTrain',
+        plan_date,
+        target_time,
+        dest_name: editAlarm.home_name,
+        dest_address: editAlarm.home_address,
+        dest_lat: editAlarm.home_lat,
+        dest_lng: editAlarm.home_lng,
+        repeat_days: repeatDaysToMask(editAlarm.repeat),
+        ...(editAlarm.mode === 'deadline' && {
+          transport_type: editAlarm.transport === 'public' ? 'TRANSIT' : 'DRIVING',
+        }),
+      };
+
+      if (isEditMode && editAlarm.journeyId) {
+        await journeysApi.updateHome(editAlarm.journeyId, payload);
+      } else {
+        await journeysApi.createHome(payload);
+      }
+      await loadAlarms();
+      bumpAlarmVersion();
+      setView('list');
+    } catch (e: any) {
+      console.error('귀가 알람 저장 실패:', e);
+      Alert.alert('저장 실패', e?.message ?? '다시 시도해주세요.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (editAlarm.journeyId) {
+      try {
+        await journeysApi.deleteJourney(editAlarm.journeyId);
+      } catch {
+        Alert.alert('삭제 실패', '다시 시도해주세요.');
+        return;
+      }
+    }
     setAlarms((prev) => prev.filter((a) => a.id !== editAlarm.id));
+    bumpAlarmVersion();
     setView('list');
   };
 
-  const toggleAlarm = (id: string) => {
-    setAlarms((prev) => prev.map((a) => a.id === id ? { ...a, enabled: !a.enabled } : a));
+  const toggleAlarm = (alarm: HomeAlarm) => {
+    const newEnabled = !alarm.enabled;
+    setAlarms((prev) => prev.map((a) => a.id === alarm.id ? { ...a, enabled: newEnabled } : a));
+    if (alarm.journeyId) {
+      journeysApi.toggleActive(alarm.journeyId, newEnabled).catch(() => {
+        setAlarms((prev) => prev.map((a) => a.id === alarm.id ? { ...a, enabled: !newEnabled } : a));
+      });
+    }
   };
 
   const toggleRepeat = (day: string) => {
@@ -158,10 +312,17 @@ export default function HomeAlarmSheet({ onClose }: Props) {
           </View>
           <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             {alarms.map((alarm) => (
-              <SwipeableAlarmCard key={alarm.id} onDelete={() => setAlarms((prev) => prev.filter((a) => a.id !== alarm.id))}>
+              <SwipeableAlarmCard key={alarm.id} onDelete={async () => {
+                if (alarm.journeyId) {
+                  try { await journeysApi.deleteJourney(alarm.journeyId); }
+                  catch { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
+                }
+                setAlarms((prev) => prev.filter((a) => a.id !== alarm.id));
+                bumpAlarmVersion();
+              }}>
                 <TouchableOpacity style={styles.alarmCard} onPress={() => openEdit(alarm)} activeOpacity={0.7}>
                   <View style={styles.alarmInfo}>
-                    <Text style={styles.alarmPlace}>{alarm.place}</Text>
+                    <Text style={styles.alarmPlace}>{alarm.home_name}</Text>
                     <View style={styles.alarmMeta}>
                       {alarm.mode === 'lastTrain'
                         ? <Text style={styles.alarmDeadline}>막차 기준</Text>
@@ -179,7 +340,7 @@ export default function HomeAlarmSheet({ onClose }: Props) {
                   <View style={styles.cardRight}>
                     <Switch
                       value={alarm.enabled}
-                      onValueChange={() => toggleAlarm(alarm.id)}
+                      onValueChange={() => toggleAlarm(alarm)}
                       trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
                       thumbColor="#FFFFFF"
                     />
@@ -198,8 +359,11 @@ export default function HomeAlarmSheet({ onClose }: Props) {
             <TouchableOpacity style={styles.headerBtn} onPress={() => setView('list')}>
               <Feather name="x" size={22} color="#1A1A1A" />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
-              <Feather name="check" size={20} color="#FFFFFF" />
+            <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={saving}>
+              {saving
+                ? <ActivityIndicator size="small" color="#FFFFFF" />
+                : <Feather name="check" size={20} color="#FFFFFF" />
+              }
             </TouchableOpacity>
           </View>
 
@@ -265,7 +429,7 @@ export default function HomeAlarmSheet({ onClose }: Props) {
                 <TouchableOpacity style={styles.optionRow} onPress={openHomePlace}>
                   <Text style={styles.optionLabel}>귀가지</Text>
                   <View style={styles.rowRight}>
-                    <Text style={styles.rowValue}>{editAlarm.place}</Text>
+                    <Text style={styles.rowValue}>{editAlarm.home_name || '선택'}</Text>
                     <Feather name="chevron-right" size={16} color="#AAAAAA" />
                   </View>
                 </TouchableOpacity>
@@ -344,9 +508,11 @@ export default function HomeAlarmSheet({ onClose }: Props) {
             </TouchableOpacity>
           </View>
           <AddressSearchView
-            initialResults={HOME_PLACES}
+            key={searchKey}
+            initialResults={tempPlace?.id === 'current_home' ? [tempPlace!, ...places] : places}
             selectedId={tempPlace?.id}
             onSelect={(item) => setTempPlace(item)}
+            onDeleteServerPlace={deletePlace}
             selectedIsHome
           />
         </>

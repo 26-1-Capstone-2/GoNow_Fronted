@@ -1,30 +1,33 @@
 import AddressSearchView, { SearchResult } from '@/src/components/common/AddressSearchView';
 import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
+import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
+import { maskToRepeatDays, targetTimeToAmpmHourMinute } from '@/src/api/journeys';
+import { usePlaces } from '@/src/hooks/usePlaces';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, FontAwesome5, FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Clipboard, Platform, Share, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
 const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));
 const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
 
-const RECENT_PLACES: SearchResult[] = [
-  { id: '1', name: '홍대역 2번 출구', address: '서울 마포구 양화로', isCurrent: true },
-  { id: '2', name: '중앙대학교 후문 입구', address: '서울 동작구 흑석로', isCurrent: false },
-];
-
 type MemberTransport = 'public' | 'car';
 interface Member { id: string; name: string; isMe: boolean; transport?: MemberTransport; }
 type Transport = 'public' | 'car';
 
 interface GroupAlarm {
-  id: string; ampm: string; hour: string; minute: string;
-  place: string; enabled: boolean; members: Member[]; inviteCode: string;
+  id: string;
+  appointmentId?: number;
+  ampm: string; hour: string; minute: string;
+  dest_name: string; dest_address: string; dest_lat?: number; dest_lng?: number;
+  enabled: boolean; members: Member[]; inviteCode: string;
   isArrivalActive?: boolean;
   transport: Transport;
+  appointment_status?: string;
+  participant_count?: number;
 }
 
 interface Props {
@@ -32,19 +35,31 @@ interface Props {
   onArrivalPress?: (alarm: GroupAlarm) => void;
 }
 
-const SAMPLE_GROUP_ALARMS: GroupAlarm[] = [
-  {
-    id: '1', ampm: '오후', hour: '7', minute: '00', place: '홍대역 2번 출구', enabled: true,
-    members: [{ id: '1', name: '가가가(본인)', isMe: true, transport: 'public' as MemberTransport }, { id: '2', name: '나나나', isMe: false, transport: 'public' as MemberTransport }, { id: '3', name: '다다다', isMe: false, transport: 'car' as MemberTransport }],
-    inviteCode: 'abcdeg', isArrivalActive: true, transport: 'public' as Transport,
-  },
-];
+const alarmsApi = createAlarmsApi();
+
+function fromAlarmItem(item: AlarmItem): GroupAlarm {
+  const { ampm, hour, minute } = targetTimeToAmpmHourMinute(item.target_time);
+  return {
+    id: String(item.appointment_id),
+    appointmentId: item.appointment_id ?? undefined,
+    ampm, hour, minute,
+    dest_name: item.dest_name,
+    dest_address: '',
+    enabled: item.is_active,
+    members: [],
+    inviteCode: '',
+    isArrivalActive: item.appointment_status === 'ACTIVE',
+    transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
+    appointment_status: item.appointment_status ?? undefined,
+    participant_count: item.participant_count ?? undefined,
+  };
+}
 
 const DEFAULT_ALARM: GroupAlarm = {
-  id: '', ampm: '오전', hour: '7', minute: '00', place: '', enabled: true,
-  members: [{ id: 'me', name: '가가가(본인)', isMe: true }], inviteCode: '',
-  isArrivalActive: false,
-  transport: 'public' as Transport,
+  id: '', ampm: '오전', hour: '7', minute: '00',
+  dest_name: '', dest_address: '', dest_lat: undefined, dest_lng: undefined,
+  enabled: true, members: [{ id: 'me', name: '가가가(본인)', isMe: true }], inviteCode: '',
+  isArrivalActive: false, transport: 'public' as Transport,
 };
 
 type ViewType = 'list' | 'edit' | 'place' | 'addChoice' | 'join' | 'transport';
@@ -53,13 +68,31 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['85%'], []);
   const { selectedDate } = useCalendarStore();
+
+  const { places, searchKey, loadPlaces, savePlace, deletePlace } = usePlaces('DEST');
+
   const [view, setView] = useState<ViewType>('list');
-  const [alarms, setAlarms] = useState<GroupAlarm[]>(SAMPLE_GROUP_ALARMS);
+  const [alarms, setAlarms] = useState<GroupAlarm[]>([]);
   const [editAlarm, setEditAlarm] = useState<GroupAlarm>(DEFAULT_ALARM);
   const [tempPlace, setTempPlace] = useState<SearchResult | null>(null);
   const [inviteCode, setInviteCode] = useState('');
   const [inviteError, setInviteError] = useState('');
   const isEditMode = !!editAlarm.id;
+
+  useEffect(() => {
+    loadPlaces().catch(() => {});
+  }, [loadPlaces]);
+
+  const loadAlarms = useCallback(async () => {
+    try {
+      const res = await alarmsApi.getAlarms(selectedDate);
+      setAlarms((res.data ?? []).filter((a) => a.alarm_type === 'GROUP').map(fromAlarmItem));
+    } catch {}
+  }, [selectedDate]);
+
+  useEffect(() => {
+    loadAlarms();
+  }, [loadAlarms]);
 
   const dateObj = new Date(selectedDate);
   const month = dateObj.getMonth() + 1;
@@ -79,8 +112,11 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress }: Props) {
   };
   const openEdit = (alarm: GroupAlarm) => { setEditAlarm(alarm); setView('edit'); };
   const openPlace = () => {
-    const cur = RECENT_PLACES.find((p) => p.name === editAlarm.place);
-    setTempPlace(cur ?? null);
+    setTempPlace(
+      editAlarm.dest_name
+        ? { id: 'current_dest', name: editAlarm.dest_name, address: editAlarm.dest_address, lat: editAlarm.dest_lat, lng: editAlarm.dest_lng }
+        : null
+    );
     setView('place');
   };
   const handleSave = () => {
@@ -101,7 +137,16 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress }: Props) {
     }
   };
   const handlePlaceConfirm = () => {
-    if (tempPlace) setEditAlarm((prev) => ({ ...prev, place: tempPlace.name }));
+    if (tempPlace?.lat && tempPlace?.lng) {
+      setEditAlarm((prev) => ({
+        ...prev,
+        dest_name: tempPlace.name,
+        dest_address: tempPlace.address,
+        dest_lat: tempPlace.lat,
+        dest_lng: tempPlace.lng,
+      }));
+      savePlace(tempPlace).catch(() => {});
+    }
     setView('edit');
   };
 
@@ -126,7 +171,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress }: Props) {
               <SwipeableAlarmCard key={alarm.id} onDelete={() => setAlarms((prev) => prev.filter((a) => a.id !== alarm.id))}>
                 <TouchableOpacity style={styles.alarmCard} onPress={() => openEdit(alarm)} activeOpacity={0.7}>
                   <View style={styles.alarmInfo}>
-                    <Text style={styles.alarmPlace}>{alarm.place}</Text>
+                    <Text style={styles.alarmPlace}>{alarm.dest_name}</Text>
                     <View style={styles.alarmMeta}>
                       <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.hour}:{alarm.minute} 까지</Text>
                       {alarm.transport === 'public'
@@ -138,7 +183,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress }: Props) {
                   <View style={styles.cardRight}>
                     <View style={styles.memberBadge}>
                       <Feather name="users" size={11} color="#555555" />
-                      <Text style={styles.memberCount}>{alarm.members.length}명</Text>
+                      <Text style={styles.memberCount}>{alarm.participant_count ?? alarm.members.length}명</Text>
                     </View>
                     <TouchableOpacity
                       onPress={() => onArrivalPress?.(alarm)}
@@ -203,7 +248,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress }: Props) {
                 <TouchableOpacity style={styles.optionRow} onPress={openPlace}>
                   <Text style={styles.optionLabel}>목적지</Text>
                   <View style={styles.rowRight}>
-                    <Text style={styles.rowValue} numberOfLines={1}>{editAlarm.place || '선택'}</Text>
+                    <Text style={styles.rowValue} numberOfLines={1}>{editAlarm.dest_name || '선택'}</Text>
                     <Feather name="chevron-right" size={16} color="#AAAAAA" />
                   </View>
                 </TouchableOpacity>
@@ -344,7 +389,13 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress }: Props) {
             <Text style={styles.title}>목적지</Text>
             <TouchableOpacity style={styles.saveBtn} onPress={handlePlaceConfirm}><Feather name="check" size={20} color="#FFFFFF" /></TouchableOpacity>
           </View>
-          <AddressSearchView initialResults={RECENT_PLACES} selectedId={tempPlace?.id} onSelect={(item) => setTempPlace(item)} />
+          <AddressSearchView
+            key={searchKey}
+            initialResults={places}
+            selectedId={tempPlace?.id}
+            onSelect={(item) => setTempPlace(item)}
+            onDeleteServerPlace={deletePlace}
+          />
         </>
       )}
     </BottomSheet>

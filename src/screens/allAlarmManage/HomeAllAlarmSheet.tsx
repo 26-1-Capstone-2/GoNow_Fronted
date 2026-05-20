@@ -1,16 +1,80 @@
 import AddressSearchView, { SearchResult } from '@/src/components/common/AddressSearchView';
 import MiniCalendar from '@/src/components/common/MiniCalendar';
 import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
+import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
+import { createJourneysApi, ensureFutureDateTime, HomeJourneyPayload, JourneyDetail, maskToRepeatDays, repeatDaysToMask, targetTimeToAmpmHourMinute, toTargetTime } from '@/src/api/journeys';
+import { usePlaces } from '@/src/hooks/usePlaces';
+import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { Platform, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Platform, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+
+const journeysApi = createJourneysApi();
+const alarmsApi = createAlarmsApi();
 
 const DAY_LABEL = ['일', '월', '화', '수', '목', '금', '토'];
-const WEEK_DAYS = ['일요일마다', '월요일마다', '화요일마다', '수요일마다', '목요일마다', '금요일마다', '토요일마다', '안함'];
+const DAYS = ['일요일마다', '월요일마다', '화요일마다', '수요일마다', '목요일마다', '금요일마다', '토요일마다', '안함'];
 const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));
 const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
+
+type AlarmMode = 'lastTrain' | 'deadline';
+type Transport = 'public' | 'car';
+type ViewType = 'list' | 'edit' | 'repeat' | 'homePlace' | 'transport' | 'date';
+
+interface HomeAlarm {
+  id: string;
+  journeyId?: number;
+  mode: AlarmMode;
+  ampm: string;
+  hour: string;
+  minute: string;
+  home_name: string;
+  home_address: string;
+  home_lat?: number;
+  home_lng?: number;
+  repeat: string[];
+  enabled: boolean;
+  transport: Transport;
+  date: string;
+}
+
+interface Props { onClose: () => void; }
+
+function fromAlarmItem(item: AlarmItem): HomeAlarm {
+  const { ampm, hour, minute } = targetTimeToAmpmHourMinute(item.target_time);
+  return {
+    id: String(item.journey_id),
+    journeyId: item.journey_id ?? undefined,
+    mode: item.is_last_mode ? 'lastTrain' : 'deadline',
+    ampm, hour, minute,
+    home_name: item.dest_name,
+    home_address: '',
+    repeat: maskToRepeatDays(item.repeat_days ?? 0),
+    enabled: item.is_active,
+    transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
+    date: item.plan_date,
+  };
+}
+
+function fromJourneyDetail(d: JourneyDetail, planDate: string): HomeAlarm {
+  const { ampm, hour, minute } = targetTimeToAmpmHourMinute(d.target_time);
+  return {
+    id: String(d.journey_id),
+    journeyId: d.journey_id,
+    mode: d.is_last_mode ? 'lastTrain' : 'deadline',
+    ampm, hour, minute,
+    home_name: d.dest_name,
+    home_address: d.dest_address,
+    home_lat: d.dest_lat,
+    home_lng: d.dest_lng,
+    repeat: maskToRepeatDays(d.repeat_days),
+    enabled: d.is_active,
+    transport: d.transport_type === 'TRANSIT' ? 'public' : 'car',
+    date: planDate,
+  };
+}
 
 function formatDateLabel(dateStr: string): string {
   const d = new Date(dateStr + 'T00:00:00');
@@ -20,16 +84,6 @@ function formatCardDate(dateStr: string): string {
   const d = new Date(dateStr + 'T00:00:00');
   return `${d.getMonth() + 1}월 ${d.getDate()}일 ${DAY_LABEL[d.getDay()]}요일`;
 }
-
-type AlarmMode = 'lastTrain' | 'deadline';
-type Transport = 'public' | 'car';
-type ViewType = 'list' | 'edit' | 'repeat' | 'homePlace' | 'transport' | 'date';
-
-interface HomeAlarm {
-  id: string; mode: AlarmMode; ampm: string; hour: string; minute: string;
-  place: string; repeat: string[]; enabled: boolean; transport: Transport; date: string;
-}
-interface Props { onClose: () => void; }
 
 function getRepeatLabel(repeat: string[]): string {
   if (repeat.includes('안함') || repeat.length === 0) return '안함';
@@ -42,49 +96,151 @@ function getRepeatLabel(repeat: string[]): string {
   return repeat.map((r) => r.replace('요일마다', '')).join(', ');
 }
 
-const HOME_PLACES: SearchResult[] = [
-  { id: 'home1', name: '우리집', address: '서울 어쩌고 저쩌고', isCurrent: true, isHome: true },
-  { id: 'home2', name: '서울 가가가', address: '서울 저쩌고 어쩌고', isCurrent: false, isHome: false },
-];
+const todayStr = (() => {
+  const t = new Date();
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+})();
 
-const SAMPLE_HOME_ALARMS: HomeAlarm[] = [
-  { id: '1', mode: 'lastTrain', ampm: '오후', hour: '11', minute: '00', place: '우리집', repeat: ['안함'], enabled: true, transport: 'public', date: '2026-05-09' },
-  { id: '2', mode: 'deadline', ampm: '오후', hour: '11', minute: '00', place: '우리집', repeat: ['월요일마다', '화요일마다', '수요일마다', '목요일마다', '금요일마다'], enabled: true, transport: 'public', date: '2026-05-11' },
-];
 const DEFAULT_ALARM: HomeAlarm = {
   id: '', mode: 'lastTrain', ampm: '오후', hour: '11', minute: '00',
-  place: '우리집', repeat: ['안함'], enabled: true, transport: 'public', date: '',
+  home_name: '', home_address: '', home_lat: undefined, home_lng: undefined,
+  repeat: ['안함'], enabled: true, transport: 'public', date: todayStr,
 };
 
 export default function HomeAllAlarmSheet({ onClose }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['85%'], []);
+  const { bumpAlarmVersion } = useCalendarStore();
+  const { places, searchKey, loadPlaces, savePlace, deletePlace } = usePlaces('HOME');
 
   const [view, setView] = useState<ViewType>('list');
-  const [alarms, setAlarms] = useState<HomeAlarm[]>(SAMPLE_HOME_ALARMS);
+  const [alarms, setAlarms] = useState<HomeAlarm[]>([]);
   const [editAlarm, setEditAlarm] = useState<HomeAlarm>(DEFAULT_ALARM);
   const [tempPlace, setTempPlace] = useState<SearchResult | null>(null);
+  const [saving, setSaving] = useState(false);
   const isEditMode = !!editAlarm.id;
+
+  useEffect(() => { loadPlaces().catch(() => {}); }, [loadPlaces]);
+
+  const loadAlarms = useCallback(async () => {
+    try {
+      const res = await alarmsApi.getAlarmsByType('HOME');
+      setAlarms((res.data ?? []).map(fromAlarmItem));
+    } catch {}
+  }, []);
+
+  useEffect(() => { loadAlarms(); }, [loadAlarms]);
 
   const handleSheetChange = useCallback((index: number) => { if (index === -1) onClose(); }, [onClose]);
   const openAdd = () => { setEditAlarm(DEFAULT_ALARM); setView('edit'); };
-  const openEdit = (alarm: HomeAlarm) => { setEditAlarm(alarm); setView('edit'); };
-  const openHomePlace = () => {
-    const cur = HOME_PLACES.find((p) => p.name === editAlarm.place);
-    setTempPlace(cur ?? null);
-    setView('homePlace');
-  };
-  const handleHomePlaceConfirm = () => {
-    if (tempPlace) setEditAlarm((prev) => ({ ...prev, place: tempPlace.name }));
+
+  const openEdit = async (alarm: HomeAlarm) => {
+    if (alarm.journeyId) {
+      try {
+        const res = await journeysApi.getJourney(alarm.journeyId);
+        let detail = fromJourneyDetail(res.data, alarm.date);
+        if (!detail.home_lat || !detail.home_lng) {
+          const match = places.find((p) => p.name === detail.home_name);
+          if (match?.lat && match?.lng) detail = { ...detail, home_lat: match.lat, home_lng: match.lng };
+        }
+        setEditAlarm(detail);
+      } catch {
+        const match = places.find((p) => p.name === alarm.home_name);
+        setEditAlarm(match?.lat && match?.lng ? { ...alarm, home_lat: match.lat, home_lng: match.lng } : alarm);
+      }
+    } else {
+      setEditAlarm(alarm);
+    }
     setView('edit');
   };
-  const handleSave = () => {
-    if (isEditMode) setAlarms((prev) => prev.map((a) => a.id === editAlarm.id ? editAlarm : a));
-    else setAlarms((prev) => [...prev, { ...editAlarm, id: String(Date.now()) }]);
+
+  const openHomePlace = () => {
+    if (editAlarm.home_name) {
+      const match = places.find((p) => p.name === editAlarm.home_name);
+      setTempPlace(match ?? { id: 'current_home', name: editAlarm.home_name, address: editAlarm.home_address, lat: editAlarm.home_lat, lng: editAlarm.home_lng, isHome: true, isCurrent: true });
+    } else {
+      setTempPlace(null);
+    }
+    setView('homePlace');
+  };
+
+  const handleHomePlaceConfirm = () => {
+    if (tempPlace?.lat && tempPlace?.lng) {
+      setEditAlarm((prev) => ({ ...prev, home_name: tempPlace.name, home_address: tempPlace.address, home_lat: tempPlace.lat, home_lng: tempPlace.lng }));
+      savePlace(tempPlace).catch(() => {});
+    }
+    setView('edit');
+  };
+
+  const handleSave = async () => {
+    if (!editAlarm.home_name) { Alert.alert('귀가지를 선택해주세요.'); return; }
+    if (!isEditMode && (!editAlarm.home_lat || !editAlarm.home_lng)) { Alert.alert('귀가지를 선택해주세요.'); return; }
+    if (!editAlarm.date) { Alert.alert('날짜를 선택해주세요.'); return; }
+    setSaving(true);
+    try {
+      const rawTime = editAlarm.mode === 'lastTrain'
+        ? `${editAlarm.date}T00:00:00`
+        : toTargetTime(editAlarm.date, editAlarm.ampm, editAlarm.hour, editAlarm.minute);
+      const isPast = new Date(rawTime) <= new Date();
+      const hasRepeat = !editAlarm.repeat.includes('안함') && editAlarm.repeat.length > 0;
+      if (isPast && !hasRepeat && editAlarm.mode === 'deadline') {
+        Alert.alert('시간 오류', '이미 지난 시간입니다. 시간을 다시 설정해주세요.');
+        setSaving(false);
+        return;
+      }
+      const { plan_date, target_time } = (isPast && hasRepeat) || editAlarm.mode === 'lastTrain'
+        ? ensureFutureDateTime(editAlarm.date, rawTime)
+        : { plan_date: editAlarm.date, target_time: rawTime };
+
+      const payload: HomeJourneyPayload = {
+        is_last_mode: editAlarm.mode === 'lastTrain',
+        plan_date,
+        target_time,
+        dest_name: editAlarm.home_name,
+        dest_address: editAlarm.home_address,
+        dest_lat: editAlarm.home_lat!,
+        dest_lng: editAlarm.home_lng!,
+        repeat_days: repeatDaysToMask(editAlarm.repeat),
+        ...(editAlarm.mode === 'deadline' && {
+          transport_type: editAlarm.transport === 'public' ? 'TRANSIT' : 'DRIVING',
+        }),
+      };
+
+      if (isEditMode && editAlarm.journeyId) {
+        await journeysApi.updateHome(editAlarm.journeyId, payload);
+      } else {
+        await journeysApi.createHome(payload);
+      }
+      await loadAlarms();
+      bumpAlarmVersion();
+      setView('list');
+    } catch {
+      Alert.alert('저장 실패', '다시 시도해주세요.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (editAlarm.journeyId) {
+      try { await journeysApi.deleteJourney(editAlarm.journeyId); }
+      catch { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
+    }
+    setAlarms((prev) => prev.filter((a) => a.id !== editAlarm.id));
+    bumpAlarmVersion();
     setView('list');
   };
-  const handleDelete = () => { setAlarms((prev) => prev.filter((a) => a.id !== editAlarm.id)); setView('list'); };
-  const toggleAlarm = (id: string) => setAlarms((prev) => prev.map((a) => a.id === id ? { ...a, enabled: !a.enabled } : a));
+
+  const toggleAlarm = (alarm: HomeAlarm) => {
+    const newEnabled = !alarm.enabled;
+    setAlarms((prev) => prev.map((a) => a.id === alarm.id ? { ...a, enabled: newEnabled } : a));
+    if (alarm.journeyId) {
+      journeysApi.toggleActive(alarm.journeyId, newEnabled).catch(() => {
+        setAlarms((prev) => prev.map((a) => a.id === alarm.id ? { ...a, enabled: !newEnabled } : a));
+      });
+    }
+  };
+
   const toggleRepeat = (day: string) => {
     setEditAlarm((prev) => {
       if (day === '안함') return { ...prev, repeat: ['안함'] };
@@ -113,15 +269,21 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
           </View>
           <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             {[...alarms].sort((a, b) => {
-              if (!a.date) return 1;
-              if (!b.date) return -1;
+              if (!a.date) return 1; if (!b.date) return -1;
               return a.date.localeCompare(b.date);
             }).map((alarm) => (
-              <SwipeableAlarmCard key={alarm.id} onDelete={() => setAlarms((prev) => prev.filter((a) => a.id !== alarm.id))}>
+              <SwipeableAlarmCard key={alarm.id} onDelete={async () => {
+                if (alarm.journeyId) {
+                  try { await journeysApi.deleteJourney(alarm.journeyId); }
+                  catch { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
+                }
+                setAlarms((prev) => prev.filter((a) => a.id !== alarm.id));
+                bumpAlarmVersion();
+              }}>
                 <TouchableOpacity style={styles.alarmCard} onPress={() => openEdit(alarm)} activeOpacity={0.7}>
                   <View style={styles.alarmInfo}>
                     {alarm.date ? <Text style={styles.alarmDate}>{formatCardDate(alarm.date)}</Text> : null}
-                    <Text style={styles.alarmPlace}>{alarm.place}</Text>
+                    <Text style={styles.alarmPlace}>{alarm.home_name}</Text>
                     <View style={styles.alarmMeta}>
                       {alarm.mode === 'lastTrain'
                         ? <Text style={styles.alarmDeadline}>막차 기준</Text>
@@ -137,7 +299,7 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
                     </View>
                   </View>
                   <View style={styles.cardRight}>
-                    <Switch value={alarm.enabled} onValueChange={() => toggleAlarm(alarm.id)}
+                    <Switch value={alarm.enabled} onValueChange={() => toggleAlarm(alarm)}
                       trackColor={{ false: '#E0E0E0', true: '#4CAF50' }} thumbColor="#FFFFFF" />
                   </View>
                 </TouchableOpacity>
@@ -152,10 +314,11 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
         <>
           <View style={styles.header}>
             <TouchableOpacity style={styles.headerBtn} onPress={() => setView('list')}><Feather name="x" size={22} color="#1A1A1A" /></TouchableOpacity>
-            <TouchableOpacity style={styles.saveBtn} onPress={handleSave}><Feather name="check" size={20} color="#FFFFFF" /></TouchableOpacity>
+            <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={saving}>
+              {saving ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Feather name="check" size={20} color="#FFFFFF" />}
+            </TouchableOpacity>
           </View>
 
-          {/* 막차 / 데드라인 탭 */}
           <View style={styles.tabContainer}>
             <TouchableOpacity style={[styles.tab, editAlarm.mode === 'lastTrain' && styles.tabActive]}
               onPress={() => setEditAlarm((prev) => ({ ...prev, mode: 'lastTrain' }))}>
@@ -167,7 +330,6 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
             </TouchableOpacity>
           </View>
 
-          {/* 날짜 선택 영역 (시간 피커 위) */}
           <TouchableOpacity style={styles.datePillContainer} onPress={() => setView('date')} activeOpacity={0.7}>
             <View style={styles.datePill}>
               <Text style={editAlarm.date ? styles.datePillText : styles.datePillPlaceholder}>
@@ -177,7 +339,6 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
           </TouchableOpacity>
 
           <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-            {/* 막차: 안내 / 데드라인: 시간 피커 */}
             {editAlarm.mode === 'lastTrain' ? (
               <View style={styles.lastTrainInfo}>
                 <Text style={styles.lastTrainBig}>막차</Text>
@@ -204,7 +365,7 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
                 <TouchableOpacity style={styles.optionRow} onPress={openHomePlace}>
                   <Text style={styles.optionLabel}>귀가지</Text>
                   <View style={styles.rowRight}>
-                    <Text style={styles.rowValue}>{editAlarm.place}</Text>
+                    <Text style={styles.rowValue}>{editAlarm.home_name || '선택'}</Text>
                     <Feather name="chevron-right" size={16} color="#AAAAAA" />
                   </View>
                 </TouchableOpacity>
@@ -230,19 +391,16 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
                 </TouchableOpacity>
               </View>
             </View>
-
             {isEditMode && (
               <View style={styles.deleteContainer}>
-                <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
-                  <Text style={styles.deleteButtonText}>알람삭제</Text>
-                </TouchableOpacity>
+                <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}><Text style={styles.deleteButtonText}>알람삭제</Text></TouchableOpacity>
               </View>
             )}
           </BottomSheetScrollView>
         </>
       )}
 
-      {/* ── 날짜 선택 (달력) ── */}
+      {/* ── 날짜 선택 ── */}
       {view === 'date' && (
         <>
           <View style={styles.header}>
@@ -293,7 +451,7 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
           </View>
           <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             <View style={styles.optionBox}>
-              {WEEK_DAYS.map((day, index) => {
+              {DAYS.map((day, index) => {
                 const selected = editAlarm.repeat.includes(day);
                 return (
                   <View key={day}>
@@ -301,7 +459,7 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
                       <Text style={styles.optionLabel}>{day}</Text>
                       {selected && <Feather name="check" size={18} color="#F5A623" />}
                     </TouchableOpacity>
-                    {index < WEEK_DAYS.length - 1 && <View style={styles.separator} />}
+                    {index < DAYS.length - 1 && <View style={styles.separator} />}
                   </View>
                 );
               })}
@@ -318,7 +476,14 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
             <Text style={styles.title}>귀가지</Text>
             <TouchableOpacity style={styles.saveBtn} onPress={handleHomePlaceConfirm}><Feather name="check" size={20} color="#FFFFFF" /></TouchableOpacity>
           </View>
-          <AddressSearchView initialResults={HOME_PLACES} selectedId={tempPlace?.id} onSelect={(item) => setTempPlace(item)} selectedIsHome />
+          <AddressSearchView
+            key={searchKey}
+            initialResults={tempPlace?.id === 'current_home' ? [tempPlace!, ...places] : places}
+            selectedId={tempPlace?.id}
+            onSelect={(item) => setTempPlace(item)}
+            onDeleteServerPlace={deletePlace}
+            selectedIsHome
+          />
         </>
       )}
     </BottomSheet>

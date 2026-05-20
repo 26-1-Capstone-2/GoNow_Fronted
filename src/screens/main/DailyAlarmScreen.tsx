@@ -1,7 +1,9 @@
+import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
+import { createJourneysApi, targetTimeToAmpmHourMinute } from '@/src/api/journeys';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, FontAwesome5, FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Platform,
   ScrollView,
@@ -13,22 +15,37 @@ import {
 } from 'react-native';
 
 const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
+const alarmsApi = createAlarmsApi();
+const journeysApi = createJourneysApi();
 
-const SAMPLE_ALARMS = {
-  personal: [
-    { id: '1', ampm: '오후', time: '3:00', place: '중앙대학교 후문 입구, 4/7', enabled: true, transport: 'public' as 'public' | 'car' },
-  ],
-  group: [
-    {
-      id: '2', ampm: '오후', time: '7:00', place: '홍대역 2번 출구, 4/7', enabled: true,
-      members: [{ active: true }, { active: false }],
-      transport: 'public' as 'public' | 'car',
-    },
-  ],
-  home: [
-    { id: '3', ampm: '', time: '막차', place: '우리집', enabled: true, transport: 'public' as 'public' | 'car' },
-  ],
+type AlarmCard = {
+  id: string;
+  journeyId?: number;
+  appointmentId?: number;
+  ampm: string;
+  time: string;
+  place: string;
+  enabled: boolean;
+  transport: 'public' | 'car';
+  isLastMode?: boolean;
+  participantCount?: number;
 };
+
+function toAlarmCard(item: AlarmItem): AlarmCard {
+  const { ampm, hour, minute } = targetTimeToAmpmHourMinute(item.target_time);
+  return {
+    id: String(item.journey_id ?? item.appointment_id),
+    journeyId: item.journey_id ?? undefined,
+    appointmentId: item.appointment_id ?? undefined,
+    ampm,
+    time: `${hour}:${minute}`,
+    place: item.dest_name,
+    enabled: item.is_active,
+    transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
+    isLastMode: item.is_last_mode,
+    participantCount: item.participant_count ?? undefined,
+  };
+}
 
 interface Props {
   onPersonalPress: () => void;
@@ -40,23 +57,41 @@ interface Props {
 
 export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHomePress, onArrivalPress, isArrivalActive = false }: Props) {
   const router = useRouter();
-  const { selectedDate, selectedMonth, setSelectedDate } = useCalendarStore();
+  const { selectedDate, selectedMonth, setSelectedDate, alarmVersion } = useCalendarStore();
   const today = new Date();
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-  const [alarms, setAlarms] = useState(SAMPLE_ALARMS);
+
+  const [personal, setPersonal] = useState<AlarmCard[]>([]);
+  const [group, setGroup] = useState<AlarmCard[]>([]);
+  const [home, setHome] = useState<AlarmCard[]>([]);
 
   const dateObj = new Date(selectedDate);
   const month = dateObj.getMonth() + 1;
   const date = dateObj.getDate();
   const dayName = DAY_NAMES[dateObj.getDay()];
 
-  const toggleAlarm = (section: 'personal' | 'group' | 'home', id: string) => {
-    setAlarms((prev) => ({
-      ...prev,
-      [section]: prev[section].map((a: any) =>
-        a.id === id ? { ...a, enabled: !a.enabled } : a
-      ),
-    }));
+  const loadAlarms = useCallback(async () => {
+    try {
+      const res = await alarmsApi.getAlarms(selectedDate);
+      const data = res.data ?? [];
+      setPersonal(data.filter((a) => a.alarm_type === 'PERSONAL').map(toAlarmCard));
+      setGroup(data.filter((a) => a.alarm_type === 'GROUP').map(toAlarmCard));
+      setHome(data.filter((a) => a.alarm_type === 'HOME').map(toAlarmCard));
+    } catch {}
+  }, [selectedDate, alarmVersion]);
+
+  useEffect(() => {
+    loadAlarms();
+  }, [loadAlarms]);
+
+  const toggleAlarm = (setter: React.Dispatch<React.SetStateAction<AlarmCard[]>>, alarm: AlarmCard) => {
+    const newEnabled = !alarm.enabled;
+    setter((prev) => prev.map((a) => a.id === alarm.id ? { ...a, enabled: newEnabled } : a));
+    if (alarm.journeyId) {
+      journeysApi.toggleActive(alarm.journeyId, newEnabled).catch(() => {
+        setter((prev) => prev.map((a) => a.id === alarm.id ? { ...a, enabled: !newEnabled } : a));
+      });
+    }
   };
 
   return (
@@ -86,7 +121,7 @@ export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHome
               <Feather name="menu" size={20} color="#888888" />
             </TouchableOpacity>
           </View>
-          {alarms.personal.map((alarm) => (
+          {personal.map((alarm) => (
             <View key={alarm.id} style={styles.alarmCard}>
               <View style={styles.alarmInfo}>
                 <Text style={styles.alarmPlace}>{alarm.place}</Text>
@@ -101,7 +136,7 @@ export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHome
               <View style={styles.cardRight}>
                 <Switch
                   value={alarm.enabled}
-                  onValueChange={() => toggleAlarm('personal', alarm.id)}
+                  onValueChange={() => toggleAlarm(setPersonal, alarm)}
                   trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
                   thumbColor="#FFFFFF"
                 />
@@ -118,7 +153,7 @@ export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHome
               <Feather name="menu" size={20} color="#888888" />
             </TouchableOpacity>
           </View>
-          {alarms.group.map((alarm) => (
+          {group.map((alarm) => (
             <View key={alarm.id} style={styles.alarmCard}>
               <View style={styles.alarmInfo}>
                 <Text style={styles.alarmPlace}>{alarm.place}</Text>
@@ -133,7 +168,7 @@ export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHome
               <View style={styles.cardRight}>
                 <View style={styles.memberBadge}>
                   <Feather name="users" size={11} color="#555555" />
-                  <Text style={styles.memberCount}>{alarm.members.length}명</Text>
+                  <Text style={styles.memberCount}>{alarm.participantCount ?? 0}명</Text>
                 </View>
                 <TouchableOpacity
                   onPress={onArrivalPress}
@@ -144,7 +179,7 @@ export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHome
                 </TouchableOpacity>
                 <Switch
                   value={alarm.enabled}
-                  onValueChange={() => toggleAlarm('group', alarm.id)}
+                  onValueChange={() => toggleAlarm(setGroup, alarm)}
                   trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
                   thumbColor="#FFFFFF"
                 />
@@ -161,15 +196,15 @@ export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHome
               <Feather name="menu" size={20} color="#888888" />
             </TouchableOpacity>
           </View>
-          {alarms.home.map((alarm) => (
+          {home.map((alarm) => (
             <View key={alarm.id} style={styles.alarmCard}>
               <View style={styles.alarmInfo}>
                 <Text style={styles.alarmPlace}>{alarm.place}</Text>
                 <View style={styles.alarmMeta}>
                   <Text style={styles.alarmDeadline}>
-                    {alarm.time === '막차' ? '막차 기준' : `${alarm.ampm ?? ''} ${alarm.time} 까지`}
+                    {alarm.isLastMode ? '막차 기준' : `${alarm.ampm} ${alarm.time} 까지`}
                   </Text>
-                  {alarm.time === '막차' || alarm.transport === 'public'
+                  {alarm.isLastMode || alarm.transport === 'public'
                     ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
                     : <FontAwesome5 name="car-side" size={13} color="#F5A623" />
                   }
@@ -178,7 +213,7 @@ export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHome
               <View style={styles.cardRight}>
                 <Switch
                   value={alarm.enabled}
-                  onValueChange={() => toggleAlarm('home', alarm.id)}
+                  onValueChange={() => toggleAlarm(setHome, alarm)}
                   trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
                   thumbColor="#FFFFFF"
                 />
