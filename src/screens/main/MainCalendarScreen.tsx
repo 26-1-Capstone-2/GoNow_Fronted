@@ -377,16 +377,10 @@ export default function MainCalendarScreen() {
       {showHomeSheet && (
         <HomeAllAlarmSheet onClose={() => setShowHomeSheet(false)} />
       )}
-      {showArrivalSheet && selectedGroupAlarm && (
+      {showArrivalSheet && selectedGroupAlarm?.appointmentId && (
         <ArrivalDashboardSheet
           onClose={() => setShowArrivalSheet(false)}
-          destination={selectedGroupAlarm.place}
-          alarmTime={selectedGroupAlarm.ampm + ' ' + selectedGroupAlarm.hour + '시'}
-          members={selectedGroupAlarm.members.map((m: any) => ({
-            ...m,
-            transport: m.transport ?? 'public',
-            arrivalTime: m.isMe ? '오후 7시 2분' : '오후 7시 3분',
-          }))}
+          appointmentId={selectedGroupAlarm.appointmentId}
         />
       )}
     </SafeAreaView>

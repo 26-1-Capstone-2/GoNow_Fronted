@@ -138,15 +138,9 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
     if (alarm.journeyId) {
       try {
         const res = await journeysApi.getJourney(alarm.journeyId);
-        let detail = fromJourneyDetail(res.data, alarm.date);
-        if (!detail.home_lat || !detail.home_lng) {
-          const match = places.find((p) => p.name === detail.home_name);
-          if (match?.lat && match?.lng) detail = { ...detail, home_lat: match.lat, home_lng: match.lng };
-        }
-        setEditAlarm(detail);
+        setEditAlarm(fromJourneyDetail(res.data, alarm.date));
       } catch {
-        const match = places.find((p) => p.name === alarm.home_name);
-        setEditAlarm(match?.lat && match?.lng ? { ...alarm, home_lat: match.lat, home_lng: match.lng } : alarm);
+        setEditAlarm(alarm);
       }
     } else {
       setEditAlarm(alarm);
@@ -155,12 +149,9 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
   };
 
   const openHomePlace = () => {
-    if (editAlarm.home_name) {
-      const match = places.find((p) => p.name === editAlarm.home_name);
-      setTempPlace(match ?? { id: 'current_home', name: editAlarm.home_name, address: editAlarm.home_address, lat: editAlarm.home_lat, lng: editAlarm.home_lng, isHome: true, isCurrent: true });
-    } else {
-      setTempPlace(null);
-    }
+    setTempPlace(editAlarm.home_name ? {
+      id: 'current_home', name: editAlarm.home_name, address: editAlarm.home_address, lat: editAlarm.home_lat, lng: editAlarm.home_lng, isHome: true, isCurrent: true,
+    } : null);
     setView('homePlace');
   };
 

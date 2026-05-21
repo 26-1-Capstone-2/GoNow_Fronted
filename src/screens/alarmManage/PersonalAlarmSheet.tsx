@@ -143,20 +143,9 @@ export default function PersonalAlarmSheet({ onClose }: Props) {
     if (alarm.journeyId) {
       try {
         const res = await journeysApi.getJourney(alarm.journeyId);
-        let detail = fromJourneyDetail(res.data);
-        if (!detail.dest_lat || !detail.dest_lng) {
-          const match = places.find((p) => p.name === detail.dest_name);
-          if (match?.lat && match?.lng) {
-            detail = { ...detail, dest_lat: match.lat, dest_lng: match.lng };
-          }
-        }
-        setEditAlarm(detail);
+        setEditAlarm(fromJourneyDetail(res.data));
       } catch {
-        const match = places.find((p) => p.name === alarm.dest_name);
-        setEditAlarm(match?.lat && match?.lng
-          ? { ...alarm, dest_lat: match.lat, dest_lng: match.lng }
-          : alarm
-        );
+        setEditAlarm(alarm);
       }
     } else {
       setEditAlarm(alarm);
@@ -164,19 +153,14 @@ export default function PersonalAlarmSheet({ onClose }: Props) {
     setView('edit');
   };
   const openPlace = () => {
-    if (editAlarm.dest_name) {
-      const match = places.find((p) => p.name === editAlarm.dest_name);
-      setTempPlace(match ?? {
-        id: 'current_dest',
-        name: editAlarm.dest_name,
-        address: editAlarm.dest_address,
-        lat: editAlarm.dest_lat,
-        lng: editAlarm.dest_lng,
-        isCurrent: true,
-      });
-    } else {
-      setTempPlace(null);
-    }
+    setTempPlace(editAlarm.dest_name ? {
+      id: 'current_dest',
+      name: editAlarm.dest_name,
+      address: editAlarm.dest_address,
+      lat: editAlarm.dest_lat,
+      lng: editAlarm.dest_lng,
+      isCurrent: true,
+    } : null);
     setView('place');
   };
 

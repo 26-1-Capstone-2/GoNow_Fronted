@@ -64,6 +64,25 @@ export type GetAppointmentResponse = {
   data: AppointmentDetail | null;
 };
 
+export type DashboardParticipant = {
+  nickname: string;
+  transport_type: 'TRANSIT' | 'DRIVING';
+  estimated_arrival: string;
+  is_me: boolean;
+};
+
+export type DashboardData = {
+  target_time: string;
+  dest_name: string;
+  participants: DashboardParticipant[];
+};
+
+export type GetDashboardResponse = {
+  success: boolean;
+  message: string;
+  data: DashboardData | null;
+};
+
 export function createAppointmentsApi() {
   const { request } = createApiClient({ getToken });
   return {
@@ -95,9 +114,11 @@ export function createAppointmentsApi() {
         { method: 'POST', body: JSON.stringify({ invite_code, transport_type }) },
       ),
     removeParticipant: (appointmentId: number, targetMemberId: number) =>
-      request<{ status: boolean; message: string; data: null }>(
+      request<{ success: boolean; message: string; data: null }>(
         `/api/appointments/${appointmentId}/participants/${targetMemberId}`,
         { method: 'DELETE' },
       ),
+    getDashboard: (appointmentId: number) =>
+      request<GetDashboardResponse>(`/api/appointments/${appointmentId}/dashboard`, { method: 'GET' }),
   };
 }

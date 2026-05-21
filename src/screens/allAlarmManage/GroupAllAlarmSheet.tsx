@@ -5,8 +5,9 @@ import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createAppointmentsApi } from '@/src/api/appointments';
 import { targetTimeToAmpmHourMinute } from '@/src/api/journeys';
 import { createMembersApi } from '@/src/api/members';
+import { usePlaces } from '@/src/hooks/usePlaces';
 import { useCalendarStore } from '@/src/store/calendarStore';
-import { Feather, FontAwesome5, FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Entypo, Feather, FontAwesome5, FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -119,6 +120,9 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
   const snapPoints = useMemo(() => ['85%'], []);
 
   const { bumpAlarmVersion } = useCalendarStore();
+  const { places, searchKey, loadPlaces, savePlace, deletePlace } = usePlaces('DEST');
+
+  useEffect(() => { loadPlaces().catch(() => {}); }, [loadPlaces]);
   const [view, setView] = useState<ViewType>('list');
   const [alarms, setAlarms] = useState<GroupAlarm[]>([]);
 
@@ -196,9 +200,9 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
       if (detailRes.success && detailRes.data) {
         const d = detailRes.data;
         const myMemberId = profileRes.data?.member_id;
-        const isCurrentUserHost = d.participants.some(
-          (p) => p.member_id === myMemberId && p.is_host
-        );
+        const isCurrentUserHost = myMemberId != null
+          ? d.participants.some((p) => p.member_id === myMemberId && p.is_host)
+          : true;
         const { ampm, hour, minute } = targetTimeToAmpmHourMinute(d.target_time);
         setEditAlarm({
           ...alarm,
@@ -222,11 +226,18 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
     } catch {}
   };
   const openPlace = () => {
-    setTempPlace(null);
+    setTempPlace(editAlarm.place ? {
+      id: 'current_dest',
+      name: editAlarm.place,
+      address: editAlarm.place_address ?? '',
+      lat: editAlarm.place_lat,
+      lng: editAlarm.place_lng,
+      isCurrent: true,
+    } : null);
     setView('place');
   };
   const handlePlaceConfirm = () => {
-    if (tempPlace) {
+    if (tempPlace?.lat && tempPlace?.lng) {
       setEditAlarm((prev) => ({
         ...prev,
         place: tempPlace.name,
@@ -234,6 +245,7 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
         place_lat: tempPlace.lat,
         place_lng: tempPlace.lng,
       }));
+      savePlace(tempPlace).catch(() => {});
     }
     setView('edit');
   };
@@ -303,25 +315,17 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
         text: '추방', style: 'destructive', onPress: async () => {
           try {
             const res = await appointmentsApi.removeParticipant(editAlarm.appointmentId!, parseInt(member.id));
-            if (res.status) {
-              const detailRes = await appointmentsApi.getAppointment(editAlarm.appointmentId!);
-              if (detailRes.success && detailRes.data) {
-                const myMemberId = editAlarm.members.find((m) => m.isMe)?.id;
-                setEditAlarm((prev) => ({
-                  ...prev,
-                  members: detailRes.data!.participants.map((p) => ({
-                    id: String(p.member_id),
-                    name: p.nickname,
-                    isMe: String(p.member_id) === myMemberId,
-                    isHost: p.is_host,
-                    transport: p.transport_type === 'TRANSIT' ? 'public' : 'car',
-                  })),
-                }));
-              }
+            if (res.success) {
               await loadAlarms();
               bumpAlarmVersion();
+              await openEdit(editAlarm);
+              Alert.alert('추방 완료', `${member.name}님을 추방했습니다.`);
+            } else {
+              Alert.alert('추방 실패', '다시 시도해주세요.');
             }
-          } catch {}
+          } catch {
+            Alert.alert('추방 실패', '네트워크 오류가 발생했습니다.');
+          }
         },
       },
     ]);
@@ -336,12 +340,18 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
         text: '탈퇴', style: 'destructive', onPress: async () => {
           try {
             const res = await appointmentsApi.removeParticipant(editAlarm.appointmentId!, parseInt(myMember.id));
-            if (res.status) {
+            if (res.success) {
               await loadAlarms();
               bumpAlarmVersion();
-              setView('list');
+              Alert.alert('탈퇴 완료', '그룹에서 탈퇴했습니다.', [
+                { text: '확인', onPress: () => setView('list') },
+              ]);
+            } else {
+              Alert.alert('탈퇴 실패', '다시 시도해주세요.');
             }
-          } catch {}
+          } catch {
+            Alert.alert('탈퇴 실패', '네트워크 오류가 발생했습니다.');
+          }
         },
       },
     ]);
@@ -433,7 +443,7 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
                     if (res.success) { await loadAlarms(); bumpAlarmVersion(); }
                   } else {
                     const res = await appointmentsApi.removeParticipant(alarm.appointmentId, myMemberId);
-                    if (res.status) { await loadAlarms(); bumpAlarmVersion(); }
+                    if (res.success) { await loadAlarms(); bumpAlarmVersion(); }
                   }
                 } catch {}
               }}>
@@ -561,8 +571,8 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
                           <FontAwesome5 name="car-side" size={18} color="#F5A623" />
                         )}
                         {editAlarm.isCurrentUserHost && !member.isHost && (
-                          <TouchableOpacity onPress={() => handleKickMember(member)} style={{ marginLeft: 8 }}>
-                            <Feather name="user-x" size={16} color="#FF3B30" />
+                          <TouchableOpacity onPress={() => handleKickMember(member)} style={{ marginLeft: 16 }}>
+                            <Entypo name="block" size={22} color="#FF3B30" />
                           </TouchableOpacity>
                         )}
                       </View>
@@ -619,10 +629,10 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
               </View>
             </View>
 
-            {isEditMode && editAlarm.isCurrentUserHost !== false && (
+            {isEditMode && editAlarm.isCurrentUserHost === true && (
               <View style={styles.deleteContainer}>
                 <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
-                  <Text style={styles.deleteButtonText}>알람삭제</Text>
+                  <Text style={styles.deleteButtonText}>그룹 삭제</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -784,9 +794,11 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
             </TouchableOpacity>
           </View>
           <AddressSearchView
-            initialResults={[]}
+            key={searchKey}
+            initialResults={tempPlace?.id === 'current_dest' ? [tempPlace!, ...places] : places}
             selectedId={tempPlace?.id}
             onSelect={(item) => setTempPlace(item)}
+            onDeleteServerPlace={deletePlace}
           />
         </>
       )}
