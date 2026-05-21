@@ -1,4 +1,4 @@
-const defaultBaseUrl = '';
+const defaultBaseUrl = 'https://gonow-api.uk';
 
 export type ApiClientOptions = {
   baseUrl?: string;

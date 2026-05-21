@@ -1,6 +1,8 @@
+import { createMembersApi } from '@/src/api/members';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React from 'react';
+import { useFocusEffect } from 'expo-router';
+import React, { useCallback, useState } from 'react';
 import {
   Alert,
   SafeAreaView,
@@ -10,8 +12,19 @@ import {
   View,
 } from 'react-native';
 
+const membersApi = createMembersApi();
+
 export default function ProfileSettingsScreen() {
   const router = useRouter();
+  const [nickname, setNickname] = useState('');
+
+  useFocusEffect(
+    useCallback(() => {
+      membersApi.getMyProfile()
+        .then((res) => setNickname(res.data.nickname))
+        .catch(() => {});
+    }, []),
+  );
 
   const handleLogout = () => {
     Alert.alert('로그아웃', '정말 로그아웃 하시겠습니까?', [
@@ -50,7 +63,7 @@ export default function ProfileSettingsScreen() {
 
       {/* 닉네임 */}
       <View style={styles.nicknameContainer}>
-        <Text style={styles.nickname}>가가가</Text>
+        <Text style={styles.nickname}>{nickname || '...'}</Text>
       </View>
 
       {/* 상단 버튼 그룹 */}

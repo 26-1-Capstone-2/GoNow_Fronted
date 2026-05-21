@@ -11,18 +11,64 @@ import {
   View,
 } from 'react-native';
 
+import { createAuthApi } from '@/src/api/auth';
 import { useAppNavigation } from '@/src/navigation';
+import { useSignUpStore } from '@/src/store/signUpStore';
+
+const authApi = createAuthApi();
+
+type FieldStatus = 'idle' | 'checking' | 'ok' | 'error';
 
 export default function SignUpScreen() {
   const { goBack, goToHomeAddressSetup } = useAppNavigation();
+  const setBasicInfo = useSignUpStore((s) => s.setBasicInfo);
+
   const [email, setEmail] = useState('');
+  const [emailStatus, setEmailStatus] = useState<FieldStatus>('idle');
+  const [emailMsg, setEmailMsg] = useState('');
+
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
+
   const [nickname, setNickname] = useState('');
+  const [nicknameStatus, setNicknameStatus] = useState<FieldStatus>('idle');
+  const [nicknameMsg, setNicknameMsg] = useState('');
+
+  const handleEmailBlur = async () => {
+    if (!email) return;
+    setEmailStatus('checking');
+    try {
+      const res = await authApi.checkEmail(email);
+      setEmailStatus(res.success ? 'ok' : 'error');
+      setEmailMsg(res.message);
+    } catch {
+      setEmailStatus('error');
+      setEmailMsg('이미 사용 중인 이메일입니다.');
+    }
+  };
+
+  const handleNicknameBlur = async () => {
+    if (!nickname) return;
+    setNicknameStatus('checking');
+    try {
+      const res = await authApi.checkNickname(nickname);
+      setNicknameStatus(res.success ? 'ok' : 'error');
+      setNicknameMsg(res.message);
+    } catch {
+      setNicknameStatus('error');
+      setNicknameMsg('이미 사용 중인 닉네임입니다.');
+    }
+  };
+
+  const canProceed =
+    emailStatus === 'ok' &&
+    nicknameStatus === 'ok' &&
+    password.length > 0 &&
+    password === passwordConfirm;
 
   const handleNext = () => {
-    // TODO: API 연동
-    console.log({ email, password, nickname });
+    if (!canProceed) return;
+    setBasicInfo({ email, password, nickname });
     goToHomeAddressSetup();
   };
 
@@ -49,14 +95,27 @@ export default function SignUpScreen() {
           <View style={styles.formContainer}>
             <Text style={styles.label}>E-mail</Text>
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                emailStatus === 'ok' && styles.inputOk,
+                emailStatus === 'error' && styles.inputError,
+              ]}
               placeholder="email@email.com"
               placeholderTextColor="#BBBBBB"
               value={email}
-              onChangeText={setEmail}
+              onChangeText={(t) => { setEmail(t); setEmailStatus('idle'); setEmailMsg(''); }}
+              onBlur={handleEmailBlur}
               keyboardType="email-address"
               autoCapitalize="none"
             />
+            {emailMsg ? (
+              <Text style={emailStatus === 'ok' ? styles.okText : styles.errorText}>
+                {emailStatus === 'checking' ? '확인 중...' : emailMsg}
+              </Text>
+            ) : null}
+            {emailStatus === 'checking' && (
+              <Text style={styles.checkingText}>확인 중...</Text>
+            )}
 
             <Text style={styles.label}>비밀번호</Text>
             <TextInput
@@ -75,6 +134,9 @@ export default function SignUpScreen() {
                 passwordConfirm.length > 0 && password !== passwordConfirm
                   ? styles.inputError
                   : null,
+                passwordConfirm.length > 0 && password === passwordConfirm
+                  ? styles.inputOk
+                  : null,
               ]}
               placeholder="비밀번호 확인"
               placeholderTextColor="#BBBBBB"
@@ -88,17 +150,34 @@ export default function SignUpScreen() {
 
             <Text style={styles.label}>닉네임</Text>
             <TextInput
-              style={styles.input}
+              style={[
+                styles.input,
+                nicknameStatus === 'ok' && styles.inputOk,
+                nicknameStatus === 'error' && styles.inputError,
+              ]}
               placeholder="12글자 이내로 입력하세요."
               placeholderTextColor="#BBBBBB"
               value={nickname}
-              onChangeText={(t) => t.length <= 12 && setNickname(t)}
+              onChangeText={(t) => { if (t.length <= 12) { setNickname(t); setNicknameStatus('idle'); setNicknameMsg(''); } }}
+              onBlur={handleNicknameBlur}
               maxLength={12}
             />
+            {nicknameMsg ? (
+              <Text style={nicknameStatus === 'ok' ? styles.okText : styles.errorText}>
+                {nicknameMsg}
+              </Text>
+            ) : null}
+            {nicknameStatus === 'checking' && (
+              <Text style={styles.checkingText}>확인 중...</Text>
+            )}
           </View>
 
           {/* 다음 버튼 */}
-          <TouchableOpacity style={styles.signUpButton} onPress={handleNext}>
+          <TouchableOpacity
+            style={[styles.signUpButton, !canProceed && styles.signUpButtonDisabled]}
+            onPress={handleNext}
+            disabled={!canProceed}
+          >
             <Text style={styles.signUpButtonText}>다음</Text>
           </TouchableOpacity>
         </ScrollView>
@@ -153,12 +232,25 @@ const styles = StyleSheet.create({
     color: '#1A1A1A',
     backgroundColor: '#FFFFFF',
   },
+  inputOk: {
+    borderColor: '#4CAF50',
+  },
   inputError: {
     borderColor: '#FF4444',
+  },
+  okText: {
+    fontSize: 12,
+    color: '#4CAF50',
+    marginTop: 4,
   },
   errorText: {
     fontSize: 12,
     color: '#FF4444',
+    marginTop: 4,
+  },
+  checkingText: {
+    fontSize: 12,
+    color: '#AAAAAA',
     marginTop: 4,
   },
   signUpButton: {
@@ -169,6 +261,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 36,
+  },
+  signUpButtonDisabled: {
+    backgroundColor: '#CCCCCC',
   },
   signUpButtonText: {
     fontSize: 16,

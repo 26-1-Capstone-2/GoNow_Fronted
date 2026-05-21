@@ -1,8 +1,9 @@
-import { useCalendarStore } from '@/src/store/calendarStore';
+import { createAppointmentsApi, DashboardParticipant } from '@/src/api/appointments';
 import { Feather, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
-import React, { useCallback, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Platform,
   StyleSheet,
   Text,
@@ -10,40 +11,73 @@ import {
   View,
 } from 'react-native';
 
+const appointmentsApi = createAppointmentsApi();
+
 const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
 
-interface MemberArrival {
-  id: string;
-  name: string;
-  isMe: boolean;
-  arrivalTime?: string;
-  transport?: 'public' | 'car';
+function formatEstimatedArrival(isoString: string): string {
+  const d = new Date(isoString);
+  const h = d.getHours();
+  const m = d.getMinutes();
+  const ampm = h >= 12 ? '오후' : '오전';
+  const displayH = h > 12 ? h - 12 : h === 0 ? 12 : h;
+  return m === 0 ? `${ampm} ${displayH}시` : `${ampm} ${displayH}시 ${m}분`;
 }
 
-interface Props {
-  onClose: () => void;
-  destination: string;
-  alarmTime: string;
-  members: MemberArrival[];
+function formatTargetTime(isoString: string): string {
+  const d = new Date(isoString);
+  const h = d.getHours();
+  const m = d.getMinutes();
+  const ampm = h >= 12 ? '오후' : '오전';
+  const displayH = h > 12 ? h - 12 : h === 0 ? 12 : h;
+  return m === 0 ? `${ampm} ${displayH}시` : `${ampm} ${displayH}시 ${m}분`;
 }
 
-function TransportBadge({ transport }: { transport?: 'public' | 'car' }) {
-  if (!transport) return null;
-  if (transport === 'public') {
+function TransportBadge({ transport }: { transport: 'TRANSIT' | 'DRIVING' }) {
+  if (transport === 'TRANSIT') {
     return <MaterialCommunityIcons name="bus-side" size={20} color="#4A90D9" />;
   }
   return <FontAwesome5 name="car-side" size={18} color="#F5A623" />;
 }
 
-export default function ArrivalDashboardSheet({ onClose, destination, alarmTime, members }: Props) {
+interface Props {
+  onClose: () => void;
+  appointmentId: number;
+}
+
+export default function ArrivalDashboardSheet({ onClose, appointmentId }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['85%'], []);
-  const { selectedDate } = useCalendarStore();
 
-  const dateObj = new Date(selectedDate);
-  const month = dateObj.getMonth() + 1;
-  const date = dateObj.getDate();
-  const dayName = DAY_NAMES[dateObj.getDay()];
+  const [loading, setLoading] = useState(true);
+  const [destName, setDestName] = useState('');
+  const [targetTime, setTargetTime] = useState('');
+  const [targetDate, setTargetDate] = useState('');
+  const [participants, setParticipants] = useState<DashboardParticipant[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetch = async () => {
+      setLoading(true);
+      try {
+        const res = await appointmentsApi.getDashboard(appointmentId);
+        if (!cancelled && res.success && res.data) {
+          const d = res.data;
+          setDestName(d.dest_name);
+          setTargetTime(formatTargetTime(d.target_time));
+          const dateObj = new Date(d.target_time);
+          const month = dateObj.getMonth() + 1;
+          const date = dateObj.getDate();
+          const dayName = DAY_NAMES[dateObj.getDay()];
+          setTargetDate(`${month}월 ${date}일 ${dayName}요일`);
+          setParticipants(d.participants);
+        }
+      } catch {}
+      if (!cancelled) setLoading(false);
+    };
+    fetch();
+    return () => { cancelled = true; };
+  }, [appointmentId]);
 
   const handleSheetChange = useCallback((index: number) => {
     if (index === -1) onClose();
@@ -69,37 +103,44 @@ export default function ArrivalDashboardSheet({ onClose, destination, alarmTime,
         <View style={{ width: 36 }} />
       </View>
 
-      <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.datePillContainer}>
-          <View style={styles.datePill}>
-            <Text style={styles.datePillText}>
-              {month}월 {date}일 {dayName}요일 {alarmTime}
-            </Text>
-          </View>
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#F5A623" />
         </View>
-
-        <View style={styles.destinationContainer}>
-          <View style={styles.destinationPill}>
-            <Text style={styles.destinationText}>{destination}</Text>
-          </View>
-        </View>
-
-        {/* 멤버 목록 */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>멤버({members.length})</Text>
-          {members.map((member) => (
-            <View key={member.id} style={styles.memberCard}>
-              <View style={styles.memberCardTop}>
-                <Text style={styles.memberName}>{member.name}</Text>
-                <TransportBadge transport={member.transport} />
-              </View>
-              <Text style={styles.arrivalTime}>
-                {member.arrivalTime ? `${member.arrivalTime} 도착예정` : '계산 중…'}
+      ) : (
+        <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <View style={styles.datePillContainer}>
+            <View style={styles.datePill}>
+              <Text style={styles.datePillText}>
+                {targetDate} {targetTime}
               </Text>
             </View>
-          ))}
-        </View>
-      </BottomSheetScrollView>
+          </View>
+
+          <View style={styles.destinationContainer}>
+            <View style={styles.destinationPill}>
+              <Text style={styles.destinationText}>{destName}</Text>
+            </View>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>멤버({participants.length})</Text>
+            {participants.map((p, i) => (
+              <View key={i} style={[styles.memberCard, p.is_me && styles.memberCardMe]}>
+                <View style={styles.memberCardTop}>
+                  <Text style={styles.memberName}>
+                    {p.nickname}{p.is_me ? ' (나)' : ''}
+                  </Text>
+                  <TransportBadge transport={p.transport_type} />
+                </View>
+                <Text style={styles.arrivalTime}>
+                  {p.estimated_arrival ? `${formatEstimatedArrival(p.estimated_arrival)} 도착예정` : '계산 중…'}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </BottomSheetScrollView>
+      )}
     </BottomSheet>
   );
 }
@@ -116,6 +157,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center',
   },
   title: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', flex: 1, textAlign: 'center' },
+  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   content: { paddingHorizontal: 16, paddingBottom: Platform.OS === 'ios' ? 40 : 24 },
   datePillContainer: { alignItems: 'center', marginBottom: 10 },
   datePill: { backgroundColor: '#F5F5F5', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8 },
@@ -130,11 +172,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 14,
     marginBottom: 8, alignItems: 'center',
   },
+  memberCardMe: { borderWidth: 1.5, borderColor: '#F5A623' },
   memberCardTop: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     width: '100%', marginBottom: 10,
   },
   memberName: { fontSize: 13, color: '#888888' },
   arrivalTime: { fontSize: 22, fontWeight: '700', color: '#1A1A1A', textAlign: 'center' },
-
 });

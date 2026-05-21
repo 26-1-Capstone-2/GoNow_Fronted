@@ -1,6 +1,6 @@
 import { AddressResult, PlaceResult, searchAll } from '@/src/api/kakao';
 import { Feather } from '@expo/vector-icons';
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -17,6 +17,9 @@ export interface SearchResult {
   id: string;
   name: string;
   address: string;
+  lat?: number;
+  lng?: number;
+  serverPlaceId?: number;
   isCurrent?: boolean;
   isHome?: boolean;
 }
@@ -25,6 +28,7 @@ interface Props {
   initialResults?: SearchResult[];
   selectedId?: string;
   onSelect: (item: SearchResult) => void;
+  onDeleteServerPlace?: (serverPlaceId: number) => void;
   placeholder?: string;
   selectedIsHome?: boolean;
 }
@@ -137,6 +141,7 @@ export default function AddressSearchView({
   initialResults = [],
   selectedId,
   onSelect,
+  onDeleteServerPlace,
   placeholder = '지번, 도로명, 건물명으로 검색',
   selectedIsHome = false,
 }: Props) {
@@ -144,6 +149,12 @@ export default function AddressSearchView({
   const [results, setResults] = useState<SearchResult[]>(initialResults);
   const [loading, setLoading] = useState(false);
   const isSearching = query.trim().length > 0;
+
+  useEffect(() => {
+    if (!isSearching) {
+      setResults(initialResults);
+    }
+  }, [initialResults]);
 
   const handleSearch = useCallback(async (text: string) => {
     setQuery(text);
@@ -159,11 +170,15 @@ export default function AddressSearchView({
           id: `place_${p.id}`,
           name: p.place_name,
           address: p.road_address_name || p.address_name,
+          lat: parseFloat(p.y),
+          lng: parseFloat(p.x),
         })),
         ...addresses.map((a: AddressResult, i: number) => ({
           id: `addr_${i}`,
           name: a.road_address?.building_name || a.address_name,
           address: a.road_address?.address_name || a.address?.address_name || a.address_name,
+          lat: parseFloat(a.y),
+          lng: parseFloat(a.x),
         })),
       ].filter((r) => r.name);
       setResults(combined.length > 0 ? combined : []);
@@ -176,6 +191,8 @@ export default function AddressSearchView({
   }, [initialResults]);
 
   const handleDelete = (id: string) => {
+    const item = results.find((r) => r.id === id);
+    if (item?.serverPlaceId) onDeleteServerPlace?.(item.serverPlaceId);
     setResults((prev) => prev.filter((r) => r.id !== id));
   };
 

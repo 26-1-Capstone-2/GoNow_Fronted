@@ -1,7 +1,10 @@
+import { createMembersApi } from '@/src/api/members';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
+    ActivityIndicator,
+    Alert,
     Platform,
     SafeAreaView,
     StyleSheet,
@@ -11,14 +14,24 @@ import {
     View,
 } from 'react-native';
 
+const membersApi = createMembersApi();
+
 export default function ChangeNicknameScreen() {
   const router = useRouter();
   const [nickname, setNickname] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!nickname.trim()) return;
-    // TODO: 닉네임 변경 API 연결
-    router.back();
+    setLoading(true);
+    try {
+      await membersApi.updateNickname(nickname.trim());
+      router.back();
+    } catch (e: any) {
+      Alert.alert('변경 실패', e?.message ?? '다시 시도해주세요.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -49,12 +62,15 @@ export default function ChangeNicknameScreen() {
       {/* 저장 버튼 */}
       <View style={styles.footer}>
         <TouchableOpacity
-          style={[styles.saveButton, !nickname.trim() && styles.saveButtonDisabled]}
+          style={[styles.saveButton, (!nickname.trim() || loading) && styles.saveButtonDisabled]}
           onPress={handleSave}
-          disabled={!nickname.trim()}
+          disabled={!nickname.trim() || loading}
           activeOpacity={0.7}
         >
-          <Text style={styles.saveButtonText}>저장</Text>
+          {loading
+            ? <ActivityIndicator color="#FFFFFF" />
+            : <Text style={styles.saveButtonText}>저장</Text>
+          }
         </TouchableOpacity>
       </View>
     </SafeAreaView>
