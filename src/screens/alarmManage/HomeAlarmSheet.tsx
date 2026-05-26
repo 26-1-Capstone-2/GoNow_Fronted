@@ -81,6 +81,8 @@ interface HomeAlarm {
 
 interface Props {
   onClose: () => void;
+  initialMode?: 'add' | 'edit';
+  editJourneyId?: number;
 }
 
 function getRepeatLabel(repeat: string[]): string {
@@ -100,7 +102,7 @@ const DEFAULT_ALARM: HomeAlarm = {
   repeat: ['안함'], enabled: true, transport: 'public',
 };
 
-export default function HomeAlarmSheet({ onClose }: Props) {
+export default function HomeAlarmSheet({ onClose, initialMode, editJourneyId }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['85%'], []);
   const { selectedDate, bumpAlarmVersion } = useCalendarStore();
@@ -137,6 +139,18 @@ export default function HomeAlarmSheet({ onClose }: Props) {
   const handleSheetChange = useCallback((index: number) => {
     if (index === -1) onClose();
   }, [onClose]);
+
+  useEffect(() => {
+    if (initialMode === 'add') {
+      setEditAlarm(DEFAULT_ALARM);
+      setView('edit');
+    } else if (initialMode === 'edit' && editJourneyId) {
+      journeysApi.getJourney(editJourneyId)
+        .then((res) => { setEditAlarm(fromJourneyDetail(res.data)); setView('edit'); })
+        .catch(() => {});
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const openAdd = () => { setEditAlarm(DEFAULT_ALARM); setView('edit'); };
   const openHomePlace = () => {

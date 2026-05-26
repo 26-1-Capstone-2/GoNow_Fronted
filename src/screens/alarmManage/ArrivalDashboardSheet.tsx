@@ -50,34 +50,36 @@ export default function ArrivalDashboardSheet({ onClose, appointmentId }: Props)
   const snapPoints = useMemo(() => ['85%'], []);
 
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [destName, setDestName] = useState('');
   const [targetTime, setTargetTime] = useState('');
   const [targetDate, setTargetDate] = useState('');
   const [participants, setParticipants] = useState<DashboardParticipant[]>([]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const fetch = async () => {
-      setLoading(true);
-      try {
-        const res = await appointmentsApi.getDashboard(appointmentId);
-        if (!cancelled && res.success && res.data) {
-          const d = res.data;
-          setDestName(d.dest_name);
-          setTargetTime(formatTargetTime(d.target_time));
-          const dateObj = new Date(d.target_time);
-          const month = dateObj.getMonth() + 1;
-          const date = dateObj.getDate();
-          const dayName = DAY_NAMES[dateObj.getDay()];
-          setTargetDate(`${month}월 ${date}일 ${dayName}요일`);
-          setParticipants(d.participants);
-        }
-      } catch {}
-      if (!cancelled) setLoading(false);
-    };
-    fetch();
-    return () => { cancelled = true; };
+  const loadDashboard = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
+    try {
+      const res = await appointmentsApi.getDashboard(appointmentId);
+      if (res.success && res.data) {
+        const d = res.data;
+        setDestName(d.dest_name);
+        setTargetTime(formatTargetTime(d.target_time));
+        const dateObj = new Date(d.target_time);
+        const month = dateObj.getMonth() + 1;
+        const date = dateObj.getDate();
+        const dayName = DAY_NAMES[dateObj.getDay()];
+        setTargetDate(`${month}월 ${date}일 ${dayName}요일`);
+        setParticipants(d.participants);
+      }
+    } catch {}
+    if (isRefresh) setRefreshing(false);
+    else setLoading(false);
   }, [appointmentId]);
+
+  useEffect(() => {
+    loadDashboard();
+  }, [loadDashboard]);
 
   const handleSheetChange = useCallback((index: number) => {
     if (index === -1) onClose();
@@ -100,7 +102,16 @@ export default function ArrivalDashboardSheet({ onClose, appointmentId }: Props)
           <Feather name="x" size={22} color="#1A1A1A" />
         </TouchableOpacity>
         <Text style={styles.title}>도착예정</Text>
-        <View style={{ width: 36 }} />
+        <TouchableOpacity
+          style={[styles.headerBtn, styles.refreshBtn]}
+          onPress={() => loadDashboard(true)}
+          disabled={refreshing}
+        >
+          {refreshing
+            ? <ActivityIndicator size="small" color="#F5A623" />
+            : <Feather name="refresh-cw" size={18} color="#F5A623" />
+          }
+        </TouchableOpacity>
       </View>
 
       {loading ? (
@@ -156,6 +167,7 @@ const styles = StyleSheet.create({
     width: 36, height: 36, borderRadius: 18,
     backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center',
   },
+  refreshBtn: { backgroundColor: '#FFF3E0' },
   title: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', flex: 1, textAlign: 'center' },
   loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   content: { paddingHorizontal: 16, paddingBottom: Platform.OS === 'ios' ? 40 : 24 },

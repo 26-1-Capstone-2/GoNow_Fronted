@@ -1,6 +1,7 @@
-import { AlarmStage, AlarmType, requestNotificationPermission, sendAlarm, sendAllArrivalAlarms, sendArrivalAlarm } from '@/src/utils/notifications';
+import { AlarmStage, AlarmType, requestNotificationPermission, sendAlarm, sendAllArrivalAlarms, sendArrivalAlarm, sendArrivalCheckAlarm, sendArrivalConfirmAlarm } from '@/src/utils/notifications';
 import { Feather, FontAwesome6 } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import * as Notifications from 'expo-notifications';
 import React, { useEffect, useState } from 'react';
 import {
     Alert,
@@ -35,6 +36,7 @@ export default function AlarmTestScreen() {
   const [hasPermission, setHasPermission] = useState(false);
   const [selectedType, setSelectedType] = useState<AlarmType>('personal');
   const [lastSent, setLastSent] = useState<string>('');
+  const [sentIds, setSentIds] = useState<Partial<Record<AlarmStage, string[]>>>({});
 
   useEffect(() => {
     requestNotificationPermission().then(setHasPermission);
@@ -53,8 +55,17 @@ export default function AlarmTestScreen() {
     const destination = selectedType === 'personal' ? '중앙대학교 후문' :
                         selectedType === 'group' ? '홍대역 2번 출구' : '우리집';
 
-    await sendAlarm(selectedType, stage, destination);
+    const ids = await sendAlarm(selectedType, stage, destination);
+    setSentIds((prev) => ({ ...prev, [stage]: [...(prev[stage] ?? []), ...ids] }));
     setLastSent(`${ALARM_TYPES.find(t => t.type === selectedType)?.label} ${stage}단계 알람 전송됨`);
+  };
+
+  const handleDismiss = async (stage: AlarmStage) => {
+    const ids = sentIds[stage] ?? [];
+    for (const id of ids) {
+      try { await Notifications.dismissNotificationAsync(id); } catch {}
+    }
+    setSentIds((prev) => { const next = { ...prev }; delete next[stage]; return next; });
   };
 
   return (
@@ -113,6 +124,15 @@ export default function AlarmTestScreen() {
                 <Text style={styles.stageBtnDesc}>{item.desc}</Text>
               </View>
               <Feather name="bell" size={18} color={item.color} />
+              {sentIds[item.stage] && (
+                <TouchableOpacity
+                  style={styles.dismissBtn}
+                  onPress={() => handleDismiss(item.stage)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Feather name="x" size={14} color="#FFFFFF" />
+                </TouchableOpacity>
+              )}
             </TouchableOpacity>
           ))}
         </View>
@@ -176,6 +196,47 @@ export default function AlarmTestScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* 도착 확인/완료 알람 */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>도착 알람</Text>
+
+          <TouchableOpacity
+            style={[styles.stageBtn, { borderLeftColor: '#F39C12' }]}
+            onPress={async () => {
+              await sendArrivalCheckAlarm('나나나', '홍대역 2번 출구');
+              setLastSent('도착 확인 알람 전송됨');
+            }}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.stageBadge, { backgroundColor: '#F39C12' }]}>
+              <Feather name="help-circle" size={16} color="#FFFFFF" />
+            </View>
+            <View style={styles.stageInfo}>
+              <Text style={styles.stageBtnLabel}>도착 여부 확인</Text>
+              <Text style={styles.stageBtnDesc}>나나나님 목적지에 도착하신건가요?</Text>
+            </View>
+            <Feather name="bell" size={18} color="#F39C12" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.stageBtn, { borderLeftColor: '#27AE60' }]}
+            onPress={async () => {
+              await sendArrivalConfirmAlarm('나나나', '오후 7시 3분', '홍대역 2번 출구');
+              setLastSent('도착 완료 알람 전송됨');
+            }}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.stageBadge, { backgroundColor: '#27AE60' }]}>
+              <Feather name="check-circle" size={16} color="#FFFFFF" />
+            </View>
+            <View style={styles.stageInfo}>
+              <Text style={styles.stageBtnLabel}>도착 완료 알림</Text>
+              <Text style={styles.stageBtnDesc}>나나나님이 오후 7시 3분에 도착하였습니다.</Text>
+            </View>
+            <Feather name="bell" size={18} color="#27AE60" />
+          </TouchableOpacity>
+        </View>
+
         {/* 마지막 전송 */}
         {lastSent !== '' && (
           <View style={styles.lastSentBox}>
@@ -236,6 +297,11 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   scenarioBtnText: { fontSize: 15, fontWeight: '600', color: '#FFFFFF' },
+  dismissBtn: {
+    width: 24, height: 24, borderRadius: 12,
+    backgroundColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center',
+    marginLeft: 6,
+  },
   lastSentBox: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: '#E8F5E9', borderRadius: 8,

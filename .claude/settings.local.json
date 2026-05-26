@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\82107\\\\OneDrive\\\\바탕 화면\\\\GoNow_Fronted\" -Recurse -Directory)",
+      "Bash(Select-Object -First 30)"
     ]
   }
 }

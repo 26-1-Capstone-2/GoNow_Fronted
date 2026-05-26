@@ -120,5 +120,10 @@ export function createAppointmentsApi() {
       ),
     getDashboard: (appointmentId: number) =>
       request<GetDashboardResponse>(`/api/appointments/${appointmentId}/dashboard`, { method: 'GET' }),
+    toggleParticipantAlarm: (appointmentId: number, is_active: boolean) =>
+      request<{ status: boolean; message: string; data: null }>(
+        `/api/appointments/${appointmentId}/participants/active`,
+        { method: 'PATCH', body: JSON.stringify({ is_active }) },
+      ),
   };
 }
