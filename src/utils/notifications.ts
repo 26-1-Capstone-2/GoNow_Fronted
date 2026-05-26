@@ -110,6 +110,39 @@ export async function requestNotificationPermission(): Promise<boolean> {
   return true;
 }
 
+// 도착 여부 확인 알람 (닉네임님 목적지에 도착하신건가요?)
+export async function sendArrivalCheckAlarm(
+  nickname: string,
+  destination: string,
+): Promise<string> {
+  return Notifications.scheduleNotificationAsync({
+    content: {
+      title: '📍 도착 확인',
+      body: `${nickname}님 ${destination}에 도착하신건가요?`,
+      sound: 'default',
+      priority: Notifications.AndroidNotificationPriority.HIGH,
+    },
+    trigger: null,
+  });
+}
+
+// 도착 완료 알람 (닉네임님이 00시 00분에 목적지에 도착하였습니다)
+export async function sendArrivalConfirmAlarm(
+  nickname: string,
+  arrivalTime: string,
+  destination: string,
+): Promise<string> {
+  return Notifications.scheduleNotificationAsync({
+    content: {
+      title: '✅ 도착 완료',
+      body: `${nickname}님이 ${arrivalTime}에 ${destination}에 도착하였습니다.`,
+      sound: 'default',
+      priority: Notifications.AndroidNotificationPriority.HIGH,
+    },
+    trigger: null,
+  });
+}
+
 // 도착예정 알람 발송
 export async function sendArrivalAlarm(
   memberName: string,
@@ -152,7 +185,7 @@ export async function sendAlarm(
   type: AlarmType,
   stage: AlarmStage,
   destination?: string,
-): Promise<void> {
+): Promise<string[]> {
   const config = STAGE_CONFIG[stage];
   const typeName = TYPE_NAMES[type];
   const message = STAGE_MESSAGES[type][stage];
@@ -162,9 +195,10 @@ export async function sendAlarm(
 
   // 4단계: 3번 반복 발송 (2초 간격)
   const repeatCount = stage === 4 ? 3 : 1;
+  const ids: string[] = [];
 
   for (let i = 0; i < repeatCount; i++) {
-    await Notifications.scheduleNotificationAsync({
+    const id = await Notifications.scheduleNotificationAsync({
       content: {
         title,
         body: stage === 4 ? `${body} (${i + 1}/${repeatCount})` : body,
@@ -180,5 +214,7 @@ export async function sendAlarm(
         ? { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds: i * 2, repeats: false }
         : null,
     });
+    ids.push(id);
   }
+  return ids;
 }

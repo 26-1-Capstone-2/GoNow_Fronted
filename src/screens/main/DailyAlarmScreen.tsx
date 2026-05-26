@@ -1,4 +1,5 @@
 import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
+import { createAppointmentsApi } from '@/src/api/appointments';
 import { createJourneysApi, targetTimeToAmpmHourMinute } from '@/src/api/journeys';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, FontAwesome5, FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -17,6 +18,7 @@ import {
 const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
 const alarmsApi = createAlarmsApi();
 const journeysApi = createJourneysApi();
+const appointmentsApi = createAppointmentsApi();
 
 type AlarmCard = {
   id: string;
@@ -48,14 +50,17 @@ function toAlarmCard(item: AlarmItem): AlarmCard {
 }
 
 interface Props {
-  onPersonalPress: () => void;
-  onGroupPress: () => void;
-  onHomePress: () => void;
+  onPersonalAdd: () => void;
+  onPersonalEdit: (journeyId: number) => void;
+  onGroupAdd: () => void;
+  onGroupEdit: (appointmentId: number) => void;
+  onHomeAdd: () => void;
+  onHomeEdit: (journeyId: number) => void;
   onArrivalPress: () => void;
   isArrivalActive?: boolean;
 }
 
-export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHomePress, onArrivalPress, isArrivalActive = false }: Props) {
+export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGroupAdd, onGroupEdit, onHomeAdd, onHomeEdit, onArrivalPress, isArrivalActive = false }: Props) {
   const router = useRouter();
   const { selectedDate, selectedMonth, setSelectedDate, alarmVersion } = useCalendarStore();
   const today = new Date();
@@ -91,6 +96,10 @@ export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHome
       journeysApi.toggleActive(alarm.journeyId, newEnabled).catch(() => {
         setter((prev) => prev.map((a) => a.id === alarm.id ? { ...a, enabled: !newEnabled } : a));
       });
+    } else if (alarm.appointmentId) {
+      appointmentsApi.toggleParticipantAlarm(alarm.appointmentId, newEnabled).catch(() => {
+        setter((prev) => prev.map((a) => a.id === alarm.id ? { ...a, enabled: !newEnabled } : a));
+      });
     }
   };
 
@@ -117,12 +126,13 @@ export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHome
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>개인</Text>
-            <TouchableOpacity onPress={onPersonalPress}>
-              <Feather name="menu" size={20} color="#888888" />
+            <TouchableOpacity onPress={onPersonalAdd}>
+              <Feather name="plus" size={22} color="#888888" />
             </TouchableOpacity>
           </View>
           {personal.map((alarm) => (
-            <View key={alarm.id} style={styles.alarmCard}>
+            <TouchableOpacity key={alarm.id} style={styles.alarmCard} activeOpacity={0.7}
+              onPress={() => alarm.journeyId && onPersonalEdit(alarm.journeyId)}>
               <View style={styles.alarmInfo}>
                 <Text style={styles.alarmPlace}>{alarm.place}</Text>
                 <View style={styles.alarmMeta}>
@@ -141,7 +151,7 @@ export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHome
                   thumbColor="#FFFFFF"
                 />
               </View>
-            </View>
+            </TouchableOpacity>
           ))}
         </View>
 
@@ -149,12 +159,13 @@ export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHome
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>그룹</Text>
-            <TouchableOpacity onPress={onGroupPress}>
-              <Feather name="menu" size={20} color="#888888" />
+            <TouchableOpacity onPress={onGroupAdd}>
+              <Feather name="plus" size={22} color="#888888" />
             </TouchableOpacity>
           </View>
           {group.map((alarm) => (
-            <View key={alarm.id} style={styles.alarmCard}>
+            <TouchableOpacity key={alarm.id} style={styles.alarmCard} activeOpacity={0.7}
+              onPress={() => alarm.appointmentId && onGroupEdit(alarm.appointmentId)}>
               <View style={styles.alarmInfo}>
                 <Text style={styles.alarmPlace}>{alarm.place}</Text>
                 <View style={styles.alarmMeta}>
@@ -184,7 +195,7 @@ export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHome
                   thumbColor="#FFFFFF"
                 />
               </View>
-            </View>
+            </TouchableOpacity>
           ))}
         </View>
 
@@ -192,12 +203,13 @@ export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHome
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>귀가</Text>
-            <TouchableOpacity onPress={onHomePress}>
-              <Feather name="menu" size={20} color="#888888" />
+            <TouchableOpacity onPress={onHomeAdd}>
+              <Feather name="plus" size={22} color="#888888" />
             </TouchableOpacity>
           </View>
           {home.map((alarm) => (
-            <View key={alarm.id} style={styles.alarmCard}>
+            <TouchableOpacity key={alarm.id} style={styles.alarmCard} activeOpacity={0.7}
+              onPress={() => alarm.journeyId && onHomeEdit(alarm.journeyId)}>
               <View style={styles.alarmInfo}>
                 <Text style={styles.alarmPlace}>{alarm.place}</Text>
                 <View style={styles.alarmMeta}>
@@ -218,7 +230,7 @@ export default function DailyAlarmScreen({ onPersonalPress, onGroupPress, onHome
                   thumbColor="#FFFFFF"
                 />
               </View>
-            </View>
+            </TouchableOpacity>
           ))}
         </View>
       </ScrollView>

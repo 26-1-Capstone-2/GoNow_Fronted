@@ -372,8 +372,16 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
     }
   };
 
-  const toggleAlarm = (id: string) => {
-    setAlarms((prev) => prev.map((a) => a.id === id ? { ...a, enabled: !a.enabled } : a));
+  const toggleAlarm = async (id: string) => {
+    const alarm = alarms.find((a) => a.id === id);
+    if (!alarm?.appointmentId) return;
+    const newValue = !alarm.enabled;
+    setAlarms((prev) => prev.map((a) => a.id === id ? { ...a, enabled: newValue } : a));
+    try {
+      await appointmentsApi.toggleParticipantAlarm(alarm.appointmentId, newValue);
+    } catch {
+      setAlarms((prev) => prev.map((a) => a.id === id ? { ...a, enabled: alarm.enabled } : a));
+    }
   };
 
   const copyInviteCode = async () => {

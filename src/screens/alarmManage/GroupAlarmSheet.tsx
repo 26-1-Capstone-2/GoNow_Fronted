@@ -36,6 +36,8 @@ interface GroupAlarm {
 interface Props {
   onClose: () => void;
   onArrivalPress?: (alarm: GroupAlarm) => void;
+  initialMode?: 'add' | 'edit';
+  editAppointmentId?: number;
 }
 
 const alarmsApi = createAlarmsApi();
@@ -76,7 +78,7 @@ const DEFAULT_ALARM: GroupAlarm = {
 
 type ViewType = 'list' | 'edit' | 'place' | 'addChoice' | 'join' | 'transport';
 
-export default function GroupAlarmSheet({ onClose, onArrivalPress }: Props) {
+export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, editAppointmentId }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['85%'], []);
   const { selectedDate, bumpAlarmVersion } = useCalendarStore();
@@ -194,6 +196,17 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress }: Props) {
       }
     } catch {}
   };
+
+  useEffect(() => {
+    if (initialMode === 'add') {
+      setEditAlarm(DEFAULT_ALARM);
+      setView('edit');
+    } else if (initialMode === 'edit' && editAppointmentId) {
+      openEdit({ ...DEFAULT_ALARM, id: String(editAppointmentId), appointmentId: editAppointmentId });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const openPlace = () => {
     setTempPlace(
       editAlarm.dest_name
@@ -317,7 +330,17 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress }: Props) {
       Alert.alert('삭제 실패', '네트워크 오류가 발생했습니다.');
     }
   };
-  const toggleAlarm = (id: string) => setAlarms((prev) => prev.map((a) => a.id === id ? { ...a, enabled: !a.enabled } : a));
+  const toggleAlarm = async (id: string) => {
+    const alarm = alarms.find((a) => a.id === id);
+    if (!alarm?.appointmentId) return;
+    const newValue = !alarm.enabled;
+    setAlarms((prev) => prev.map((a) => a.id === id ? { ...a, enabled: newValue } : a));
+    try {
+      await appointmentsApi.toggleParticipantAlarm(alarm.appointmentId, newValue);
+    } catch {
+      setAlarms((prev) => prev.map((a) => a.id === id ? { ...a, enabled: alarm.enabled } : a));
+    }
+  };
   const copyInviteCode = async () => {
     try {
       await Share.share({ message: editAlarm.inviteCode });
