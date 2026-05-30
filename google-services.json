@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "716367330728",
+    "project_id": "gonow-e9dad",
+    "storage_bucket": "gonow-e9dad.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:716367330728:android:2267080b6829facc21b19d",
+        "android_client_info": {
+          "package_name": "com.hyeongwon.gonow"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAWR8Nu_PoctWDGjREg_JD2QhS3OBO5qBw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

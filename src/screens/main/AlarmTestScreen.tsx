@@ -1,7 +1,7 @@
 import { AlarmStage, AlarmType, requestNotificationPermission, sendAlarm, sendAllArrivalAlarms, sendArrivalAlarm, sendArrivalCheckAlarm, sendArrivalConfirmAlarm } from '@/src/utils/notifications';
 import { Feather, FontAwesome6 } from '@expo/vector-icons';
+import notifee from '@notifee/react-native';
 import { useRouter } from 'expo-router';
-import * as Notifications from 'expo-notifications';
 import React, { useEffect, useState } from 'react';
 import {
     Alert,
@@ -63,7 +63,7 @@ export default function AlarmTestScreen() {
   const handleDismiss = async (stage: AlarmStage) => {
     const ids = sentIds[stage] ?? [];
     for (const id of ids) {
-      try { await Notifications.dismissNotificationAsync(id); } catch {}
+      try { await notifee.cancelNotification(id); } catch {}
     }
     setSentIds((prev) => { const next = { ...prev }; delete next[stage]; return next; });
   };

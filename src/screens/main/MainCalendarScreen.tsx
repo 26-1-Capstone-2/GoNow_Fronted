@@ -14,12 +14,12 @@ import {
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
-  SafeAreaView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const DAY_WIDTH = Math.floor(SCREEN_WIDTH / 7);

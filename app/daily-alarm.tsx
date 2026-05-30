@@ -3,6 +3,7 @@ import GroupAlarmSheet from '@/src/screens/alarmManage/GroupAlarmSheet';
 import HomeAlarmSheet from '@/src/screens/alarmManage/HomeAlarmSheet';
 import PersonalAlarmSheet from '@/src/screens/alarmManage/PersonalAlarmSheet';
 import DailyAlarmScreen from '@/src/screens/main/DailyAlarmScreen';
+import { useAppointmentStatusStore } from '@/src/store/appointmentStatusStore';
 import { useState } from 'react';
 import { View } from 'react-native';
 
@@ -13,8 +14,12 @@ export default function DailyAlarmPage() {
   const [groupSheet, setGroupSheet] = useState<SheetState>(null);
   const [homeSheet, setHomeSheet] = useState<SheetState>(null);
   const [showArrivalSheet, setShowArrivalSheet] = useState(false);
-  const [isArrivalActive] = useState(true);
   const [selectedGroupAlarm, setSelectedGroupAlarm] = useState<any>(null);
+
+  const { statuses, activeAppointmentId } = useAppointmentStatusStore();
+  const isArrivalActive = activeAppointmentId != null
+    ? (statuses[activeAppointmentId] ?? 'WAITING') === 'ACTIVE'
+    : false;
 
   return (
     <View style={{ flex: 1 }}>

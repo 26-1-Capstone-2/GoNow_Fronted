@@ -1,6 +1,29 @@
 import { getToken } from '@/src/store/authStore';
 import { createApiClient } from './client';
-import { TransportType } from './journeys';
+import { TransportType, JourneyStatus } from './journeys';
+
+export type AppointmentStatus = 'WAITING' | 'ACTIVE' | 'FINISHED';
+
+export type ParticipantLocationResponse = {
+  status: boolean;
+  message: string;
+  data: {
+    participant_status: JourneyStatus;
+    appointment_status: AppointmentStatus;
+    departure_alarm_time: string;
+    estimated_arrival: string;
+    preparation_time: number;
+    interval: number | null;
+  };
+};
+
+export type ParticipantArriveResponse = {
+  success: boolean;
+  message: string;
+  data: {
+    appointment_status: AppointmentStatus;
+  };
+};
 
 export type CreateAppointmentPayload = {
   title?: string;
@@ -124,6 +147,16 @@ export function createAppointmentsApi() {
       request<{ status: boolean; message: string; data: null }>(
         `/api/appointments/${appointmentId}/participants/active`,
         { method: 'PATCH', body: JSON.stringify({ is_active }) },
+      ),
+    updateParticipantLocation: (appointmentId: number, lat: number, lng: number) =>
+      request<ParticipantLocationResponse>(
+        `/api/appointments/${appointmentId}/participants/location`,
+        { method: 'PATCH', body: JSON.stringify({ lat, lng }) },
+      ),
+    arriveParticipant: (appointmentId: number) =>
+      request<ParticipantArriveResponse>(
+        `/api/appointments/${appointmentId}/participants/arrive`,
+        { method: 'PATCH' },
       ),
   };
 }
