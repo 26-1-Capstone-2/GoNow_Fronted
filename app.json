@@ -29,8 +29,7 @@
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
+        "foregroundImage": "./assets/images/gonow_logo.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
@@ -65,7 +64,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/images/gonow_logo.png",
+          "icon": "./assets/images/android-icon-monochrome.png",
           "color": "#4CAF50",
           "sounds": [],
           "mode": "production"
