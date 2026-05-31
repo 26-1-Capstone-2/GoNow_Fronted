@@ -179,23 +179,29 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
         setSaving(false);
         return;
       }
-      const { plan_date, target_time } = (isPast && hasRepeat) || editAlarm.mode === 'lastTrain'
-        ? ensureFutureDateTime(editAlarm.date, rawTime)
-        : { plan_date: editAlarm.date, target_time: rawTime };
-
-      const payload: HomeJourneyPayload = {
-        is_last_mode: editAlarm.mode === 'lastTrain',
-        plan_date,
-        target_time,
+      const commonFields = {
         dest_name: editAlarm.home_name,
         dest_address: editAlarm.home_address,
         dest_lat: editAlarm.home_lat!,
         dest_lng: editAlarm.home_lng!,
         repeat_days: repeatDaysToMask(editAlarm.repeat),
-        ...(editAlarm.mode === 'deadline' && {
-          transport_type: editAlarm.transport === 'public' ? 'TRANSIT' : 'DRIVING',
-        }),
       };
+
+      let payload: HomeJourneyPayload;
+      if (editAlarm.mode === 'lastTrain') {
+        payload = { is_last_mode: true, plan_date: editAlarm.date, ...commonFields };
+      } else {
+        const { plan_date, target_time } = isPast && hasRepeat
+          ? ensureFutureDateTime(editAlarm.date, rawTime)
+          : { plan_date: editAlarm.date, target_time: rawTime };
+        payload = {
+          is_last_mode: false,
+          plan_date,
+          target_time,
+          transport_type: editAlarm.transport === 'public' ? 'TRANSIT' : 'DRIVING',
+          ...commonFields,
+        };
+      }
 
       if (isEditMode && editAlarm.journeyId) {
         await journeysApi.updateHome(editAlarm.journeyId, payload);

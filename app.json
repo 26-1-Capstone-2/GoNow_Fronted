@@ -25,10 +25,11 @@
       }
     },
     "android": {
+      "package": "com.hyeongwon.gonow",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
+        "foregroundImage": "./assets/images/gonow_logo.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
@@ -36,7 +37,9 @@
       "permissions": [
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.VIBRATE",
-        "android.permission.USE_FULL_SCREEN_INTENT"
+        "android.permission.USE_FULL_SCREEN_INTENT",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
       ]
     },
     "web": {
@@ -61,7 +64,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/images/gonow_logo.png",
+          "icon": "./assets/images/android-icon-monochrome.png",
           "color": "#4CAF50",
           "sounds": [],
           "mode": "production"
@@ -71,6 +74,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "f9e1a464-f427-4bb3-ba40-7d6e2382f3f0"
+      }
+    },
+    "owner": "hyeongwon"
   }
 }

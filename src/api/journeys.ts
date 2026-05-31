@@ -15,18 +15,33 @@ export type PersonalJourneyPayload = {
   repeat_days: number;
 };
 
-export type HomeJourneyPayload = {
+export type HomeJourneyDeadlinePayload = {
   title?: string;
-  is_last_mode: boolean;
+  is_last_mode: false;
   plan_date: string;
   target_time: string;
   dest_name: string;
   dest_address: string;
   dest_lat: number;
   dest_lng: number;
-  transport_type?: TransportType; // 데드라인 모드에서만 포함
+  transport_type: TransportType;
   repeat_days: number;
 };
+
+export type HomeJourneyLastModePayload = {
+  title?: string;
+  is_last_mode: true;
+  plan_date: string;
+  dest_name: string;
+  dest_address: string;
+  dest_lat: number;
+  dest_lng: number;
+  repeat_days: number;
+};
+
+export type HomeJourneyPayload = HomeJourneyDeadlinePayload | HomeJourneyLastModePayload;
+
+export type JourneyStatus = 'SCHEDULED' | 'READY' | 'DEPARTING' | 'MOVING' | 'ARRIVED' | 'NEARDEST';
 
 export type JourneyResponse = {
   success: boolean;
@@ -34,6 +49,17 @@ export type JourneyResponse = {
   data: {
     journey_id: number;
     journey_status: string;
+  };
+};
+
+export type LocationResponse = {
+  status: boolean;
+  message: string;
+  data: {
+    journey_status: JourneyStatus;
+    departure_alarm_time: string;
+    preparation_time: number;
+    interval: number | null;
   };
 };
 
@@ -155,6 +181,17 @@ export function createJourneysApi() {
     deleteJourney: (journeyId: number) =>
       request<{ status: boolean; message: string; data: null }>(`/api/journeys/${journeyId}`, {
         method: 'DELETE',
+      }),
+
+    updateLocation: (journeyId: number, lat: number, lng: number) =>
+      request<LocationResponse>(`/api/journeys/${journeyId}/location`, {
+        method: 'PATCH',
+        body: JSON.stringify({ lat, lng }),
+      }),
+
+    arrive: (journeyId: number) =>
+      request<{ status: boolean; message: string; data: null }>(`/api/journeys/${journeyId}/arrive`, {
+        method: 'PATCH',
       }),
   };
 }

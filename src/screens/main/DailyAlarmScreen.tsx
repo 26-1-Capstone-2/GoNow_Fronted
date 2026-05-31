@@ -6,7 +6,6 @@ import { Feather, FontAwesome5, FontAwesome6, MaterialCommunityIcons } from '@ex
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Platform,
   ScrollView,
   StyleSheet,
   Switch,
@@ -14,6 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
 const alarmsApi = createAlarmsApi();
@@ -104,7 +104,7 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       {/* 헤더 */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => { setSelectedDate(todayStr); router.back(); }}>
@@ -234,7 +234,7 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
           ))}
         </View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -242,7 +242,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FFFFFF',
-    paddingTop: Platform.OS === 'ios' ? 50 : 0,
   },
   header: {
     flexDirection: 'row',

@@ -70,5 +70,11 @@ export function createMembersApi(clientOptions?: ApiClientOptions) {
         method: 'PATCH',
         body: JSON.stringify({ current_password, new_password }),
       }),
+
+    registerFcmToken: (fcm_token: string) =>
+      request<MemberApiResponse>('/api/members/me/fcm-token', {
+        method: 'PATCH',
+        body: JSON.stringify({ fcm_token }),
+      }),
   };
 }

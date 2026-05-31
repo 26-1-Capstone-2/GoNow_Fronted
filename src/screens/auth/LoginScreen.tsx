@@ -4,17 +4,19 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { createAuthApi } from '@/src/api/auth';
+import { createMembersApi } from '@/src/api/members';
 import { useAppNavigation } from '@/src/navigation';
 import { useAuthStore } from '@/src/store/authStore';
+import * as Notifications from 'expo-notifications';
 
 const authApi = createAuthApi();
 
@@ -31,6 +33,14 @@ export default function LoginScreen() {
     try {
       const res = await authApi.login({ email, password });
       setToken(res.data.access_token);
+
+      try {
+        const tokenData = await Notifications.getDevicePushTokenAsync();
+        await createMembersApi().registerFcmToken(tokenData.data);
+      } catch {
+        // FCM 토큰 등록 실패해도 로그인은 계속 진행
+      }
+
       goToMainTabs();
     } catch (e: any) {
       Alert.alert('로그인 실패', '이메일 또는 비밀번호를 확인해주세요.');
