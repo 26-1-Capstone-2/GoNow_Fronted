@@ -195,6 +195,7 @@ export default function MainCalendarScreen() {
   const isMountedRef = useRef(false);
   const pendingScrollRef = useRef(false);
   const containerHeightRef = useRef(0);
+  const prevContainerHeightRef = useRef(0);
 
   const currentIndex = CENTER_INDEX + getOffsetFromBase(
     today.getFullYear(), today.getMonth() + 1,
@@ -210,19 +211,27 @@ export default function MainCalendarScreen() {
 
   useEffect(() => {
     if (containerHeight === 0) return;
+    const clampedIndex = Math.max(0, Math.min(TOTAL_MONTHS - 1, currentIndex));
+    const heightChanged = prevContainerHeightRef.current !== containerHeight;
+    prevContainerHeightRef.current = containerHeight;
+
     if (!isMountedRef.current) {
       isMountedRef.current = true;
-      const clampedIndex = Math.max(0, Math.min(TOTAL_MONTHS - 1, currentIndex));
       requestAnimationFrame(() => {
-        const h = containerHeightRef.current;
-        if (h > 0) flatListRef.current?.scrollToOffset({ offset: clampedIndex * h, animated: false });
+        flatListRef.current?.scrollToOffset({ offset: clampedIndex * containerHeight, animated: false });
       });
       return;
     }
+
+    if (heightChanged) {
+      // 레이아웃 재계산으로 높이가 바뀌면 현재 달 위치로 즉시 재스냅
+      flatListRef.current?.scrollToOffset({ offset: clampedIndex * containerHeight, animated: false });
+      return;
+    }
+
     if (pendingScrollRef.current) {
       pendingScrollRef.current = false;
-      const clampedIndex = Math.max(0, Math.min(TOTAL_MONTHS - 1, currentIndex));
-      flatListRef.current?.scrollToOffset({ offset: clampedIndex * containerHeightRef.current, animated: true });
+      flatListRef.current?.scrollToOffset({ offset: clampedIndex * containerHeight, animated: true });
     }
   }, [containerHeight, selectedYear, selectedMonth]);
 

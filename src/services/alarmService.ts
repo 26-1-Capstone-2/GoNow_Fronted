@@ -21,7 +21,7 @@ interface AlarmTarget {
   appointmentId?: number;
 }
 
-class AlarmService {
+class AlarmRunner {
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private stageTimers: ReturnType<typeof setTimeout>[] = [];
   private target: AlarmTarget | null = null;
@@ -32,6 +32,11 @@ class AlarmService {
   private arrivedSent = false;
   private nearDestSent = false;
   private stagesCancelled = false;
+  private onFinish?: () => void;
+
+  setOnFinish(cb: () => void): void {
+    this.onFinish = cb;
+  }
 
   async start(target: AlarmTarget): Promise<void> {
     this.stop();
@@ -57,20 +62,15 @@ class AlarmService {
     }
     this.cancelRemainingStages();
     this.target = null;
+    const cb = this.onFinish;
+    this.onFinish = undefined;
+    cb?.();
   }
 
   cancelRemainingStages(): void {
     this.stageTimers.forEach(clearTimeout);
     this.stageTimers = [];
     this.stagesCancelled = true;
-  }
-
-  get activeJourneyId(): number | null {
-    return this.target?.journeyId ?? null;
-  }
-
-  get activeAppointmentId(): number | null {
-    return this.target?.appointmentId ?? null;
   }
 
   private scheduleNextPoll(): void {
@@ -117,7 +117,6 @@ class AlarmService {
 
     const { participant_status, appointment_status, estimated_arrival, preparation_time, interval } = res.data;
 
-    // appointment_status → 대시보드 버튼 활성/비활성
     useAppointmentStatusStore.getState().setStatus(this.target.appointmentId, appointment_status);
 
     if (interval !== null) this.intervalSec = interval;
@@ -133,7 +132,6 @@ class AlarmService {
     }
 
     if (newStatus !== this.status) {
-      const prev = this.status;
       this.status = newStatus;
 
       if (newStatus === 'DEPARTING' && !this.stagingStarted) {
@@ -204,6 +202,39 @@ class AlarmService {
   }
 }
 
+class AlarmManager {
+  private runners = new Map<string, AlarmRunner>();
+
+  private key(journeyId?: number, appointmentId?: number): string {
+    return journeyId != null ? `j_${journeyId}` : `a_${appointmentId}`;
+  }
+
+  async start(target: AlarmTarget): Promise<void> {
+    const k = this.key(target.journeyId, target.appointmentId);
+    this.runners.get(k)?.stop();
+    const runner = new AlarmRunner();
+    runner.setOnFinish(() => this.runners.delete(k));
+    this.runners.set(k, runner);
+    await runner.start(target);
+  }
+
+  stop(journeyId?: number, appointmentId?: number): void {
+    const k = this.key(journeyId, appointmentId);
+    this.runners.get(k)?.stop();
+    this.runners.delete(k);
+  }
+
+  stopAll(): void {
+    this.runners.forEach(r => r.stop());
+    this.runners.clear();
+  }
+
+  cancelRemainingStages(journeyId?: number, appointmentId?: number): void {
+    const k = this.key(journeyId, appointmentId);
+    this.runners.get(k)?.cancelRemainingStages();
+  }
+}
+
 function formatEstimatedArrival(isoString: string): string {
   const d = new Date(isoString);
   const h = d.getHours();
@@ -213,4 +244,4 @@ function formatEstimatedArrival(isoString: string): string {
   return m === 0 ? `${ampm} ${displayH}시` : `${ampm} ${displayH}시 ${m}분`;
 }
 
-export const alarmService = new AlarmService();
+export const alarmService = new AlarmManager();
