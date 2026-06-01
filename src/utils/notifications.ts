@@ -4,6 +4,8 @@ import notifee, {
   AndroidVisibility,
   AuthorizationStatus,
   EventType,
+  TimestampTrigger,
+  TriggerType,
 } from '@notifee/react-native';
 import { Alert, Linking, Platform } from 'react-native';
 
@@ -112,17 +114,32 @@ export async function requestNotificationPermission(): Promise<boolean> {
 // _layout.tsx 호환용 no-op
 export function setupNotificationCategories(): void {}
 
+function buildAlarmBody(
+  stage: AlarmStage,
+  type: AlarmType,
+  destination: string | undefined,
+  whichStation: string | null | undefined,
+  minutesRemaining: number | undefined,
+): string {
+  const stageMsg = STAGE_MESSAGES[type][stage];
+  const message = (whichStation && minutesRemaining != null && minutesRemaining > 0)
+    ? `${whichStation} 탑승까지 ${minutesRemaining}분 남았어요.`
+    : stageMsg;
+  return destination ? `[${destination}] ${message}` : message;
+}
+
 export async function sendAlarm(
   type: AlarmType,
   stage: AlarmStage,
   destination?: string,
+  whichStation?: string | null,
+  minutesRemaining?: number,
 ): Promise<string[]> {
   await ensureChannels();
 
   const config = STAGE_CONFIG[stage];
   const title = `${config.title} - ${TYPE_NAMES[type]} 알람`;
-  const message = STAGE_MESSAGES[type][stage];
-  const body = destination ? `[${destination}] ${message}` : message;
+  const body = buildAlarmBody(stage, type, destination, whichStation, minutesRemaining);
 
   const repeatCount = stage === 4 ? 3 : 1;
   const ids: string[] = [];
@@ -230,6 +247,79 @@ export async function sendArrivalAlarm(
       pressAction: { id: 'default' },
     },
   });
+}
+
+export async function sendLastTransitAlarm(
+  transitType: '지하철' | '버스',
+  stopName: string,
+  time: string,
+): Promise<string> {
+  await ensureChannels();
+  return notifee.displayNotification({
+    title: `${transitType}: 지금 출발하세요!`,
+    body: `${stopName} ${time} 탑승`,
+    android: {
+      channelId: CHANNEL_URGENT,
+      importance: AndroidImportance.HIGH,
+      category: AndroidCategory.ALARM,
+      visibility: AndroidVisibility.PUBLIC,
+      vibrationPattern: [100, 500, 200, 500, 200, 500],
+      fullScreenAction: { id: 'default', launchActivity: 'default' },
+      pressAction: { id: 'default' },
+      actions: [{ title: '✕ 닫기', pressAction: { id: 'dismiss' } }],
+    },
+  });
+}
+
+export async function scheduleFutureAlarm(
+  type: AlarmType,
+  stage: Exclude<AlarmStage, 1>,
+  destination: string | undefined,
+  triggerTimestamp: number,
+  journeyId?: number,
+  appointmentId?: number,
+  whichStation?: string | null,
+  minutesRemaining?: number,
+): Promise<string[]> {
+  await ensureChannels();
+  const config = STAGE_CONFIG[stage];
+  const title = `${config.title} - ${TYPE_NAMES[type]} 알람`;
+  const body = buildAlarmBody(stage, type, destination, whichStation, minutesRemaining);
+  const repeatCount = stage === 4 ? 3 : 1;
+  const ids: string[] = [];
+
+  for (let i = 0; i < repeatCount; i++) {
+    const trigger: TimestampTrigger = {
+      type: TriggerType.TIMESTAMP,
+      timestamp: triggerTimestamp + i * 2500,
+    };
+    const id = await notifee.createTriggerNotification(
+      {
+        title,
+        body: stage === 4 ? `${body} (${i + 1}/${repeatCount})` : body,
+        data: {
+          ...(journeyId != null && { journeyId: String(journeyId) }),
+          ...(appointmentId != null && { appointmentId: String(appointmentId) }),
+        },
+        android: {
+          channelId: stage >= 3 ? CHANNEL_URGENT : CHANNEL_DEFAULT,
+          importance: AndroidImportance.HIGH,
+          category: AndroidCategory.ALARM,
+          visibility: AndroidVisibility.PUBLIC,
+          sound: config.sound ? 'default' : undefined,
+          vibrationPattern: config.vibrate ? [100, 500, 200, 500, 200, 500] : undefined,
+          fullScreenAction: { id: 'default', launchActivity: 'default' },
+          pressAction: { id: 'default' },
+          ...(stage <= 3 && {
+            actions: [{ title: '✕ 닫기', pressAction: { id: 'dismiss' } }],
+          }),
+        },
+      },
+      trigger,
+    );
+    ids.push(id);
+  }
+  return ids;
 }
 
 export async function sendAllArrivalAlarms(

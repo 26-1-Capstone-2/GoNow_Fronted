@@ -48,7 +48,7 @@ export type JourneyResponse = {
   message: string;
   data: {
     journey_id: number;
-    journey_status: string;
+    journey_status: JourneyStatus;
   };
 };
 
@@ -60,6 +60,8 @@ export type LocationResponse = {
     departure_alarm_time: string;
     preparation_time: number;
     interval: number | null;
+    which_station: string | null;
+    boarding_time: string | null;
   };
 };
 

@@ -2,6 +2,7 @@ import AddressSearchView, { SearchResult } from '@/src/components/common/Address
 import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
 import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createJourneysApi, ensureFutureDateTime, JourneyDetail, maskToRepeatDays, PersonalJourneyPayload, repeatDaysToMask, targetTimeToAmpmHourMinute, toTargetTime } from '@/src/api/journeys';
+import { alarmService } from '@/src/services/alarmService';
 import { usePlaces } from '@/src/hooks/usePlaces';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -15,6 +16,7 @@ import {
   StyleSheet,
   Switch,
   Text,
+  ToastAndroid,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -33,6 +35,7 @@ function fromAlarmItem(item: AlarmItem): Alarm {
     repeat: maskToRepeatDays(item.repeat_days ?? 0),
     enabled: item.is_active,
     transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
+    isActive: ['MOVING', 'NEARDEST', 'ARRIVED'].includes(item.my_status),
   };
 }
 
@@ -72,6 +75,7 @@ interface Alarm {
   repeat: string[];
   enabled: boolean;
   transport: Transport;
+  isActive?: boolean;
 }
 
 interface Props {
@@ -154,6 +158,7 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
 
   const openAdd = () => { setEditAlarm(DEFAULT_ALARM); setView('edit'); };
   const openEdit = async (alarm: Alarm) => {
+    if (alarm.isActive) return;
     if (alarm.journeyId) {
       try {
         const res = await journeysApi.getJourney(alarm.journeyId);
@@ -213,9 +218,17 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
       };
 
       if (isEditMode && editAlarm.journeyId) {
-        await journeysApi.updatePersonal(editAlarm.journeyId, payload);
+        const res = await journeysApi.updatePersonal(editAlarm.journeyId, payload);
+        if (res.data.journey_status === 'READY') {
+          alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: editAlarm.journeyId });
+        } else if (res.data.journey_status === 'SCHEDULED') {
+          alarmService.stop(editAlarm.journeyId);
+        }
       } else {
-        await journeysApi.createPersonal(payload);
+        const res = await journeysApi.createPersonal(payload);
+        if (res.data.journey_status === 'READY') {
+          alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: res.data.journey_id });
+        }
       }
       await loadAlarms();
       bumpAlarmVersion();
@@ -318,7 +331,19 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
                 setAlarms((prev) => prev.filter((a) => a.id !== alarm.id));
                 bumpAlarmVersion();
               }}>
-                <TouchableOpacity style={styles.alarmCard} onPress={() => openEdit(alarm)} activeOpacity={0.7}>
+                <TouchableOpacity
+                  style={[styles.alarmCard, alarm.isActive && { opacity: 0.45 }]}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    if (alarm.isActive) {
+                      Platform.OS === 'android'
+                        ? ToastAndroid.show('이동 중에는 수정할 수 없어요.', ToastAndroid.SHORT)
+                        : Alert.alert('', '이동 중에는 수정할 수 없어요.');
+                      return;
+                    }
+                    openEdit(alarm);
+                  }}
+                >
                   <View style={styles.alarmInfo}>
                     <Text style={styles.alarmPlace}>{alarm.dest_name}</Text>
                     <View style={styles.alarmMeta}>
