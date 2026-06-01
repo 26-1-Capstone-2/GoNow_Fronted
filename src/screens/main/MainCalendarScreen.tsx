@@ -3,6 +3,7 @@ import GroupAllAlarmSheet from '@/src/screens/allAlarmManage/GroupAllAlarmSheet'
 import HomeAllAlarmSheet from '@/src/screens/allAlarmManage/HomeAllAlarmSheet';
 import PersonalAllAlarmSheet from '@/src/screens/allAlarmManage/PersonalAllAlarmSheet';
 import AlarmSettingsSheet from '@/src/screens/main/AlarmSettingsSheet';
+import { createAlarmsApi } from '@/src/api/alarms';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -55,6 +56,7 @@ function locdateToString(locdate: number): string {
 }
 
 type EventMap = Record<string, { label: string; color: string }[]>;
+type AlarmCountMap = Record<string, { personal: number; group: number; home: number }>;
 
 function getOffsetFromBase(baseYear: number, baseMonth: number, targetYear: number, targetMonth: number) {
   return (targetYear - baseYear) * 12 + (targetMonth - baseMonth);
@@ -105,10 +107,13 @@ interface CalendarMonthProps {
   onDayPress: (date: string) => void;
   containerHeight: number;
   events: EventMap;
+  alarmCounts: AlarmCountMap;
 }
 
+const alarmsApi = createAlarmsApi();
+
 const CalendarMonth = memo(function CalendarMonth({
-  year, month, todayStr, selectedDate, onSelectDate, onDayPress, containerHeight, events,
+  year, month, todayStr, selectedDate, onSelectDate, onDayPress, containerHeight, events, alarmCounts,
 }: CalendarMonthProps) {
   const weeks = getCalendarWeeks(year, month);
   const MONTH_TITLE_H = 60;
@@ -159,12 +164,29 @@ const CalendarMonth = memo(function CalendarMonth({
                       {day.date}
                     </Text>
                   </View>
-                  {dayEvents.slice(0, 2).map((ev, ei) => (
+                  {dayEvents.slice(0, 1).map((ev, ei) => (
                     <View key={ei} style={[styles.eventBadge, { backgroundColor: ev.color + '22' }]}>
                       <View style={[styles.eventDot, { backgroundColor: ev.color }]} />
                       <Text style={[styles.eventLabel, { color: ev.color }]} numberOfLines={1}>{ev.label}</Text>
                     </View>
                   ))}
+                  {isCur && (() => {
+                    const c = alarmCounts[day.fullDate];
+                    if (!c || (c.personal === 0 && c.group === 0 && c.home === 0)) return null;
+                    return (
+                      <View style={styles.alarmCountRow}>
+                        {c.personal > 0 && (
+                          <Text style={[styles.alarmCountText, { color: '#007AFF' }]}>개인 {c.personal}</Text>
+                        )}
+                        {c.group > 0 && (
+                          <Text style={[styles.alarmCountText, { color: '#FF9500' }]}>그룹 {c.group}</Text>
+                        )}
+                        {c.home > 0 && (
+                          <Text style={[styles.alarmCountText, { color: '#34C759' }]}>귀가 {c.home}</Text>
+                        )}
+                      </View>
+                    );
+                  })()}
                 </TouchableOpacity>
               );
             })}
@@ -180,7 +202,7 @@ export default function MainCalendarScreen() {
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   const router = useRouter();
 
-  const { selectedYear, selectedMonth, selectedDate, setSelectedDate, setYearMonth } = useCalendarStore();
+  const { selectedYear, selectedMonth, selectedDate, setSelectedDate, setYearMonth, alarmVersion } = useCalendarStore();
 
   const [containerHeight, setContainerHeight] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
@@ -190,6 +212,7 @@ export default function MainCalendarScreen() {
   const [showArrivalSheet, setShowArrivalSheet] = useState(false);
   const [selectedGroupAlarm, setSelectedGroupAlarm] = useState<any>(null);
   const [events, setEvents] = useState<EventMap>({});
+  const [alarmCounts, setAlarmCounts] = useState<AlarmCountMap>({});
   const flatListRef = useRef<FlatList>(null);
   const isAtTodayRef = useRef(true);
   const isMountedRef = useRef(false);
@@ -234,6 +257,29 @@ export default function MainCalendarScreen() {
       flatListRef.current?.scrollToOffset({ offset: clampedIndex * containerHeight, animated: true });
     }
   }, [containerHeight, selectedYear, selectedMonth]);
+
+  useEffect(() => {
+    Promise.all([
+      alarmsApi.getAlarmsByType('PERSONAL'),
+      alarmsApi.getAlarmsByType('GROUP'),
+      alarmsApi.getAlarmsByType('HOME'),
+    ]).then(([personal, group, home]) => {
+      const counts: AlarmCountMap = {};
+      (personal.data ?? []).forEach((a) => {
+        if (!counts[a.plan_date]) counts[a.plan_date] = { personal: 0, group: 0, home: 0 };
+        counts[a.plan_date].personal++;
+      });
+      (group.data ?? []).forEach((a) => {
+        if (!counts[a.plan_date]) counts[a.plan_date] = { personal: 0, group: 0, home: 0 };
+        counts[a.plan_date].group++;
+      });
+      (home.data ?? []).forEach((a) => {
+        if (!counts[a.plan_date]) counts[a.plan_date] = { personal: 0, group: 0, home: 0 };
+        counts[a.plan_date].home++;
+      });
+      setAlarmCounts(counts);
+    }).catch(() => {});
+  }, [alarmVersion]);
 
   useEffect(() => {
     fetchHolidays(selectedYear, selectedMonth).then((holidays) => {
@@ -284,9 +330,10 @@ export default function MainCalendarScreen() {
         onDayPress={(date) => { setSelectedDate(date); router.push('/daily-alarm'); }}
         containerHeight={containerHeight}
         events={events}
+        alarmCounts={alarmCounts}
       />
     );
-  }, [containerHeight, events, selectedDate, todayStr]);
+  }, [containerHeight, events, alarmCounts, selectedDate, todayStr]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -449,4 +496,6 @@ const styles = StyleSheet.create({
   rightBtns: { flexDirection: 'row', gap: 28, alignItems: 'center' },
   rightBtn: { alignItems: 'center', gap: 3 },
   rightBtnLabel: { fontSize: 10, color: '#444444', fontWeight: '500' },
+  alarmCountRow: { flexDirection: 'column', gap: 1, marginTop: 1, alignItems: 'flex-start', paddingLeft: 4 },
+  alarmCountText: { fontSize: 8, fontWeight: '600' },
 });
