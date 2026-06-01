@@ -13,39 +13,44 @@ GoNow 앱의 프론트엔드 프로젝트입니다.
 
 ## 실행 방법
 
-1. 의존성을 설치합니다.
+> ⚠️ 이 프로젝트는 `@notifee`, 백그라운드 위치 추적 등 커스텀 네이티브 모듈을 사용합니다.  
+> **Expo Go로는 실행할 수 없습니다.** 반드시 아래 빌드 방식을 사용하세요.
+
+### 1단계: 의존성 설치
 
 ```bash
 npm install
 ```
 
-2. 앱을 실행합니다.
-
-```bash
-npx expo start
-```
-
-## 실행 옵션
-
-앱 실행 후 아래 방법 중 하나를 선택해 확인할 수 있습니다.
-
-- Expo Go 앱으로 QR 코드 스캔
-- Android Emulator
-- iOS Simulator (Mac 환경)
-
-## APK 빌드
-
-EAS Build를 사용합니다. 빌드 전 `eas-cli`가 설치되어 있어야 합니다.
+### 2단계: EAS CLI 설치 및 로그인
 
 ```bash
 npm install -g eas-cli
 eas login
 ```
 
-개발/테스트용 APK 빌드:
+## 개발 중 코드 변경 반영 (Development 빌드)
+
+코드를 수정하면서 즉시 반영되는 핫리로드 환경입니다.
+
+**최초 1회: Development APK 빌드 후 기기에 설치**
 
 ```bash
-eas build -p android --profile preview
+eas build --platform android --profile development
+```
+
+**이후 매번: Metro 서버 실행 → 기기에서 자동 연결**
+
+```bash
+npx expo start
+```
+
+## 테스트용 APK 빌드 (Preview 빌드)
+
+코드가 번들에 고정된 APK입니다. 코드 변경 시 재빌드가 필요합니다.
+
+```bash
+eas build --platform android --profile preview
 ```
 
 빌드 완료 후 EAS 대시보드에서 APK를 다운로드할 수 있습니다.
