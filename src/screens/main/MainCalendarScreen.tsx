@@ -170,11 +170,11 @@ const CalendarMonth = memo(function CalendarMonth({
                       <Text style={[styles.eventLabel, { color: ev.color }]} numberOfLines={1}>{ev.label}</Text>
                     </View>
                   ))}
-                  {isCur && (() => {
+                  {(() => {
                     const c = alarmCounts[day.fullDate];
                     if (!c || (c.personal === 0 && c.group === 0 && c.home === 0)) return null;
                     return (
-                      <View style={styles.alarmCountRow}>
+                      <View style={[styles.alarmCountRow, !isCur && { opacity: 0.4 }]}>
                         {c.personal > 0 && (
                           <Text style={[styles.alarmCountText, { color: '#007AFF' }]}>개인 {c.personal}</Text>
                         )}
@@ -259,24 +259,59 @@ export default function MainCalendarScreen() {
   }, [containerHeight, selectedYear, selectedMonth]);
 
   useEffect(() => {
+    // 달력 표시 범위: 오늘 기준 ±24개월
+    const rangeStart = new Date(today.getFullYear(), today.getMonth() - 24, 1);
+    const rangeEnd = new Date(today.getFullYear(), today.getMonth() + 25, 0);
+
+    // getDay() → repeat_days 비트 (0=일, 1=월, ..., 6=토)
+    const DAY_TO_BIT = [64, 1, 2, 4, 8, 16, 32];
+
+    function toDateKey(d: Date): string {
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
+    function addCount(key: string, type: 'personal' | 'group' | 'home', counts: AlarmCountMap) {
+      if (!counts[key]) counts[key] = { personal: 0, group: 0, home: 0 };
+      counts[key][type]++;
+    }
+
+    function expandAlarm(planDateRaw: string, repeatDays: number | null, type: 'personal' | 'group' | 'home', counts: AlarmCountMap) {
+      const baseKey = planDateRaw.split('T')[0]; // datetime 형식 대비 정규화
+
+      if (!repeatDays) {
+        addCount(baseKey, type, counts);
+        return;
+      }
+
+      // 반복 알람: 각 요일별로 범위 내 모든 날짜에 카운트
+      const planDate = new Date(baseKey);
+      planDate.setHours(0, 0, 0, 0);
+
+      for (let dow = 0; dow < 7; dow++) {
+        if (!(repeatDays & DAY_TO_BIT[dow])) continue;
+
+        // plan_date와 rangeStart 중 더 늦은 날부터 해당 요일 첫 날 찾기
+        const start = new Date(Math.max(planDate.getTime(), rangeStart.getTime()));
+        const daysUntil = (dow - start.getDay() + 7) % 7;
+        const cur = new Date(start);
+        cur.setDate(cur.getDate() + daysUntil);
+
+        while (cur <= rangeEnd) {
+          addCount(toDateKey(cur), type, counts);
+          cur.setDate(cur.getDate() + 7);
+        }
+      }
+    }
+
     Promise.all([
       alarmsApi.getAlarmsByType('PERSONAL'),
       alarmsApi.getAlarmsByType('GROUP'),
       alarmsApi.getAlarmsByType('HOME'),
     ]).then(([personal, group, home]) => {
       const counts: AlarmCountMap = {};
-      (personal.data ?? []).forEach((a) => {
-        if (!counts[a.plan_date]) counts[a.plan_date] = { personal: 0, group: 0, home: 0 };
-        counts[a.plan_date].personal++;
-      });
-      (group.data ?? []).forEach((a) => {
-        if (!counts[a.plan_date]) counts[a.plan_date] = { personal: 0, group: 0, home: 0 };
-        counts[a.plan_date].group++;
-      });
-      (home.data ?? []).forEach((a) => {
-        if (!counts[a.plan_date]) counts[a.plan_date] = { personal: 0, group: 0, home: 0 };
-        counts[a.plan_date].home++;
-      });
+      (personal.data ?? []).forEach((a) => expandAlarm(a.plan_date, a.repeat_days, 'personal', counts));
+      (group.data ?? []).forEach((a) => expandAlarm(a.plan_date, a.repeat_days, 'group', counts));
+      (home.data ?? []).forEach((a) => expandAlarm(a.plan_date, a.repeat_days, 'home', counts));
       setAlarmCounts(counts);
     }).catch(() => {});
   }, [alarmVersion]);
