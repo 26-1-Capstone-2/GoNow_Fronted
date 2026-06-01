@@ -5,14 +5,16 @@ import { createAlarmsApi } from '@/src/api/alarms';
 import { alarmService } from '@/src/services/alarmService';
 import * as Notifications from 'expo-notifications';
 import { BACKGROUND_ALARM_TASK } from '@/src/tasks/backgroundAlarmTask';
+import '@/src/tasks/backgroundLocationTask';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
+import * as Location from 'expo-location';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
-import notifee, { AndroidCategory, AndroidImportance, AndroidVisibility, EventType } from '@notifee/react-native';
+import notifee, { EventType } from '@notifee/react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
 export const unstable_settings = {
@@ -26,6 +28,7 @@ export default function RootLayout() {
     requestNotificationPermission();
     setupNotificationCategories();
     Notifications.registerTaskAsync(BACKGROUND_ALARM_TASK).catch(() => {});
+    Location.requestBackgroundPermissionsAsync().catch(() => {});
 
     const journeysApi = createJourneysApi();
     const appointmentsApi = createAppointmentsApi();
@@ -80,22 +83,6 @@ export default function RootLayout() {
             const res = await journeysApi.getJourney(id);
             if (!res.data) return;
             const type: AlarmType = res.data.journey_type === 'HOME' ? 'home' : 'personal';
-            const label = type === 'home' ? '귀가' : '개인';
-            await notifee.displayNotification({
-              title: `🔴 ${label} 알람`,
-              body: `지금 바로 출발하세요! [${res.data.dest_name}]`,
-              data: { journeyId: String(id) },
-              android: {
-                channelId: 'gonow-alarm-urgent',
-                importance: AndroidImportance.HIGH,
-                category: AndroidCategory.ALARM,
-                visibility: AndroidVisibility.PUBLIC,
-                vibrationPattern: [100, 500, 200, 500, 200, 500],
-                fullScreenAction: { id: 'default', launchActivity: 'default' },
-                pressAction: { id: 'default' },
-                actions: [{ title: '✕ 닫기', pressAction: { id: 'dismiss' } }],
-              },
-            });
             await alarmService.start({ alarmType: type, destination: res.data.dest_name, journeyId: id });
           } catch {}
         }),
@@ -103,21 +90,6 @@ export default function RootLayout() {
           try {
             const res = await appointmentsApi.getAppointment(id);
             if (!res.data) return;
-            await notifee.displayNotification({
-              title: '🔴 그룹 알람',
-              body: `지금 바로 출발하세요! [${res.data.dest_name}]`,
-              data: { appointmentId: String(id) },
-              android: {
-                channelId: 'gonow-alarm-urgent',
-                importance: AndroidImportance.HIGH,
-                category: AndroidCategory.ALARM,
-                visibility: AndroidVisibility.PUBLIC,
-                vibrationPattern: [100, 500, 200, 500, 200, 500],
-                fullScreenAction: { id: 'default', launchActivity: 'default' },
-                pressAction: { id: 'default' },
-                actions: [{ title: '✕ 닫기', pressAction: { id: 'dismiss' } }],
-              },
-            });
             await alarmService.start({ alarmType: 'group', destination: res.data.dest_name, appointmentId: id });
           } catch {}
         }),

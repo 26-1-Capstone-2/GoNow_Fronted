@@ -1,14 +1,22 @@
 import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import notifee from '@notifee/react-native';
 import { createJourneysApi, JourneyStatus } from '@/src/api/journeys';
 import { createAppointmentsApi } from '@/src/api/appointments';
 import { useAppointmentStatusStore } from '@/src/store/appointmentStatusStore';
 import {
   sendAlarm,
+  scheduleFutureAlarm,
   sendArrivalCheckAlarm,
   sendArrivalAlarm,
   sendArrivalConfirmAlarm,
   AlarmType,
 } from '@/src/utils/notifications';
+import {
+  ACTIVE_JOURNEYS_KEY,
+  ACTIVE_APPOINTMENTS_KEY,
+  STAGING_DONE_KEY,
+} from '@/src/tasks/backgroundLocationTask';
 
 const journeysApi = createJourneysApi();
 const appointmentsApi = createAppointmentsApi();
@@ -23,7 +31,7 @@ interface AlarmTarget {
 
 class AlarmRunner {
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
-  private stageTimers: ReturnType<typeof setTimeout>[] = [];
+  private stageTriggerIds: string[] = [];
   private target: AlarmTarget | null = null;
   private status: JourneyStatus = 'SCHEDULED';
   private intervalSec = DEFAULT_INTERVAL;
@@ -31,7 +39,6 @@ class AlarmRunner {
   private movingSent = false;
   private arrivedSent = false;
   private nearDestSent = false;
-  private stagesCancelled = false;
   private onFinish?: () => void;
 
   setOnFinish(cb: () => void): void {
@@ -46,13 +53,39 @@ class AlarmRunner {
     this.movingSent = false;
     this.arrivedSent = false;
     this.nearDestSent = false;
-    this.stagesCancelled = false;
     this.intervalSec = DEFAULT_INTERVAL;
+
+    // 백그라운드 태스크가 이 알람을 처리하지 않도록 AsyncStorage에서 제거
+    await this.handOffFromBackground();
 
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== 'granted') return;
 
     await this.poll();
+  }
+
+  private async handOffFromBackground(): Promise<void> {
+    const { journeyId, appointmentId } = this.target!;
+    const key = journeyId != null ? `j_${journeyId}` : `a_${appointmentId}`;
+
+    // 백그라운드 태스크의 active 목록에서 제거
+    await Promise.all([
+      journeyId != null && AsyncStorage.getItem(ACTIVE_JOURNEYS_KEY).then(async (raw) => {
+        const ids: number[] = raw ? JSON.parse(raw) : [];
+        await AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify(ids.filter(id => id !== journeyId)));
+      }),
+      appointmentId != null && AsyncStorage.getItem(ACTIVE_APPOINTMENTS_KEY).then(async (raw) => {
+        const ids: number[] = raw ? JSON.parse(raw) : [];
+        await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify(ids.filter(id => id !== appointmentId)));
+      }),
+      // staging done 마킹 → 백그라운드 태스크가 이중으로 알람 울리지 않도록
+      AsyncStorage.getItem(STAGING_DONE_KEY).then(async (raw) => {
+        const done: string[] = raw ? JSON.parse(raw) : [];
+        if (!done.includes(key)) {
+          await AsyncStorage.setItem(STAGING_DONE_KEY, JSON.stringify([...done, key]));
+        }
+      }),
+    ].filter(Boolean));
   }
 
   stop(): void {
@@ -68,9 +101,8 @@ class AlarmRunner {
   }
 
   cancelRemainingStages(): void {
-    this.stageTimers.forEach(clearTimeout);
-    this.stageTimers = [];
-    this.stagesCancelled = true;
+    this.stageTriggerIds.forEach(id => notifee.cancelTriggerNotification(id).catch(() => {}));
+    this.stageTriggerIds = [];
   }
 
   private scheduleNextPoll(): void {
@@ -135,7 +167,6 @@ class AlarmRunner {
 
       if (newStatus === 'DEPARTING' && !this.stagingStarted) {
         this.stagingStarted = true;
-        this.stagesCancelled = false;
         this.scheduleAlarmStages(preparationTime);
       }
 
@@ -160,7 +191,6 @@ class AlarmRunner {
 
       if (newStatus === 'DEPARTING' && !this.stagingStarted) {
         this.stagingStarted = true;
-        this.stagesCancelled = false;
         this.scheduleAlarmStages(preparationTime);
       }
 
@@ -188,16 +218,19 @@ class AlarmRunner {
     const stepMs = preparationTime * 60 * 1000 * 0.25;
     const type = this.target!.alarmType;
     const dest = this.target!.destination;
+    const journeyId = this.target!.journeyId;
+    const appointmentId = this.target!.appointmentId;
 
     sendAlarm(type, 1, dest);
 
-    for (let i = 1; i <= 3; i++) {
-      const stage = (i + 1) as 2 | 3 | 4;
-      const timer = setTimeout(() => {
-        if (!this.stagesCancelled) sendAlarm(type, stage, dest);
-      }, stepMs * i);
-      this.stageTimers.push(timer);
-    }
+    // 앱이 꺼져도 OS가 울릴 수 있도록 createTriggerNotification으로 스케줄
+    Promise.all([
+      scheduleFutureAlarm(type, 2, dest, Date.now() + stepMs, journeyId, appointmentId),
+      scheduleFutureAlarm(type, 3, dest, Date.now() + stepMs * 2, journeyId, appointmentId),
+      scheduleFutureAlarm(type, 4, dest, Date.now() + stepMs * 3, journeyId, appointmentId),
+    ]).then((results) => {
+      this.stageTriggerIds = results.flat();
+    }).catch(() => {});
   }
 }
 

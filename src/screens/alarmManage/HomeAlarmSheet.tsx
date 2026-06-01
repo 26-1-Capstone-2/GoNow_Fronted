@@ -16,6 +16,7 @@ import {
   StyleSheet,
   Switch,
   Text,
+  ToastAndroid,
   TouchableOpacity,
   View
 } from 'react-native';
@@ -336,7 +337,19 @@ export default function HomeAlarmSheet({ onClose, initialMode, editJourneyId }: 
                 setAlarms((prev) => prev.filter((a) => a.id !== alarm.id));
                 bumpAlarmVersion();
               }}>
-                <TouchableOpacity style={styles.alarmCard} onPress={() => openEdit(alarm)} activeOpacity={0.7}>
+                <TouchableOpacity
+                  style={[styles.alarmCard, alarm.isActive && { opacity: 0.45 }]}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    if (alarm.isActive) {
+                      Platform.OS === 'android'
+                        ? ToastAndroid.show('이동 중에는 수정할 수 없어요.', ToastAndroid.SHORT)
+                        : Alert.alert('', '이동 중에는 수정할 수 없어요.');
+                      return;
+                    }
+                    openEdit(alarm);
+                  }}
+                >
                   <View style={styles.alarmInfo}>
                     <Text style={styles.alarmPlace}>{alarm.home_name}</Text>
                     <View style={styles.alarmMeta}>

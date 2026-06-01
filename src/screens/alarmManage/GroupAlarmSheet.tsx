@@ -11,7 +11,7 @@ import { Entypo, Feather, FontAwesome5, FontAwesome6, MaterialCommunityIcons } f
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Platform, Share, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Platform, Share, StyleSheet, Switch, Text, TextInput, ToastAndroid, TouchableOpacity, View } from 'react-native';
 
 const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
 const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));
@@ -431,7 +431,19 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
                   }
                 } catch {}
               }}>
-                <TouchableOpacity style={styles.alarmCard} onPress={() => openEdit(alarm)} activeOpacity={0.7}>
+                <TouchableOpacity
+                  style={[styles.alarmCard, alarm.isArrivalActive && { opacity: 0.45 }]}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    if (alarm.isArrivalActive) {
+                      Platform.OS === 'android'
+                        ? ToastAndroid.show('약속이 진행 중에는 수정할 수 없어요.', ToastAndroid.SHORT)
+                        : Alert.alert('', '약속이 진행 중에는 수정할 수 없어요.');
+                      return;
+                    }
+                    openEdit(alarm);
+                  }}
+                >
                   <View style={styles.alarmInfo}>
                     <Text style={styles.alarmPlace}>{alarm.dest_name}</Text>
                     <View style={styles.alarmMeta}>
