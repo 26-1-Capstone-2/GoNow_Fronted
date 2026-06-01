@@ -134,10 +134,10 @@ class AlarmRunner {
     const res = await journeysApi.updateLocation(this.target.journeyId, lat, lng);
     if (!res.data) return;
 
-    const { journey_status, preparation_time, interval } = res.data;
+    const { journey_status, preparation_time, interval, which_station } = res.data;
     if (interval !== null) this.intervalSec = interval;
     this.scheduleNextPoll();
-    this.handlePersonalStatus(journey_status, preparation_time);
+    this.handlePersonalStatus(journey_status, preparation_time, which_station);
   }
 
   private async pollGroup(lat: number, lng: number): Promise<void> {
@@ -146,16 +146,16 @@ class AlarmRunner {
     const res = await appointmentsApi.updateParticipantLocation(this.target.appointmentId, lat, lng);
     if (!res.data) return;
 
-    const { participant_status, appointment_status, estimated_arrival, preparation_time, interval } = res.data;
+    const { participant_status, appointment_status, estimated_arrival, preparation_time, interval, which_station } = res.data;
 
     useAppointmentStatusStore.getState().setStatus(this.target.appointmentId, appointment_status);
 
     if (interval !== null) this.intervalSec = interval;
     this.scheduleNextPoll();
-    this.handleGroupStatus(participant_status, preparation_time, estimated_arrival);
+    this.handleGroupStatus(participant_status, preparation_time, estimated_arrival, which_station);
   }
 
-  private handlePersonalStatus(newStatus: JourneyStatus, preparationTime: number): void {
+  private handlePersonalStatus(newStatus: JourneyStatus, preparationTime: number, whichStation?: string | null): void {
     if (newStatus === 'READY' && this.status === 'SCHEDULED') {
       this.status = newStatus;
       this.poll();
@@ -167,7 +167,7 @@ class AlarmRunner {
 
       if (newStatus === 'DEPARTING' && !this.stagingStarted) {
         this.stagingStarted = true;
-        this.scheduleAlarmStages(preparationTime);
+        this.scheduleAlarmStages(preparationTime, whichStation);
       }
 
       if (newStatus === 'NEARDEST' && !this.nearDestSent) {
@@ -179,7 +179,7 @@ class AlarmRunner {
     }
   }
 
-  private handleGroupStatus(newStatus: JourneyStatus, preparationTime: number, estimatedArrival: string): void {
+  private handleGroupStatus(newStatus: JourneyStatus, preparationTime: number, estimatedArrival: string, whichStation?: string | null): void {
     if (newStatus === 'READY' && this.status === 'SCHEDULED') {
       this.status = newStatus;
       this.poll();
@@ -191,7 +191,7 @@ class AlarmRunner {
 
       if (newStatus === 'DEPARTING' && !this.stagingStarted) {
         this.stagingStarted = true;
-        this.scheduleAlarmStages(preparationTime);
+        this.scheduleAlarmStages(preparationTime, whichStation);
       }
 
       if (newStatus === 'MOVING' && !this.movingSent) {
@@ -214,20 +214,25 @@ class AlarmRunner {
     }
   }
 
-  private scheduleAlarmStages(preparationTime: number): void {
+  private scheduleAlarmStages(preparationTime: number, whichStation?: string | null): void {
     const stepMs = preparationTime * 60 * 1000 * 0.25;
     const type = this.target!.alarmType;
     const dest = this.target!.destination;
     const journeyId = this.target!.journeyId;
     const appointmentId = this.target!.appointmentId;
 
-    sendAlarm(type, 1, dest);
+    // 각 단계 발송 시점의 탑승까지 남은 분 (which_station 있을 때만 사용)
+    const mins = whichStation
+      ? (f: number) => Math.round(preparationTime * f)
+      : () => undefined;
+
+    sendAlarm(type, 1, dest, whichStation, mins(1.0));
 
     // 앱이 꺼져도 OS가 울릴 수 있도록 createTriggerNotification으로 스케줄
     Promise.all([
-      scheduleFutureAlarm(type, 2, dest, Date.now() + stepMs, journeyId, appointmentId),
-      scheduleFutureAlarm(type, 3, dest, Date.now() + stepMs * 2, journeyId, appointmentId),
-      scheduleFutureAlarm(type, 4, dest, Date.now() + stepMs * 3, journeyId, appointmentId),
+      scheduleFutureAlarm(type, 2, dest, Date.now() + stepMs, journeyId, appointmentId, whichStation, mins(0.75)),
+      scheduleFutureAlarm(type, 3, dest, Date.now() + stepMs * 2, journeyId, appointmentId, whichStation, mins(0.5)),
+      scheduleFutureAlarm(type, 4, dest, Date.now() + stepMs * 3, journeyId, appointmentId, whichStation, mins(0.25)),
     ]).then((results) => {
       this.stageTriggerIds = results.flat();
     }).catch(() => {});

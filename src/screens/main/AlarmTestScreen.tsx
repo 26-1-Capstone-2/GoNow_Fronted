@@ -1,4 +1,4 @@
-import { AlarmStage, AlarmType, requestNotificationPermission, sendAlarm, sendAllArrivalAlarms, sendArrivalAlarm, sendArrivalCheckAlarm, sendArrivalConfirmAlarm, sendLastTransitAlarm } from '@/src/utils/notifications';
+import { AlarmStage, AlarmType, requestNotificationPermission, sendAlarm, sendAllArrivalAlarms, sendArrivalAlarm, sendArrivalCheckAlarm, sendArrivalConfirmAlarm } from '@/src/utils/notifications';
 import { Feather, FontAwesome6 } from '@expo/vector-icons';
 import notifee from '@notifee/react-native';
 import { useRouter } from 'expo-router';
@@ -156,65 +156,36 @@ export default function AlarmTestScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* 귀가-막차 알람 */}
+        {/* 탑승역 포함 알람 예시 */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>귀가-막차 알람</Text>
-
-          <TouchableOpacity
-            style={[styles.stageBtn, { borderLeftColor: '#27AE60' }]}
-            onPress={async () => {
-              await sendLastTransitAlarm('지하철', '강남역 2번 출구', '오전 8시 30분');
-              setLastSent('귀가-막차 지하철 알람 전송됨');
-            }}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.stageBadge, { backgroundColor: '#27AE60' }]}>
-              <Feather name="navigation" size={16} color="#FFFFFF" />
-            </View>
-            <View style={styles.stageInfo}>
-              <Text style={styles.stageBtnLabel}>지하철 막차 알람</Text>
-              <Text style={styles.stageBtnDesc}>강남역 2번 출구 · 오전 8시 30분 탑승</Text>
-            </View>
-            <Feather name="bell" size={18} color="#27AE60" />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.stageBtn, { borderLeftColor: '#1ABC9C' }]}
-            onPress={async () => {
-              await sendLastTransitAlarm('버스', '강남역사거리 정류장', '오전 8시 30분');
-              setLastSent('귀가-막차 버스 알람 전송됨');
-            }}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.stageBadge, { backgroundColor: '#1ABC9C' }]}>
-              <Feather name="navigation" size={16} color="#FFFFFF" />
-            </View>
-            <View style={styles.stageInfo}>
-              <Text style={styles.stageBtnLabel}>버스 막차 알람</Text>
-              <Text style={styles.stageBtnDesc}>강남역사거리 정류장 · 오전 8시 30분 탑승</Text>
-            </View>
-            <Feather name="bell" size={18} color="#1ABC9C" />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.stageBtn, { borderLeftColor: '#8E44AD' }]}
-            onPress={async () => {
-              await sendLastTransitAlarm('지하철', '강남역 2번 출구', '오전 8시 30분');
-              await new Promise(res => setTimeout(res, 1000));
-              await sendLastTransitAlarm('버스', '강남역사거리 정류장', '오전 8시 30분');
-              setLastSent('귀가-막차 지하철+버스 알람 전송됨');
-            }}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.stageBadge, { backgroundColor: '#8E44AD' }]}>
-              <Feather name="navigation" size={16} color="#FFFFFF" />
-            </View>
-            <View style={styles.stageInfo}>
-              <Text style={styles.stageBtnLabel}>지하철 + 버스 동시 알람</Text>
-              <Text style={styles.stageBtnDesc}>두 교통수단 알람 1초 간격 발송</Text>
-            </View>
-            <Feather name="bell" size={18} color="#8E44AD" />
-          </TouchableOpacity>
+          <Text style={styles.sectionTitle}>탑승역 포함 알람 예시</Text>
+          <Text style={styles.sectionDesc}>which_station: 강남역 / preparation_time: 20분</Text>
+          {([
+            { stage: 1, mins: 20, color: '#2ECC71' },
+            { stage: 2, mins: 15, color: '#F39C12' },
+            { stage: 3, mins: 10, color: '#E67E22' },
+            { stage: 4, mins: 5,  color: '#E74C3C' },
+          ] as { stage: AlarmStage; mins: number; color: string }[]).map(({ stage, mins, color }) => (
+            <TouchableOpacity
+              key={stage}
+              style={[styles.stageBtn, { borderLeftColor: color }]}
+              onPress={async () => {
+                const ids = await sendAlarm('personal', stage, '중앙대학교 후문', '강남역', mins);
+                setSentIds((prev) => ({ ...prev, [stage]: [...(prev[stage] ?? []), ...ids] }));
+                setLastSent(`${stage}단계 탑승역 알람 전송됨 (강남역 ${mins}분 전)`);
+              }}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.stageBadge, { backgroundColor: color }]}>
+                <Text style={styles.stageBadgeText}>{stage}</Text>
+              </View>
+              <View style={styles.stageInfo}>
+                <Text style={styles.stageBtnLabel}>{stage}단계 — 강남역 {mins}분 전</Text>
+                <Text style={styles.stageBtnDesc}>[중앙대학교 후문] 강남역 탑승까지 {mins}분 남았어요.</Text>
+              </View>
+              <Feather name="bell" size={18} color={color} />
+            </TouchableOpacity>
+          ))}
         </View>
 
         {/* 도착예정 알람 */}
@@ -331,6 +302,7 @@ const styles = StyleSheet.create({
   permissionText: { fontSize: 13, fontWeight: '500' },
   section: { marginTop: 24 },
   sectionTitle: { fontSize: 13, fontWeight: '600', color: '#888888', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
+  sectionDesc: { fontSize: 12, color: '#AAAAAA', marginBottom: 10, marginTop: -6 },
   typeRow: { flexDirection: 'row', gap: 10 },
   typeBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',

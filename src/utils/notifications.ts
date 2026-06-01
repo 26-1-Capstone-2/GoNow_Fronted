@@ -114,17 +114,32 @@ export async function requestNotificationPermission(): Promise<boolean> {
 // _layout.tsx 호환용 no-op
 export function setupNotificationCategories(): void {}
 
+function buildAlarmBody(
+  stage: AlarmStage,
+  type: AlarmType,
+  destination: string | undefined,
+  whichStation: string | null | undefined,
+  minutesRemaining: number | undefined,
+): string {
+  const stageMsg = STAGE_MESSAGES[type][stage];
+  const message = (whichStation && minutesRemaining != null && minutesRemaining > 0)
+    ? `${whichStation} 탑승까지 ${minutesRemaining}분 남았어요.`
+    : stageMsg;
+  return destination ? `[${destination}] ${message}` : message;
+}
+
 export async function sendAlarm(
   type: AlarmType,
   stage: AlarmStage,
   destination?: string,
+  whichStation?: string | null,
+  minutesRemaining?: number,
 ): Promise<string[]> {
   await ensureChannels();
 
   const config = STAGE_CONFIG[stage];
   const title = `${config.title} - ${TYPE_NAMES[type]} 알람`;
-  const message = STAGE_MESSAGES[type][stage];
-  const body = destination ? `[${destination}] ${message}` : message;
+  const body = buildAlarmBody(stage, type, destination, whichStation, minutesRemaining);
 
   const repeatCount = stage === 4 ? 3 : 1;
   const ids: string[] = [];
@@ -263,12 +278,13 @@ export async function scheduleFutureAlarm(
   triggerTimestamp: number,
   journeyId?: number,
   appointmentId?: number,
+  whichStation?: string | null,
+  minutesRemaining?: number,
 ): Promise<string[]> {
   await ensureChannels();
   const config = STAGE_CONFIG[stage];
   const title = `${config.title} - ${TYPE_NAMES[type]} 알람`;
-  const message = STAGE_MESSAGES[type][stage];
-  const body = destination ? `[${destination}] ${message}` : message;
+  const body = buildAlarmBody(stage, type, destination, whichStation, minutesRemaining);
   const repeatCount = stage === 4 ? 3 : 1;
   const ids: string[] = [];
 

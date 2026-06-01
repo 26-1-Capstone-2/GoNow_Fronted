@@ -14,6 +14,8 @@ export type ParticipantLocationResponse = {
     estimated_arrival: string;
     preparation_time: number;
     interval: number | null;
+    which_station: string | null;
+    boarding_time: string | null;
   };
 };
 

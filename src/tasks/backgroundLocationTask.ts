@@ -98,18 +98,20 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
       const key = `j_${id}`;
       try {
         const res = await patchLocation(`/api/journeys/${id}/location`, token, lat, lng);
-        const { journey_status, preparation_time, journey_type, dest_name } = res?.data ?? {};
+        const { journey_status, preparation_time, journey_type, dest_name, which_station } = res?.data ?? {};
         const type: AlarmType = journey_type === 'HOME' ? 'home' : 'personal';
 
         if (journey_status === 'DEPARTING' && !stagingDone.has(key)) {
           stagingDone.add(key);
           await markStagingDone(key);
-          const stepMs = (preparation_time ?? 0) * 60 * 1000 * 0.25;
-          await sendAlarm(type, 1, dest_name);
+          const pt = preparation_time ?? 0;
+          const stepMs = pt * 60 * 1000 * 0.25;
+          const mins = (f: number) => which_station ? Math.round(pt * f) : undefined;
+          await sendAlarm(type, 1, dest_name, which_station, mins(1.0));
           await Promise.all([
-            scheduleFutureAlarm(type, 2, dest_name, Date.now() + stepMs, id, undefined),
-            scheduleFutureAlarm(type, 3, dest_name, Date.now() + stepMs * 2, id, undefined),
-            scheduleFutureAlarm(type, 4, dest_name, Date.now() + stepMs * 3, id, undefined),
+            scheduleFutureAlarm(type, 2, dest_name, Date.now() + stepMs, id, undefined, which_station, mins(0.75)),
+            scheduleFutureAlarm(type, 3, dest_name, Date.now() + stepMs * 2, id, undefined, which_station, mins(0.5)),
+            scheduleFutureAlarm(type, 4, dest_name, Date.now() + stepMs * 3, id, undefined, which_station, mins(0.25)),
           ]);
         }
 
@@ -126,17 +128,19 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
       const key = `a_${id}`;
       try {
         const res = await patchLocation(`/api/appointments/${id}/participants/location`, token, lat, lng);
-        const { participant_status, preparation_time, dest_name } = res?.data ?? {};
+        const { participant_status, preparation_time, dest_name, which_station } = res?.data ?? {};
 
         if (participant_status === 'DEPARTING' && !stagingDone.has(key)) {
           stagingDone.add(key);
           await markStagingDone(key);
-          const stepMs = (preparation_time ?? 0) * 60 * 1000 * 0.25;
-          await sendAlarm('group', 1, dest_name);
+          const pt = preparation_time ?? 0;
+          const stepMs = pt * 60 * 1000 * 0.25;
+          const mins = (f: number) => which_station ? Math.round(pt * f) : undefined;
+          await sendAlarm('group', 1, dest_name, which_station, mins(1.0));
           await Promise.all([
-            scheduleFutureAlarm('group', 2, dest_name, Date.now() + stepMs, undefined, id),
-            scheduleFutureAlarm('group', 3, dest_name, Date.now() + stepMs * 2, undefined, id),
-            scheduleFutureAlarm('group', 4, dest_name, Date.now() + stepMs * 3, undefined, id),
+            scheduleFutureAlarm('group', 2, dest_name, Date.now() + stepMs, undefined, id, which_station, mins(0.75)),
+            scheduleFutureAlarm('group', 3, dest_name, Date.now() + stepMs * 2, undefined, id, which_station, mins(0.5)),
+            scheduleFutureAlarm('group', 4, dest_name, Date.now() + stepMs * 3, undefined, id, which_station, mins(0.25)),
           ]);
         }
 

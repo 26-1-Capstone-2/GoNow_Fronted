@@ -60,6 +60,8 @@ export type LocationResponse = {
     departure_alarm_time: string;
     preparation_time: number;
     interval: number | null;
+    which_station: string | null;
+    boarding_time: string | null;
   };
 };
 
