@@ -166,6 +166,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
     }
   };
   const openEdit = async (alarm: GroupAlarm) => {
+    if (alarm.isArrivalActive) return;
     setEditAlarm(alarm);
     setView('edit');
     if (!alarm.appointmentId) return;
@@ -249,6 +250,8 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
           if (res.success) {
             if (res.data?.participant_status === 'READY') {
               alarmService.start({ alarmType: 'group', destination: editAlarm.dest_name, appointmentId: editAlarm.appointmentId });
+            } else if (res.data?.participant_status === 'SCHEDULED' && editAlarm.appointmentId != null) {
+              alarmService.stop(undefined, editAlarm.appointmentId);
             }
             await loadAlarms();
             bumpAlarmVersion();

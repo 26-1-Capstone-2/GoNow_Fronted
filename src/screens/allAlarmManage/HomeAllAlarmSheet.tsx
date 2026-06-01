@@ -3,6 +3,7 @@ import MiniCalendar from '@/src/components/common/MiniCalendar';
 import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
 import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createJourneysApi, ensureFutureDateTime, HomeJourneyPayload, JourneyDetail, maskToRepeatDays, repeatDaysToMask, targetTimeToAmpmHourMinute, toTargetTime } from '@/src/api/journeys';
+import { alarmService } from '@/src/services/alarmService';
 import { usePlaces } from '@/src/hooks/usePlaces';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -38,6 +39,7 @@ interface HomeAlarm {
   enabled: boolean;
   transport: Transport;
   date: string;
+  isActive?: boolean;
 }
 
 interface Props { onClose: () => void; }
@@ -55,6 +57,7 @@ function fromAlarmItem(item: AlarmItem): HomeAlarm {
     enabled: item.is_active,
     transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
     date: item.plan_date,
+    isActive: ['MOVING', 'NEARDEST', 'ARRIVED'].includes(item.my_status),
   };
 }
 
@@ -135,6 +138,7 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
   const openAdd = () => { setEditAlarm(DEFAULT_ALARM); setView('edit'); };
 
   const openEdit = async (alarm: HomeAlarm) => {
+    if (alarm.isActive) return;
     if (alarm.journeyId) {
       try {
         const res = await journeysApi.getJourney(alarm.journeyId);
@@ -204,9 +208,17 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
       }
 
       if (isEditMode && editAlarm.journeyId) {
-        await journeysApi.updateHome(editAlarm.journeyId, payload);
+        const res = await journeysApi.updateHome(editAlarm.journeyId, payload);
+        if (res.data.journey_status === 'READY') {
+          alarmService.start({ alarmType: 'home', destination: editAlarm.home_name, journeyId: editAlarm.journeyId });
+        } else if (res.data.journey_status === 'SCHEDULED') {
+          alarmService.stop(editAlarm.journeyId);
+        }
       } else {
-        await journeysApi.createHome(payload);
+        const res = await journeysApi.createHome(payload);
+        if (res.data.journey_status === 'READY') {
+          alarmService.start({ alarmType: 'home', destination: editAlarm.home_name, journeyId: res.data.journey_id });
+        }
       }
       await loadAlarms();
       bumpAlarmVersion();

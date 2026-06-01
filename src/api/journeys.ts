@@ -48,7 +48,7 @@ export type JourneyResponse = {
   message: string;
   data: {
     journey_id: number;
-    journey_status: string;
+    journey_status: JourneyStatus;
   };
 };
 

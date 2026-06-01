@@ -1,7 +1,6 @@
 import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createAppointmentsApi } from '@/src/api/appointments';
 import { createJourneysApi, targetTimeToAmpmHourMinute } from '@/src/api/journeys';
-import { alarmService } from '@/src/services/alarmService';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, FontAwesome5, FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -83,16 +82,6 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
       setPersonal(data.filter((a) => a.alarm_type === 'PERSONAL').map(toAlarmCard));
       setGroup(data.filter((a) => a.alarm_type === 'GROUP').map(toAlarmCard));
       setHome(data.filter((a) => a.alarm_type === 'HOME').map(toAlarmCard));
-
-      data.filter((a) => a.my_status === 'READY').forEach((a) => {
-        if (a.alarm_type === 'GROUP' && a.appointment_id != null) {
-          alarmService.start({ alarmType: 'group', destination: a.dest_name, appointmentId: a.appointment_id });
-        } else if (a.alarm_type === 'HOME' && a.journey_id != null) {
-          alarmService.start({ alarmType: 'home', destination: a.dest_name, journeyId: a.journey_id });
-        } else if (a.alarm_type === 'PERSONAL' && a.journey_id != null) {
-          alarmService.start({ alarmType: 'personal', destination: a.dest_name, journeyId: a.journey_id });
-        }
-      });
     } catch {}
   }, [selectedDate, alarmVersion]);
 
