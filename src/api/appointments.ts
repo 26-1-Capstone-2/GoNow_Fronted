@@ -42,6 +42,7 @@ export type CreateAppointmentResponse = {
   data: {
     appointment_id: number;
     invite_code: string;
+    participant_status: JourneyStatus;
   } | null;
 };
 
@@ -58,7 +59,9 @@ export type UpdateAppointmentPayload = {
 export type UpdateAppointmentResponse = {
   success: boolean;
   message: string;
-  data: null;
+  data: {
+    participant_status: JourneyStatus;
+  } | null;
 };
 
 export type AppointmentParticipant = {
@@ -132,7 +135,7 @@ export function createAppointmentsApi() {
         { method: 'PATCH', body: JSON.stringify({ transport_type }) },
       ),
     joinAppointment: (invite_code: string, transport_type: TransportType) =>
-      request<{ success: boolean; message: string; data: { appointment_id: number } | null }>(
+      request<{ success: boolean; message: string; data: { appointment_id: number; participant_status: JourneyStatus } | null }>(
         '/api/appointments/join',
         { method: 'POST', body: JSON.stringify({ invite_code, transport_type }) },
       ),

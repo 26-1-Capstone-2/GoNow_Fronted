@@ -1,6 +1,6 @@
 import { getToken } from '@/src/store/authStore';
 import { createApiClient } from './client';
-import { TransportType } from './journeys';
+import { TransportType, JourneyStatus } from './journeys';
 
 export type AlarmType = 'PERSONAL' | 'HOME' | 'GROUP';
 
@@ -18,6 +18,7 @@ export type AlarmItem = {
   repeat_days: number | null;
   appointment_status: string | null;
   participant_count: number | null;
+  my_status: JourneyStatus;
 };
 
 export type AlarmsResponse = {

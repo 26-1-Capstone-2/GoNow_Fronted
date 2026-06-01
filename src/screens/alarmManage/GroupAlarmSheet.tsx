@@ -2,6 +2,7 @@ import AddressSearchView, { SearchResult } from '@/src/components/common/Address
 import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
 import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createAppointmentsApi } from '@/src/api/appointments';
+import { alarmService } from '@/src/services/alarmService';
 import { targetTimeToAmpmHourMinute } from '@/src/api/journeys';
 import { createMembersApi } from '@/src/api/members';
 import { usePlaces } from '@/src/hooks/usePlaces';
@@ -144,7 +145,13 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
         inviteCode.trim(),
         joinTransport === 'public' ? 'TRANSIT' : 'DRIVING',
       );
-      if (res.success) {
+      if (res.success && res.data) {
+        if (res.data.participant_status === 'READY') {
+          const detail = await appointmentsApi.getAppointment(res.data.appointment_id);
+          if (detail.data) {
+            alarmService.start({ alarmType: 'group', destination: detail.data.dest_name, appointmentId: res.data.appointment_id });
+          }
+        }
         setInviteCode('');
         setInviteError('');
         setJoinTransport('public');
@@ -220,23 +227,35 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
       if (!editAlarm.appointmentId) { Alert.alert('수정 실패', '약속 정보를 찾을 수 없습니다.'); return; }
       try {
         const transportType = editAlarm.transport === 'public' ? 'TRANSIT' : 'DRIVING';
-        const res = editAlarm.isCurrentUserHost === false
-          ? await appointmentsApi.updateParticipantTransport(editAlarm.appointmentId, transportType)
-          : await appointmentsApi.updateAppointment(editAlarm.appointmentId, {
-              plan_date: selectedDate,
-              target_time: toTargetTime(selectedDate, editAlarm.ampm, editAlarm.hour, editAlarm.minute),
-              dest_name: editAlarm.dest_name,
-              dest_address: editAlarm.dest_address,
-              dest_lat: editAlarm.dest_lat ?? 0,
-              dest_lng: editAlarm.dest_lng ?? 0,
-              transport_type: transportType,
-            });
-        if (res.success) {
-          await loadAlarms();
-          bumpAlarmVersion();
-          setView('list');
+        if (editAlarm.isCurrentUserHost === false) {
+          const res = await appointmentsApi.updateParticipantTransport(editAlarm.appointmentId, transportType);
+          if (res.success) {
+            await loadAlarms();
+            bumpAlarmVersion();
+            setView('list');
+          } else {
+            Alert.alert('수정 실패', res.message ?? '다시 시도해주세요.');
+          }
         } else {
-          Alert.alert('수정 실패', res.message ?? '다시 시도해주세요.');
+          const res = await appointmentsApi.updateAppointment(editAlarm.appointmentId, {
+            plan_date: selectedDate,
+            target_time: toTargetTime(selectedDate, editAlarm.ampm, editAlarm.hour, editAlarm.minute),
+            dest_name: editAlarm.dest_name,
+            dest_address: editAlarm.dest_address,
+            dest_lat: editAlarm.dest_lat ?? 0,
+            dest_lng: editAlarm.dest_lng ?? 0,
+            transport_type: transportType,
+          });
+          if (res.success) {
+            if (res.data?.participant_status === 'READY') {
+              alarmService.start({ alarmType: 'group', destination: editAlarm.dest_name, appointmentId: editAlarm.appointmentId });
+            }
+            await loadAlarms();
+            bumpAlarmVersion();
+            setView('list');
+          } else {
+            Alert.alert('수정 실패', res.message ?? '다시 시도해주세요.');
+          }
         }
       } catch {
         Alert.alert('수정 실패', '네트워크 오류가 발생했습니다.');
@@ -256,6 +275,9 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
         transport_type: editAlarm.transport === 'public' ? 'TRANSIT' : 'DRIVING',
       });
       if (res.success && res.data) {
+        if (res.data.participant_status === 'READY') {
+          alarmService.start({ alarmType: 'group', destination: editAlarm.dest_name, appointmentId: res.data.appointment_id });
+        }
         await loadAlarms();
         bumpAlarmVersion();
         setView('list');

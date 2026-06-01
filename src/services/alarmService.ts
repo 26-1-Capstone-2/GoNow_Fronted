@@ -80,7 +80,6 @@ class AlarmRunner {
 
   private async poll(): Promise<void> {
     if (!this.target) return;
-    if (this.status === 'SCHEDULED') return;
 
     try {
       const loc = await Location.getCurrentPositionAsync({
