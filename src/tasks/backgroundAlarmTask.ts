@@ -18,7 +18,8 @@ TaskManager.defineTask(BACKGROUND_ALARM_TASK, async ({ data, error }) => {
   const notification = (data as any)?.notification as Notifications.Notification | undefined;
   if (!notification) return;
 
-  const fcmData = notification.request.content.data as Record<string, unknown>;
+  const fcmData = notification.request?.content?.data as Record<string, unknown>;
+  if (!fcmData) return;
 
   const journeyIds: number[] = fcmData?.journey_ids
     ? String(fcmData.journey_ids).split(',').map(Number).filter(n => !isNaN(n))
