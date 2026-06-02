@@ -52,6 +52,8 @@ export default function RootLayout() {
     // FCM 서버 푸시 수신 → 해당하는 알람 모두 동시 시작
     const fcmSub = Notifications.addNotificationReceivedListener(async (notification) => {
       const data = notification.request.content.data as Record<string, unknown>;
+      const title = notification.request.content.title;
+      const body = notification.request.content.body;
 
       // 방장 알람 수정 시 참가자 상태 동기화 FCM
       if (data?.appointment_id && data?.participant_status) {
@@ -70,30 +72,46 @@ export default function RootLayout() {
         return;
       }
 
-      const journeyIds: number[] = data?.journey_ids
-        ? String(data.journey_ids).split(',').map(Number).filter(n => !isNaN(n))
-        : [];
-      const appointmentIds: number[] = data?.appointment_ids
-        ? String(data.appointment_ids).split(',').map(Number).filter(n => !isNaN(n))
-        : [];
+      // FCM Data 메시지 (새벽 4시 READY 전환) → GPS 폴링 시작
+      if (data?.journey_ids || data?.appointment_ids) {
+        const journeyIds: number[] = data?.journey_ids
+          ? String(data.journey_ids).split(',').map(Number).filter(n => !isNaN(n))
+          : [];
+        const appointmentIds: number[] = data?.appointment_ids
+          ? String(data.appointment_ids).split(',').map(Number).filter(n => !isNaN(n))
+          : [];
 
-      await Promise.all([
-        ...journeyIds.map(async (id) => {
-          try {
-            const res = await journeysApi.getJourney(id);
-            if (!res.data) return;
-            const type: AlarmType = res.data.journey_type === 'HOME' ? 'home' : 'personal';
-            await alarmService.start({ alarmType: type, destination: res.data.dest_name, journeyId: id });
-          } catch {}
-        }),
-        ...appointmentIds.map(async (id) => {
-          try {
-            const res = await appointmentsApi.getAppointment(id);
-            if (!res.data) return;
-            await alarmService.start({ alarmType: 'group', destination: res.data.dest_name, appointmentId: id });
-          } catch {}
-        }),
-      ]);
+        await Promise.all([
+          ...journeyIds.map(async (id) => {
+            try {
+              const res = await journeysApi.getJourney(id);
+              if (!res.data) return;
+              const type: AlarmType = res.data.journey_type === 'HOME' ? 'home' : 'personal';
+              await alarmService.start({ alarmType: type, destination: res.data.dest_name, journeyId: id });
+            } catch {}
+          }),
+          ...appointmentIds.map(async (id) => {
+            try {
+              const res = await appointmentsApi.getAppointment(id);
+              if (!res.data) return;
+              await alarmService.start({ alarmType: 'group', destination: res.data.dest_name, appointmentId: id });
+            } catch {}
+          }),
+        ]);
+        return;
+      }
+
+      // FCM Notification 메시지 (그룹 도착 알람 등) → 포그라운드에서 notifee로 직접 표시
+      if (title && body) {
+        await notifee.displayNotification({
+          title,
+          body,
+          android: {
+            channelId: 'gonow-alarm',
+            pressAction: { id: 'default' },
+          },
+        });
+      }
     });
 
     // 포그라운드 알림 버튼 처리
