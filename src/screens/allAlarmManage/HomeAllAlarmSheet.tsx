@@ -4,6 +4,8 @@ import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
 import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createJourneysApi, ensureFutureDateTime, HomeJourneyPayload, JourneyDetail, maskToRepeatDays, repeatDaysToMask, targetTimeToAmpmHourMinute, toTargetTime } from '@/src/api/journeys';
 import { alarmService } from '@/src/services/alarmService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ACTIVE_JOURNEYS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { usePlaces } from '@/src/hooks/usePlaces';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -232,8 +234,13 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
 
   const handleDelete = async () => {
     if (editAlarm.journeyId) {
-      try { await journeysApi.deleteJourney(editAlarm.journeyId); }
-      catch { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
+      try {
+        await journeysApi.deleteJourney(editAlarm.journeyId);
+        alarmService.stop(editAlarm.journeyId);
+        const raw = await AsyncStorage.getItem(ACTIVE_JOURNEYS_KEY);
+        const ids: number[] = raw ? JSON.parse(raw) : [];
+        await AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify(ids.filter(id => id !== editAlarm.journeyId)));
+      } catch { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
     }
     setAlarms((prev) => prev.filter((a) => a.id !== editAlarm.id));
     bumpAlarmVersion();
@@ -283,8 +290,13 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
             }).map((alarm) => (
               <SwipeableAlarmCard key={alarm.id} onDelete={async () => {
                 if (alarm.journeyId) {
-                  try { await journeysApi.deleteJourney(alarm.journeyId); }
-                  catch { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
+                  try {
+                    await journeysApi.deleteJourney(alarm.journeyId);
+                    alarmService.stop(alarm.journeyId);
+                    const raw = await AsyncStorage.getItem(ACTIVE_JOURNEYS_KEY);
+                    const ids: number[] = raw ? JSON.parse(raw) : [];
+                    await AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify(ids.filter(id => id !== alarm.journeyId)));
+                  } catch { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
                 }
                 setAlarms((prev) => prev.filter((a) => a.id !== alarm.id));
                 bumpAlarmVersion();

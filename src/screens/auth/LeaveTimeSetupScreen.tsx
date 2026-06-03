@@ -11,8 +11,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAppNavigation } from '@/src/navigation';
 import { createAuthApi } from '@/src/api/auth';
+import { createMembersApi } from '@/src/api/members';
 import { useSignUpStore } from '@/src/store/signUpStore';
 import { useAuthStore } from '@/src/store/authStore';
+import * as Notifications from 'expo-notifications';
 
 const authApi = createAuthApi();
 
@@ -45,6 +47,11 @@ export default function LeaveTimeSetupScreen() {
 
       const loginRes = await authApi.login({ email, password });
       setToken(loginRes.data.access_token);
+
+      try {
+        const tokenData = await Notifications.getDevicePushTokenAsync();
+        await createMembersApi().registerFcmToken(tokenData.data);
+      } catch {}
 
       resetSignUp();
       goToMainTabs();
