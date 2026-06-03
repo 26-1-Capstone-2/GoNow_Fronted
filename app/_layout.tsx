@@ -5,12 +5,14 @@ import { createAlarmsApi } from '@/src/api/alarms';
 import { alarmService } from '@/src/services/alarmService';
 import * as Notifications from 'expo-notifications';
 import { BACKGROUND_ALARM_TASK } from '@/src/tasks/backgroundAlarmTask';
-import '@/src/tasks/backgroundLocationTask';
+import { ACTIVE_JOURNEYS_KEY, ACTIVE_APPOINTMENTS_KEY, startBackgroundLocationUpdates, stopBackgroundLocationUpdates } from '@/src/tasks/backgroundLocationTask';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import * as Location from 'expo-location';
+import { AppState } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
 
@@ -25,6 +27,11 @@ export default function RootLayout() {
   const colorScheme = useColorScheme();
 
   useEffect(() => {
+    // 버그2: 앱 시작 시 이전 세션 유령 ID 초기화
+    stopBackgroundLocationUpdates().catch(() => {});
+    AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify([]));
+    AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify([]));
+
     requestNotificationPermission();
     setupNotificationCategories();
     Notifications.registerTaskAsync(BACKGROUND_ALARM_TASK)
@@ -36,20 +43,34 @@ export default function RootLayout() {
     const appointmentsApi = createAppointmentsApi();
     const alarmsApi = createAlarmsApi();
 
-    // 앱 시작 시 오늘 날짜 알람 조회 → READY 상태인 것들 GPS 폴링 재개
     const today = new Date();
     const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    alarmsApi.getAlarms(todayStr).then((res) => {
-      (res.data ?? []).filter((a) => a.my_status === 'READY').forEach((a) => {
-        if (a.alarm_type === 'GROUP' && a.appointment_id != null) {
-          alarmService.start({ alarmType: 'group', destination: a.dest_name, appointmentId: a.appointment_id });
-        } else if (a.alarm_type === 'HOME' && a.journey_id != null) {
-          alarmService.start({ alarmType: 'home', destination: a.dest_name, journeyId: a.journey_id });
-        } else if (a.alarm_type === 'PERSONAL' && a.journey_id != null) {
-          alarmService.start({ alarmType: 'personal', destination: a.dest_name, journeyId: a.journey_id });
-        }
-      });
-    }).catch(() => {});
+
+    const startReadyAlarms = () => {
+      alarmsApi.getAlarms(todayStr).then((res) => {
+        (res.data ?? []).filter((a) => a.my_status === 'READY').forEach((a) => {
+          if (a.alarm_type === 'GROUP' && a.appointment_id != null) {
+            alarmService.start({ alarmType: 'group', destination: a.dest_name, appointmentId: a.appointment_id });
+          } else if (a.alarm_type === 'HOME' && a.journey_id != null) {
+            alarmService.start({ alarmType: 'home', destination: a.dest_name, journeyId: a.journey_id });
+          } else if (a.alarm_type === 'PERSONAL' && a.journey_id != null) {
+            alarmService.start({ alarmType: 'personal', destination: a.dest_name, journeyId: a.journey_id });
+          }
+        });
+      }).catch(() => {});
+    };
+
+    // 앱 시작 시 오늘 날짜 알람 조회 → READY 상태인 것들 GPS 폴링 재개
+    startReadyAlarms();
+
+    // 버그5: AppState 감지 → 포그라운드/백그라운드 전환 핸드오프
+    const appStateSub = AppState.addEventListener('change', async (nextState) => {
+      if (nextState === 'active') {
+        startReadyAlarms();
+      } else if (nextState === 'background') {
+        await startBackgroundLocationUpdates().catch(() => {});
+      }
+    });
 
     // FCM 서버 푸시 수신 → 해당하는 알람 모두 동시 시작
     const fcmSub = Notifications.addNotificationReceivedListener(async (notification) => {
@@ -147,6 +168,7 @@ export default function RootLayout() {
     return () => {
       fcmSub.remove();
       notifSub();
+      appStateSub.remove();
     };
   }, []);
 

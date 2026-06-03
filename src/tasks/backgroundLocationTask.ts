@@ -8,6 +8,8 @@ export const BACKGROUND_LOCATION_TASK = 'BACKGROUND-LOCATION-TASK';
 export const ACTIVE_JOURNEYS_KEY = 'gonow_active_journeys';
 export const ACTIVE_APPOINTMENTS_KEY = 'gonow_active_appointments';
 export const STAGING_DONE_KEY = 'gonow_staging_done';
+export const DESIRED_INTERVALS_KEY = 'gonow_desired_intervals'; // Record<key, seconds>
+const LAST_CALL_TIMES_KEY = 'gonow_last_call_times';           // Record<key, ms timestamp>
 
 const BASE_URL = 'https://gonow-api.uk';
 
@@ -93,13 +95,33 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   const remainingJourneys: number[] = [];
   const remainingAppointments: number[] = [];
 
+  // 인터벌 추적: 알람별 마지막 호출 시간 + 원하는 인터벌(초)
+  const [lastCallTimesRaw, desiredIntervalsRaw] = await Promise.all([
+    AsyncStorage.getItem(LAST_CALL_TIMES_KEY),
+    AsyncStorage.getItem(DESIRED_INTERVALS_KEY),
+  ]);
+  const lastCallTimes: Record<string, number> = lastCallTimesRaw ? JSON.parse(lastCallTimesRaw) : {};
+  const desiredIntervals: Record<string, number> = desiredIntervalsRaw ? JSON.parse(desiredIntervalsRaw) : {};
+  const now = Date.now();
+
   await Promise.all([
     ...journeyIds.map(async (id) => {
       const key = `j_${id}`;
+
+      // 아직 원하는 인터벌이 지나지 않았으면 skip
+      const intervalMs = (desiredIntervals[key] ?? 30) * 1000;
+      if (now - (lastCallTimes[key] ?? 0) < intervalMs) {
+        remainingJourneys.push(id);
+        return;
+      }
+      lastCallTimes[key] = now;
+
       try {
         const res = await patchLocation(`/api/journeys/${id}/location`, token, lat, lng);
-        const { journey_status, preparation_time, journey_type, dest_name, which_station } = res?.data ?? {};
+        const { journey_status, preparation_time, journey_type, dest_name, which_station, interval } = res?.data ?? {};
         const type: AlarmType = journey_type === 'HOME' ? 'home' : 'personal';
+
+        if (interval != null) desiredIntervals[key] = interval;
 
         if (journey_status === 'DEPARTING' && !stagingDone.has(key)) {
           stagingDone.add(key);
@@ -117,6 +139,8 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
 
         if (journey_status === 'ARRIVED') {
           await removeStagingKey(key);
+          delete lastCallTimes[key];
+          delete desiredIntervals[key];
         } else {
           remainingJourneys.push(id);
         }
@@ -126,9 +150,19 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
     }),
     ...appointmentIds.map(async (id) => {
       const key = `a_${id}`;
+
+      const intervalMs = (desiredIntervals[key] ?? 30) * 1000;
+      if (now - (lastCallTimes[key] ?? 0) < intervalMs) {
+        remainingAppointments.push(id);
+        return;
+      }
+      lastCallTimes[key] = now;
+
       try {
         const res = await patchLocation(`/api/appointments/${id}/participants/location`, token, lat, lng);
-        const { participant_status, preparation_time, dest_name, which_station } = res?.data ?? {};
+        const { participant_status, preparation_time, dest_name, which_station, interval } = res?.data ?? {};
+
+        if (interval != null) desiredIntervals[key] = interval;
 
         if (participant_status === 'DEPARTING' && !stagingDone.has(key)) {
           stagingDone.add(key);
@@ -146,6 +180,8 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
 
         if (participant_status === 'ARRIVED') {
           await removeStagingKey(key);
+          delete lastCallTimes[key];
+          delete desiredIntervals[key];
         } else {
           remainingAppointments.push(id);
         }
@@ -158,6 +194,8 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   await Promise.all([
     AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify(remainingJourneys)),
     AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify(remainingAppointments)),
+    AsyncStorage.setItem(LAST_CALL_TIMES_KEY, JSON.stringify(lastCallTimes)),
+    AsyncStorage.setItem(DESIRED_INTERVALS_KEY, JSON.stringify(desiredIntervals)),
   ]);
 
   if (remainingJourneys.length === 0 && remainingAppointments.length === 0) {

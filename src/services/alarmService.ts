@@ -16,6 +16,7 @@ import {
   ACTIVE_JOURNEYS_KEY,
   ACTIVE_APPOINTMENTS_KEY,
   STAGING_DONE_KEY,
+  DESIRED_INTERVALS_KEY,
 } from '@/src/tasks/backgroundLocationTask';
 
 const journeysApi = createJourneysApi();
@@ -135,7 +136,16 @@ class AlarmRunner {
     if (!res.data) return;
 
     const { journey_status, preparation_time, interval, which_station } = res.data;
-    if (interval !== null) this.intervalSec = interval;
+    if (interval !== null) {
+      this.intervalSec = interval;
+      // 백그라운드 전환 시 태스크가 이어받을 수 있도록 저장
+      const key = `j_${this.target!.journeyId}`;
+      AsyncStorage.getItem(DESIRED_INTERVALS_KEY).then(raw => {
+        const intervals = raw ? JSON.parse(raw) : {};
+        intervals[key] = interval;
+        AsyncStorage.setItem(DESIRED_INTERVALS_KEY, JSON.stringify(intervals));
+      }).catch(() => {});
+    }
     if (!this.target) return;
     this.scheduleNextPoll();
     this.handlePersonalStatus(journey_status, preparation_time, which_station);
@@ -151,7 +161,15 @@ class AlarmRunner {
 
     useAppointmentStatusStore.getState().setStatus(this.target.appointmentId, appointment_status);
 
-    if (interval !== null) this.intervalSec = interval;
+    if (interval !== null) {
+      this.intervalSec = interval;
+      const key = `a_${this.target!.appointmentId}`;
+      AsyncStorage.getItem(DESIRED_INTERVALS_KEY).then(raw => {
+        const intervals = raw ? JSON.parse(raw) : {};
+        intervals[key] = interval;
+        AsyncStorage.setItem(DESIRED_INTERVALS_KEY, JSON.stringify(intervals));
+      }).catch(() => {});
+    }
     if (!this.target) return;
     this.scheduleNextPoll();
     this.handleGroupStatus(participant_status, preparation_time, estimated_arrival, which_station);

@@ -3,6 +3,8 @@ import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
 import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createAppointmentsApi } from '@/src/api/appointments';
 import { alarmService } from '@/src/services/alarmService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ACTIVE_APPOINTMENTS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { targetTimeToAmpmHourMinute } from '@/src/api/journeys';
 import { createMembersApi } from '@/src/api/members';
 import { usePlaces } from '@/src/hooks/usePlaces';
@@ -345,6 +347,10 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
     try {
       const res = await appointmentsApi.deleteAppointment(editAlarm.appointmentId);
       if (res.success) {
+        alarmService.stop(undefined, editAlarm.appointmentId);
+        const raw = await AsyncStorage.getItem(ACTIVE_APPOINTMENTS_KEY);
+        const ids: number[] = raw ? JSON.parse(raw) : [];
+        await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify(ids.filter(id => id !== editAlarm.appointmentId)));
         await loadAlarms();
         bumpAlarmVersion();
         setView('list');
@@ -424,10 +430,22 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
                   );
                   if (isHost) {
                     const res = await appointmentsApi.deleteAppointment(alarm.appointmentId);
-                    if (res.success) { await loadAlarms(); bumpAlarmVersion(); }
+                    if (res.success) {
+                      alarmService.stop(undefined, alarm.appointmentId);
+                      const raw = await AsyncStorage.getItem(ACTIVE_APPOINTMENTS_KEY);
+                      const ids: number[] = raw ? JSON.parse(raw) : [];
+                      await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify(ids.filter(id => id !== alarm.appointmentId)));
+                      await loadAlarms(); bumpAlarmVersion();
+                    }
                   } else {
                     const res = await appointmentsApi.removeParticipant(alarm.appointmentId, myMemberId);
-                    if (res.success) { await loadAlarms(); bumpAlarmVersion(); }
+                    if (res.success) {
+                      alarmService.stop(undefined, alarm.appointmentId);
+                      const raw = await AsyncStorage.getItem(ACTIVE_APPOINTMENTS_KEY);
+                      const ids: number[] = raw ? JSON.parse(raw) : [];
+                      await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify(ids.filter(id => id !== alarm.appointmentId)));
+                      await loadAlarms(); bumpAlarmVersion();
+                    }
                   }
                 } catch {}
               }}>
