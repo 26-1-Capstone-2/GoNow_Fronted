@@ -18,7 +18,7 @@ TaskManager.defineTask(BACKGROUND_ALARM_TASK, async ({ data, error }) => {
   }
 
   console.log('[BACKGROUND_ALARM_TASK] data:', JSON.stringify(data));
-  const fcmData = (data as any) as Record<string, unknown>;
+  const fcmData = (data as any)?.data as Record<string, unknown>;
   if (!fcmData) return;
 
   const journeyIds: number[] = fcmData?.journey_ids
