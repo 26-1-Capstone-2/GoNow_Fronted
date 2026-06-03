@@ -286,6 +286,10 @@ class AlarmManager {
     this.runners.clear();
   }
 
+  isRunning(journeyId?: number, appointmentId?: number): boolean {
+    return this.runners.has(this.key(journeyId, appointmentId));
+  }
+
   cancelRemainingStages(journeyId?: number, appointmentId?: number): void {
     const k = this.key(journeyId, appointmentId);
     this.runners.get(k)?.cancelRemainingStages();

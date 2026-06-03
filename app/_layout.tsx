@@ -27,50 +27,60 @@ export default function RootLayout() {
   const colorScheme = useColorScheme();
 
   useEffect(() => {
-    // 버그2: 앱 시작 시 이전 세션 유령 ID 초기화
-    stopBackgroundLocationUpdates().catch(() => {});
-    AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify([]));
-    AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify([]));
+    let cleanup = () => {};
 
-    requestNotificationPermission();
-    setupNotificationCategories();
-    Notifications.registerTaskAsync(BACKGROUND_ALARM_TASK)
-      .then(() => console.log('[BACKGROUND_ALARM_TASK] 등록 성공'))
-      .catch((e) => console.log('[BACKGROUND_ALARM_TASK] 등록 실패:', e));
-    Location.requestBackgroundPermissionsAsync().catch(() => {});
+    const init = async () => {
+      // 앱 시작 시 이전 세션 유령 ID 초기화 (await 필수 — 완료 전 startReadyAlarms 실행 방지)
+      await stopBackgroundLocationUpdates().catch(() => {});
+      await AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify([]));
+      await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify([]));
 
-    const journeysApi = createJourneysApi();
-    const appointmentsApi = createAppointmentsApi();
-    const alarmsApi = createAlarmsApi();
+      requestNotificationPermission();
+      setupNotificationCategories();
+      Notifications.registerTaskAsync(BACKGROUND_ALARM_TASK)
+        .then(() => console.log('[BACKGROUND_ALARM_TASK] 등록 성공'))
+        .catch((e) => console.log('[BACKGROUND_ALARM_TASK] 등록 실패:', e));
+      Location.requestBackgroundPermissionsAsync().catch(() => {});
 
-    const today = new Date();
-    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      const journeysApi = createJourneysApi();
+      const appointmentsApi = createAppointmentsApi();
+      const alarmsApi = createAlarmsApi();
 
-    const startReadyAlarms = () => {
-      alarmsApi.getAlarms(todayStr).then((res) => {
-        (res.data ?? []).filter((a) => a.my_status === 'READY').forEach((a) => {
-          if (a.alarm_type === 'GROUP' && a.appointment_id != null) {
-            alarmService.start({ alarmType: 'group', destination: a.dest_name, appointmentId: a.appointment_id });
-          } else if (a.alarm_type === 'HOME' && a.journey_id != null) {
-            alarmService.start({ alarmType: 'home', destination: a.dest_name, journeyId: a.journey_id });
-          } else if (a.alarm_type === 'PERSONAL' && a.journey_id != null) {
-            alarmService.start({ alarmType: 'personal', destination: a.dest_name, journeyId: a.journey_id });
-          }
-        });
-      }).catch(() => {});
-    };
+      const today = new Date();
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
-    // 앱 시작 시 오늘 날짜 알람 조회 → READY 상태인 것들 GPS 폴링 재개
-    startReadyAlarms();
+      const startReadyAlarms = () => {
+        alarmsApi.getAlarms(todayStr).then((res) => {
+          (res.data ?? []).filter((a) => a.my_status === 'READY').forEach((a) => {
+            if (a.alarm_type === 'GROUP' && a.appointment_id != null) {
+              if (alarmService.isRunning(undefined, a.appointment_id)) return;
+              alarmService.start({ alarmType: 'group', destination: a.dest_name, appointmentId: a.appointment_id });
+            } else if (a.alarm_type === 'HOME' && a.journey_id != null) {
+              if (alarmService.isRunning(a.journey_id)) return;
+              alarmService.start({ alarmType: 'home', destination: a.dest_name, journeyId: a.journey_id });
+            } else if (a.alarm_type === 'PERSONAL' && a.journey_id != null) {
+              if (alarmService.isRunning(a.journey_id)) return;
+              alarmService.start({ alarmType: 'personal', destination: a.dest_name, journeyId: a.journey_id });
+            }
+          });
+        }).catch(() => {});
+      };
 
-    // 버그5: AppState 감지 → 포그라운드/백그라운드 전환 핸드오프
-    const appStateSub = AppState.addEventListener('change', async (nextState) => {
-      if (nextState === 'active') {
-        startReadyAlarms();
-      } else if (nextState === 'background') {
-        await startBackgroundLocationUpdates().catch(() => {});
-      }
-    });
+      // 앱 시작 시 오늘 날짜 알람 조회 → READY 상태인 것들 GPS 폴링 재개
+      startReadyAlarms();
+
+      // AppState 감지 → active 3초 디바운스로 중복 발화 방지
+      let lastForegroundAt = 0;
+      const appStateSub = AppState.addEventListener('change', async (nextState) => {
+        if (nextState === 'active') {
+          const now = Date.now();
+          if (now - lastForegroundAt < 3000) return;
+          lastForegroundAt = now;
+          startReadyAlarms();
+        } else if (nextState === 'background') {
+          await startBackgroundLocationUpdates().catch(() => {});
+        }
+      });
 
     // FCM 서버 푸시 수신 → 해당하는 알람 모두 동시 시작
     const fcmSub = Notifications.addNotificationReceivedListener(async (notification) => {
@@ -165,11 +175,15 @@ export default function RootLayout() {
       }
     });
 
-    return () => {
-      fcmSub.remove();
-      notifSub();
-      appStateSub.remove();
+      cleanup = () => {
+        fcmSub.remove();
+        notifSub();
+        appStateSub.remove();
+      };
     };
+
+    init();
+    return () => cleanup();
   }, []);
 
   return (
