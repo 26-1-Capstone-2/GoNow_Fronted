@@ -13,9 +13,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { createAuthApi } from '@/src/api/auth';
+import { createAlarmsApi } from '@/src/api/alarms';
 import { createMembersApi } from '@/src/api/members';
 import { useAppNavigation } from '@/src/navigation';
 import { useAuthStore } from '@/src/store/authStore';
+import { alarmService } from '@/src/services/alarmService';
 import * as Notifications from 'expo-notifications';
 
 const authApi = createAuthApi();
@@ -35,11 +37,28 @@ export default function LoginScreen() {
       setToken(res.data.access_token);
 
       try {
-        const tokenData = await Notifications.getDevicePushTokenAsync();
+        const tokenData = await Notifications.getExpoPushTokenAsync({
+          projectId: 'f9e1a464-f427-4bb3-ba40-7d6e2382f3f0',
+        });
         await createMembersApi().registerFcmToken(tokenData.data);
-      } catch {
-        // FCM 토큰 등록 실패해도 로그인은 계속 진행
+      } catch (e) {
+        console.log('[FCM] 토큰 등록 실패:', e);
       }
+
+      // 로그인 완료 후 오늘 READY 알람 조회 → GPS 폴링 시작
+      const today = new Date();
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      createAlarmsApi().getAlarms(todayStr).then((alarmsRes) => {
+        (alarmsRes.data ?? []).filter((a) => a.my_status === 'READY').forEach((a) => {
+          if (a.alarm_type === 'GROUP' && a.appointment_id != null) {
+            alarmService.start({ alarmType: 'group', destination: a.dest_name, appointmentId: a.appointment_id });
+          } else if (a.alarm_type === 'HOME' && a.journey_id != null) {
+            alarmService.start({ alarmType: 'home', destination: a.dest_name, journeyId: a.journey_id });
+          } else if (a.alarm_type === 'PERSONAL' && a.journey_id != null) {
+            alarmService.start({ alarmType: 'personal', destination: a.dest_name, journeyId: a.journey_id });
+          }
+        });
+      }).catch(() => {});
 
       goToMainTabs();
     } catch (e: any) {

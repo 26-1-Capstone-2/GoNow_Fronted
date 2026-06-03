@@ -27,7 +27,9 @@ export default function RootLayout() {
   useEffect(() => {
     requestNotificationPermission();
     setupNotificationCategories();
-    Notifications.registerTaskAsync(BACKGROUND_ALARM_TASK).catch(() => {});
+    Notifications.registerTaskAsync(BACKGROUND_ALARM_TASK)
+      .then(() => console.log('[BACKGROUND_ALARM_TASK] 등록 성공'))
+      .catch((e) => console.log('[BACKGROUND_ALARM_TASK] 등록 실패:', e));
     Location.requestBackgroundPermissionsAsync().catch(() => {});
 
     const journeysApi = createJourneysApi();
