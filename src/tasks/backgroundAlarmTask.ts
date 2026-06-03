@@ -1,6 +1,5 @@
 import * as TaskManager from 'expo-task-manager';
 import * as Notifications from 'expo-notifications';
-import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   BACKGROUND_LOCATION_TASK,
@@ -13,6 +12,7 @@ export const BACKGROUND_ALARM_TASK = 'BACKGROUND-ALARM-TASK';
 
 // 모듈 로드 시 태스크 정의 (registerTaskAsync 전에 반드시 실행돼야 함)
 TaskManager.defineTask(BACKGROUND_ALARM_TASK, async ({ data, error }) => {
+  console.log('[BACKGROUND_ALARM_TASK] fired');
   if (error) return;
 
   const notification = (data as any)?.notification as Notifications.Notification | undefined;
@@ -45,11 +45,6 @@ TaskManager.defineTask(BACKGROUND_ALARM_TASK, async ({ data, error }) => {
   ]);
 
   // 백그라운드 위치 추적 시작 → backgroundLocationTask가 GPS 폴링하며 상태 감지
-  const hasPermission = await Location.getBackgroundPermissionsAsync()
-    .then(p => p.granted)
-    .catch(() => false);
-
-  if (hasPermission) {
-    await startBackgroundLocationUpdates().catch(() => {});
-  }
+  // 백그라운드 태스크 내에서 getBackgroundPermissionsAsync()가 false를 반환하는 경우가 있어 체크 생략
+  await startBackgroundLocationUpdates().catch(() => {});
 });
