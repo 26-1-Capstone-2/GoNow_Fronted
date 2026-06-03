@@ -37,9 +37,7 @@ export default function LoginScreen() {
       setToken(res.data.access_token);
 
       try {
-        const tokenData = await Notifications.getExpoPushTokenAsync({
-          projectId: 'f9e1a464-f427-4bb3-ba40-7d6e2382f3f0',
-        });
+        const tokenData = await Notifications.getDevicePushTokenAsync();
         await createMembersApi().registerFcmToken(tokenData.data);
       } catch (e) {
         console.log('[FCM] 토큰 등록 실패:', e);

@@ -136,6 +136,7 @@ class AlarmRunner {
 
     const { journey_status, preparation_time, interval, which_station } = res.data;
     if (interval !== null) this.intervalSec = interval;
+    if (!this.target) return;
     this.scheduleNextPoll();
     this.handlePersonalStatus(journey_status, preparation_time, which_station);
   }
@@ -151,6 +152,7 @@ class AlarmRunner {
     useAppointmentStatusStore.getState().setStatus(this.target.appointmentId, appointment_status);
 
     if (interval !== null) this.intervalSec = interval;
+    if (!this.target) return;
     this.scheduleNextPoll();
     this.handleGroupStatus(participant_status, preparation_time, estimated_arrival, which_station);
   }
