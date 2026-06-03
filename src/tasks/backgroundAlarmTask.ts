@@ -1,5 +1,4 @@
 import * as TaskManager from 'expo-task-manager';
-import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   BACKGROUND_LOCATION_TASK,
@@ -13,12 +12,13 @@ export const BACKGROUND_ALARM_TASK = 'BACKGROUND-ALARM-TASK';
 // 모듈 로드 시 태스크 정의 (registerTaskAsync 전에 반드시 실행돼야 함)
 TaskManager.defineTask(BACKGROUND_ALARM_TASK, async ({ data, error }) => {
   console.log('[BACKGROUND_ALARM_TASK] fired');
-  if (error) return;
+  if (error) {
+    console.log('[BACKGROUND_ALARM_TASK] error:', JSON.stringify(error));
+    return;
+  }
 
-  const notification = (data as any)?.notification as Notifications.Notification | undefined;
-  if (!notification) return;
-
-  const fcmData = notification.request?.content?.data as Record<string, unknown>;
+  console.log('[BACKGROUND_ALARM_TASK] data:', JSON.stringify(data));
+  const fcmData = (data as any) as Record<string, unknown>;
   if (!fcmData) return;
 
   const journeyIds: number[] = fcmData?.journey_ids
