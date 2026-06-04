@@ -251,11 +251,13 @@ export default function RootLayout() {
         const appointmentId = data?.appointmentId ? Number(data.appointmentId) : undefined;
 
         if (actionId === 'dismiss' && notifId) {
+          console.log(`[알람] 출발알람 X버튼 눌림 — journeyId:${journeyId} appointmentId:${appointmentId} → 남은 단계 취소`);
           notifee.cancelNotification(notifId);
           alarmService.cancelRemainingStages(journeyId, appointmentId);
         }
 
         if (actionId === 'arrival-yes' && notifId) {
+          console.log(`[알람] 도착확인 YES버튼 눌림 — journeyId:${journeyId} appointmentId:${appointmentId} → /arrive 호출`);
           notifee.cancelNotification(notifId);
           if (journeyId != null) journeysApi.arrive(journeyId);
           if (appointmentId != null) appointmentsApi.arriveParticipant(appointmentId);

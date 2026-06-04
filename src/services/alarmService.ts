@@ -105,6 +105,10 @@ class AlarmRunner {
       const done: string[] = raw ? JSON.parse(raw) : [];
       if (!done.includes(key)) {
         await AsyncStorage.setItem(STAGING_DONE_KEY, JSON.stringify([...done, key]));
+      } else {
+        // 이미 단계별 알람이 발송된 적 있음 → 스위치 OFF→ON 시 재발송 방지
+        this.stagingStarted = true;
+        console.log(`[alarmService.handOff] 단계별 알람 이미 발송됨 — key:${key} 재등록 방지`);
       }
     });
   }
@@ -152,7 +156,7 @@ class AlarmRunner {
       } else {
         await this.pollPersonal(loc.coords.latitude, loc.coords.longitude);
       }
-    } catch (e) {
+    } catch (e: any) {
       const id = this.target?.journeyId ?? `apt${this.target?.appointmentId}`;
       console.log(`[포그라운드] GPS 위치 획득 실패 — id:${id}`, e);
       this.scheduleNextPoll();
@@ -190,9 +194,15 @@ class AlarmRunner {
       if (!this.target) return;
       this.scheduleNextPoll();
       this.handlePersonalStatus(journey_status, preparation_time, which_station);
-    } catch (e) {
-      console.log(`[포그라운드] /location 호출 실패 — journeyId:${this.target?.journeyId}`, e);
-      this.scheduleNextPoll();
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      if (msg.includes('"success":false') || msg.startsWith('HTTP 4')) {
+        console.log(`[포그라운드] /location 서버 오류 — journeyId:${this.target?.journeyId} 폴링 중단`);
+        this.stop();
+      } else {
+        console.log(`[포그라운드] /location 호출 실패 — journeyId:${this.target?.journeyId}`, e);
+        this.scheduleNextPoll();
+      }
     }
   }
 
@@ -227,9 +237,15 @@ class AlarmRunner {
       if (!this.target) return;
       this.scheduleNextPoll();
       this.handleGroupStatus(participant_status, preparation_time, estimated_arrival, which_station);
-    } catch (e) {
-      console.log(`[포그라운드] /location 호출 실패 — appointmentId:${this.target?.appointmentId}`, e);
-      this.scheduleNextPoll();
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      if (msg.includes('"success":false') || msg.startsWith('HTTP 4')) {
+        console.log(`[포그라운드] /location 서버 오류 — appointmentId:${this.target?.appointmentId} 폴링 중단`);
+        this.stop();
+      } else {
+        console.log(`[포그라운드] /location 호출 실패 — appointmentId:${this.target?.appointmentId}`, e);
+        this.scheduleNextPoll();
+      }
     }
   }
 
@@ -258,14 +274,21 @@ class AlarmRunner {
         this.scheduleAlarmStages(preparationTime, whichStation);
       }
 
+      if (newStatus === 'MOVING') {
+        this.cancelRemainingStages(); // 출발 확인 — 남은 단계별 알람 취소
+        console.log(`[alarmService] MOVING — 단계별 알람 취소 journeyId:${this.target?.journeyId}`);
+      }
+
       if (newStatus === 'NEARDEST' && !this.nearDestSent) {
         this.nearDestSent = true;
+        this.cancelRemainingStages(); // 목적지 근처 도달 — 남은 단계별 알람 취소
         console.log(`[alarmService] NEARDEST 도착 확인 알람 발송 — journeyId:${this.target?.journeyId}`);
         sendArrivalCheckAlarm('나', this.target!.destination, this.target?.journeyId);
       }
 
       if (newStatus === 'ARRIVED') {
         const key = `j_${this.target?.journeyId}`;
+        this.cancelRemainingStages(); // 도착 — 남은 단계별 알람 취소
         console.log(`[alarmService] ARRIVED → 폴링 종료 — journeyId:${this.target?.journeyId}`);
         clearStagingKey(key);
         this.stop();
@@ -304,16 +327,27 @@ class AlarmRunner {
 
       if (newStatus === 'MOVING' && !this.movingSent) {
         this.movingSent = true;
+        this.cancelRemainingStages(); // 출발 확인 — 남은 단계별 알람 취소
         if (this.isActive) {
           const arrivalTime = formatEstimatedArrival(estimatedArrival);
-          console.log(`[alarmService] MOVING — 도착예정 알람 발송 appointmentId:${this.target?.appointmentId} ETA:${arrivalTime}`);
+          console.log(`[alarmService] MOVING — 단계별 알람 취소 + 도착예정 알람 발송 appointmentId:${this.target?.appointmentId} ETA:${arrivalTime}`);
           sendArrivalAlarm('나', arrivalTime, this.target!.destination);
+        }
+      }
+
+      if (newStatus === 'NEARDEST' && !this.nearDestSent) {
+        this.nearDestSent = true;
+        this.cancelRemainingStages(); // 목적지 근처 도달 — 남은 단계별 알람 취소
+        if (this.isActive) {
+          console.log(`[alarmService] NEARDEST 도착 확인 알람 발송 — appointmentId:${this.target?.appointmentId}`);
+          sendArrivalCheckAlarm('나', this.target!.destination, undefined, this.target?.appointmentId);
         }
       }
 
       if (newStatus === 'ARRIVED' && !this.arrivedSent) {
         this.arrivedSent = true;
         const key = `a_${this.target?.appointmentId}`;
+        this.cancelRemainingStages(); // 도착 — 남은 단계별 알람 취소
         if (this.isActive) {
           const arrivalTime = formatEstimatedArrival(estimatedArrival);
           console.log(`[alarmService] ARRIVED — 도착완료 알람 발송 appointmentId:${this.target?.appointmentId} time:${arrivalTime}`);
@@ -321,14 +355,6 @@ class AlarmRunner {
         }
         clearStagingKey(key);
         this.stop();
-      }
-
-      if (newStatus === 'NEARDEST' && !this.nearDestSent) {
-        this.nearDestSent = true;
-        if (this.isActive) {
-          console.log(`[alarmService] NEARDEST 도착 확인 알람 발송 — appointmentId:${this.target?.appointmentId}`);
-          sendArrivalCheckAlarm('나', this.target!.destination, undefined, this.target?.appointmentId);
-        }
       }
     }
   }

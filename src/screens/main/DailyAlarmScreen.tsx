@@ -102,7 +102,7 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
       });
       if (!newEnabled) {
         alarmService.stop(alarm.journeyId);
-      } else if (alarm.myStatus === 'READY') {
+      } else if (['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
         alarmService.start({ alarmType, destination: alarm.place, journeyId: alarm.journeyId });
       }
     } else if (alarm.appointmentId) {

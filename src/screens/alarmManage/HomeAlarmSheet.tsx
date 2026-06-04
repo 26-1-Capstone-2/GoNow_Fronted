@@ -293,7 +293,7 @@ export default function HomeAlarmSheet({ onClose, initialMode, editJourneyId }: 
       });
       if (!newEnabled) {
         alarmService.stop(alarm.journeyId);
-      } else if (alarm.myStatus === 'READY') {
+      } else if (['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
         alarmService.start({ alarmType: 'home', destination: alarm.home_name, journeyId: alarm.journeyId });
       }
     }
