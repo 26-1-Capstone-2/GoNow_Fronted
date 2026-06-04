@@ -5,7 +5,7 @@ import { createAlarmsApi } from '@/src/api/alarms';
 import { alarmService } from '@/src/services/alarmService';
 import * as Notifications from 'expo-notifications';
 import { BACKGROUND_ALARM_TASK } from '@/src/tasks/backgroundAlarmTask';
-import { ACTIVE_JOURNEYS_KEY, ACTIVE_APPOINTMENTS_KEY, DESIRED_INTERVALS_KEY, SESSION_READY_KEY, startBackgroundLocationUpdates, stopBackgroundLocationUpdates } from '@/src/tasks/backgroundLocationTask';
+import { ACTIVE_JOURNEYS_KEY, ACTIVE_APPOINTMENTS_KEY, DESIRED_INTERVALS_KEY, SESSION_READY_KEY, STAGING_DONE_KEY, startBackgroundLocationUpdates, stopBackgroundLocationUpdates } from '@/src/tasks/backgroundLocationTask';
 import { getToken } from '@/src/store/authStore';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
@@ -38,6 +38,7 @@ export default function RootLayout() {
       await AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify([]));
       await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify([]));
       await AsyncStorage.setItem(DESIRED_INTERVALS_KEY, JSON.stringify({}));
+      await AsyncStorage.setItem(STAGING_DONE_KEY, JSON.stringify([]));
 
       requestNotificationPermission();
       setupNotificationCategories();

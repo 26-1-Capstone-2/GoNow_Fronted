@@ -103,8 +103,10 @@ class AlarmRunner {
     // ACTIVE_JOURNEYS/APPOINTMENTS ID 조작은 background 핸들러(_layout.tsx)에서 처리
     await AsyncStorage.getItem(STAGING_DONE_KEY).then(async (raw) => {
       const done: string[] = raw ? JSON.parse(raw) : [];
+      console.log(`[alarmService.handOff] STAGING_DONE 목록 — ${JSON.stringify(done)}`);
       if (!done.includes(key)) {
         await AsyncStorage.setItem(STAGING_DONE_KEY, JSON.stringify([...done, key]));
+        console.log(`[alarmService.handOff] STAGING_DONE에 key 추가 — key:${key}`);
       } else {
         // 이미 단계별 알람이 발송된 적 있음 → 스위치 OFF→ON 시 재발송 방지
         this.stagingStarted = true;
@@ -250,9 +252,16 @@ class AlarmRunner {
   }
 
   private handlePersonalStatus(newStatus: JourneyStatus, preparationTime: number, whichStation?: string | null): void {
-    if (newStatus === 'READY' && this.status === 'SCHEDULED') {
-      console.log(`[alarmService] 상태전이 SCHEDULED → READY — journeyId:${this.target?.journeyId}`);
+    if (newStatus === 'READY' && this.status !== 'READY') {
+      console.log(`[alarmService] 상태전이 ${this.status} → READY — journeyId:${this.target?.journeyId}`);
       this.status = newStatus;
+      // READY 복귀 시 stagingStarted 리셋 → 다시 DEPARTING 되면 알람 재발송
+      if (this.stagingStarted) {
+        this.stagingStarted = false;
+        const key = `j_${this.target?.journeyId}`;
+        clearStagingKey(key);
+        console.log(`[alarmService] READY 복귀 — stagingStarted 리셋 key:${key}`);
+      }
       this.poll();
       return;
     }
@@ -297,9 +306,16 @@ class AlarmRunner {
   }
 
   private handleGroupStatus(newStatus: JourneyStatus, preparationTime: number, estimatedArrival: string, whichStation?: string | null): void {
-    if (newStatus === 'READY' && this.status === 'SCHEDULED') {
-      console.log(`[alarmService] 상태전이 SCHEDULED → READY — appointmentId:${this.target?.appointmentId}`);
+    if (newStatus === 'READY' && this.status !== 'READY') {
+      console.log(`[alarmService] 상태전이 ${this.status} → READY — appointmentId:${this.target?.appointmentId}`);
       this.status = newStatus;
+      // READY 복귀 시 stagingStarted 리셋 → 다시 DEPARTING 되면 알람 재발송
+      if (this.stagingStarted) {
+        this.stagingStarted = false;
+        const key = `a_${this.target?.appointmentId}`;
+        clearStagingKey(key);
+        console.log(`[alarmService] READY 복귀 — stagingStarted 리셋 key:${key}`);
+      }
       this.poll();
       return;
     }

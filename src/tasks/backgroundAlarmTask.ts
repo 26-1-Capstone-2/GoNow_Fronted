@@ -62,7 +62,7 @@ TaskManager.defineTask(BACKGROUND_ALARM_TASK, async ({ data, error }) => {
       timeInterval: 30000,
       distanceInterval: 0,
     }).then(() => {
-      console.log('[BACKGROUND_ALARM_TASK] 위치추적 시작 완료 (foregroundService 없음)');
+      console.log('[BACKGROUND_ALARM_TASK] 위치추적 시작 완료 (foregroundService 없음 — Android 정책상 백그라운드에서 불가)');
     }).catch((e) => {
       console.log('[BACKGROUND_ALARM_TASK] 위치추적 시작 실패:', e?.message);
     });

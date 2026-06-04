@@ -1,7 +1,7 @@
 import { createMembersApi } from '@/src/api/members';
 import { createAuthApi } from '@/src/api/auth';
 import { alarmService } from '@/src/services/alarmService';
-import { stopBackgroundLocationUpdates, ACTIVE_JOURNEYS_KEY, ACTIVE_APPOINTMENTS_KEY } from '@/src/tasks/backgroundLocationTask';
+import { stopBackgroundLocationUpdates, ACTIVE_JOURNEYS_KEY, ACTIVE_APPOINTMENTS_KEY, STAGING_DONE_KEY } from '@/src/tasks/backgroundLocationTask';
 import { useAuthStore } from '@/src/store/authStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Feather } from '@expo/vector-icons';
@@ -38,11 +38,12 @@ export default function ProfileSettingsScreen() {
         text: '로그아웃',
         style: 'destructive',
         onPress: async () => {
-          try { await createAuthApi().logout(); } catch {}
+          try { await createAuthApi({ getToken: () => useAuthStore.getState().token }).logout(); } catch {}
           alarmService.stopAll();
           await stopBackgroundLocationUpdates().catch(() => {});
           await AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify([]));
           await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify([]));
+          await AsyncStorage.setItem(STAGING_DONE_KEY, JSON.stringify([]));
           useAuthStore.getState().setToken(null);
           router.replace('/(auth)/login');
         },
