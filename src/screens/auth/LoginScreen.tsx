@@ -50,7 +50,7 @@ export default function LoginScreen() {
         const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
         const alarmsRes = await createAlarmsApi().getAlarms(todayStr);
         console.log(`[LoginScreen] getAlarms 응답 — 전체:${alarmsRes.data?.length ?? 0}`);
-        (alarmsRes.data ?? []).filter((a) => a.my_status === 'READY' && a.is_active).forEach((a) => {
+        (alarmsRes.data ?? []).filter((a) => ['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(a.my_status) && a.is_active).forEach((a) => {
           if (a.alarm_type === 'GROUP' && a.appointment_id != null) {
             if (alarmService.isRunning(undefined, a.appointment_id)) return;
             alarmService.start({ alarmType: 'group', destination: a.dest_name, appointmentId: a.appointment_id });

@@ -67,8 +67,8 @@ export default function RootLayout() {
       let lastStartReadyAlarmsAt = 0;
       const doStartReadyAlarms = () => {
         alarmsApi.getAlarms(todayStr).then((res) => {
-          const readyItems = (res.data ?? []).filter((a) => a.my_status === 'READY' && a.is_active);
-          console.log(`[startReadyAlarms] getAlarms 응답 — 전체:${res.data?.length ?? 0} READY:${readyItems.length}`);
+          const readyItems = (res.data ?? []).filter((a) => ['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(a.my_status) && a.is_active);
+          console.log(`[startReadyAlarms] getAlarms 응답 — 전체:${res.data?.length ?? 0} 추적대상:${readyItems.length}`);
           readyItems.forEach((a) => {
             if (a.alarm_type === 'GROUP' && a.appointment_id != null) {
               if (alarmService.isRunning(undefined, a.appointment_id)) return;
