@@ -5,7 +5,8 @@ import { createAlarmsApi } from '@/src/api/alarms';
 import { alarmService } from '@/src/services/alarmService';
 import * as Notifications from 'expo-notifications';
 import { BACKGROUND_ALARM_TASK } from '@/src/tasks/backgroundAlarmTask';
-import { ACTIVE_JOURNEYS_KEY, ACTIVE_APPOINTMENTS_KEY, startBackgroundLocationUpdates, stopBackgroundLocationUpdates } from '@/src/tasks/backgroundLocationTask';
+import { ACTIVE_JOURNEYS_KEY, ACTIVE_APPOINTMENTS_KEY, DESIRED_INTERVALS_KEY, SESSION_READY_KEY, startBackgroundLocationUpdates, stopBackgroundLocationUpdates } from '@/src/tasks/backgroundLocationTask';
+import { getToken } from '@/src/store/authStore';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -31,15 +32,29 @@ export default function RootLayout() {
 
     const init = async () => {
       // 앱 시작 시 이전 세션 유령 ID 초기화 (await 필수 — 완료 전 startReadyAlarms 실행 방지)
+      // SESSION_READY_KEY를 먼저 '0'으로 초기화 → backgroundLocationTask가 init() 완료 전 발화해도 skip
+      await AsyncStorage.setItem(SESSION_READY_KEY, '0');
       await stopBackgroundLocationUpdates().catch(() => {});
       await AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify([]));
       await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify([]));
+      await AsyncStorage.setItem(DESIRED_INTERVALS_KEY, JSON.stringify({}));
 
       requestNotificationPermission();
       setupNotificationCategories();
-      Notifications.registerTaskAsync(BACKGROUND_ALARM_TASK)
-        .then(() => console.log('[BACKGROUND_ALARM_TASK] 등록 성공'))
-        .catch((e) => console.log('[BACKGROUND_ALARM_TASK] 등록 실패:', e));
+
+      // registerTaskAsync는 앱 초기화 완료 후 호출해야 함 (너무 이르면 NullPointerException)
+      // 재시도 로직: 실패하면 3초 후 재시도
+      const registerBackgroundTask = (retryCount = 0) => {
+        Notifications.registerTaskAsync(BACKGROUND_ALARM_TASK)
+          .then(() => console.log('[BACKGROUND_ALARM_TASK] 등록 성공'))
+          .catch((e) => {
+            console.log(`[BACKGROUND_ALARM_TASK] 등록 실패 (시도 ${retryCount + 1}):`, e);
+            if (retryCount < 5) {
+              setTimeout(() => registerBackgroundTask(retryCount + 1), 3000);
+            }
+          });
+      };
+      setTimeout(() => registerBackgroundTask(), 2000);
       Location.requestBackgroundPermissionsAsync().catch(() => {});
 
       const journeysApi = createJourneysApi();
@@ -49,9 +64,12 @@ export default function RootLayout() {
       const today = new Date();
       const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
-      const startReadyAlarms = () => {
+      let lastStartReadyAlarmsAt = 0;
+      const doStartReadyAlarms = () => {
         alarmsApi.getAlarms(todayStr).then((res) => {
-          (res.data ?? []).filter((a) => a.my_status === 'READY').forEach((a) => {
+          const readyItems = (res.data ?? []).filter((a) => a.my_status === 'READY' && a.is_active);
+          console.log(`[startReadyAlarms] getAlarms 응답 — 전체:${res.data?.length ?? 0} READY:${readyItems.length}`);
+          readyItems.forEach((a) => {
             if (a.alarm_type === 'GROUP' && a.appointment_id != null) {
               if (alarmService.isRunning(undefined, a.appointment_id)) return;
               alarmService.start({ alarmType: 'group', destination: a.dest_name, appointmentId: a.appointment_id });
@@ -63,22 +81,68 @@ export default function RootLayout() {
               alarmService.start({ alarmType: 'personal', destination: a.dest_name, journeyId: a.journey_id });
             }
           });
-        }).catch(() => {});
+        }).catch((e) => { console.log('[startReadyAlarms] getAlarms 실패:', e?.message ?? e); });
+      };
+      const startReadyAlarms = () => {
+        if (!getToken()) {
+          console.log('[startReadyAlarms] 토큰 없음 — skip');
+          return;
+        }
+        const now = Date.now();
+        if (now - lastStartReadyAlarmsAt < 10000) {
+          console.log('[startReadyAlarms] 10초 내 중복 — skip');
+          return;
+        }
+        lastStartReadyAlarmsAt = now;
+        doStartReadyAlarms();
       };
 
-      // 앱 시작 시 오늘 날짜 알람 조회 → READY 상태인 것들 GPS 폴링 재개
-      startReadyAlarms();
+      // init() 완료 — backgroundLocationTask가 이 시점부터 정상 동작 가능
+      await AsyncStorage.setItem(SESSION_READY_KEY, '1');
 
-      // AppState 감지 → active 3초 디바운스로 중복 발화 방지
+      // AppState 감지 → active/background 3초 디바운스로 중복 발화 방지
       let lastForegroundAt = 0;
+      let lastBackgroundAt = 0;
       const appStateSub = AppState.addEventListener('change', async (nextState) => {
+        console.log('[AppState] 상태 변경:', nextState);
         if (nextState === 'active') {
+          // 백그라운드 위치추적 종료 (포그라운드 alarmService가 인계)
+          console.log('[AppState] active → stopBackgroundLocationUpdates 호출');
+          await stopBackgroundLocationUpdates().catch(() => {});
           const now = Date.now();
-          if (now - lastForegroundAt < 3000) return;
+          if (now - lastForegroundAt < 3000) {
+            console.log('[AppState] active 3초 내 중복 — skip');
+            // 활성 알람이 있을 때만 백그라운드 추적 재시작 (알람 없으면 상단바 알림 불필요)
+            if (alarmService.hasRunning()) {
+              await startBackgroundLocationUpdates().catch(() => {});
+            }
+            return;
+          }
           lastForegroundAt = now;
+          console.log('[AppState] active → startReadyAlarms 호출');
           startReadyAlarms();
+          // startReadyAlarms는 isRunning=true면 alarmService.start() skip → startBackgroundLocationUpdates 미호출
+          // → alarmService가 폴링 중이면 백그라운드 추적도 항상 켜둠 (상단바 알림 유지)
+          if (alarmService.hasRunning()) {
+            await startBackgroundLocationUpdates().catch(() => {});
+          }
         } else if (nextState === 'background') {
-          await startBackgroundLocationUpdates().catch(() => {});
+          const nowBg = Date.now();
+          if (nowBg - lastBackgroundAt < 3000) {
+            return;
+          }
+          lastBackgroundAt = nowBg;
+          console.log('[AppState] background 진입 — AsyncStorage에 활성 알람 ID 등록');
+          // 백그라운드 전환 시 현재 실행 중인 알람 ID를 AsyncStorage에 등록
+          // → backgroundLocationTask가 발화 시 이 ID로 /location 호출
+          const { journeyIds, appointmentIds } = alarmService.getRunningIds();
+          if (journeyIds.length > 0 || appointmentIds.length > 0) {
+            await Promise.all([
+              AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify(journeyIds)),
+              AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify(appointmentIds)),
+            ]);
+            console.log(`[AppState] background — AsyncStorage 등록 완료 journeys:${journeyIds} appointments:${appointmentIds}`);
+          }
         }
       });
 
@@ -87,21 +151,30 @@ export default function RootLayout() {
       const data = notification.request.content.data as Record<string, unknown>;
       const title = notification.request.content.title;
       const body = notification.request.content.body;
+      console.log('[FCM] 수신 — data keys:', Object.keys(data ?? {}), 'title:', title ?? '(없음)');
 
       // 방장 알람 수정 시 참가자 상태 동기화 FCM
       if (data?.appointment_id && data?.participant_status) {
         const appointmentId = Number(data.appointment_id);
         const participantStatus = String(data.participant_status);
+        console.log(`[FCM] 방장 수정 동기화 — appointmentId:${appointmentId} participantStatus:${participantStatus}`);
         try {
           if (participantStatus === 'READY') {
+            if (alarmService.isRunning(undefined, appointmentId)) {
+              console.log(`[FCM] 방장 수정 READY — appointmentId:${appointmentId} 이미 실행 중 skip`);
+              return;
+            }
             const res = await appointmentsApi.getAppointment(appointmentId);
             if (res.data) {
               await alarmService.start({ alarmType: 'group', destination: res.data.dest_name, appointmentId });
             }
           } else if (participantStatus === 'SCHEDULED') {
+            console.log(`[FCM] 방장 수정 SCHEDULED — appointmentId:${appointmentId} 폴링 중단`);
             alarmService.stop(undefined, appointmentId);
           }
-        } catch {}
+        } catch (e) {
+          console.log(`[FCM] 방장 수정 동기화 실패 — appointmentId:${appointmentId}`, e);
+        }
         return;
       }
 
@@ -113,22 +186,41 @@ export default function RootLayout() {
         const appointmentIds: number[] = data?.appointment_ids
           ? String(data.appointment_ids).split(',').map(Number).filter(n => !isNaN(n))
           : [];
+        console.log(`[FCM] READY 전환 트리거 — journeyIds:${journeyIds} appointmentIds:${appointmentIds}`);
 
         await Promise.all([
           ...journeyIds.map(async (id) => {
+            if (alarmService.isRunning(id)) {
+              console.log(`[FCM] journeyId:${id} 이미 실행 중 — skip`);
+              return;
+            }
             try {
               const res = await journeysApi.getJourney(id);
-              if (!res.data) return;
+              if (!res.data) {
+                console.log(`[FCM] journeyId:${id} 조회 실패`);
+                return;
+              }
               const type: AlarmType = res.data.journey_type === 'HOME' ? 'home' : 'personal';
               await alarmService.start({ alarmType: type, destination: res.data.dest_name, journeyId: id });
-            } catch {}
+            } catch (e) {
+              console.log(`[FCM] journeyId:${id} start 실패`, e);
+            }
           }),
           ...appointmentIds.map(async (id) => {
+            if (alarmService.isRunning(undefined, id)) {
+              console.log(`[FCM] appointmentId:${id} 이미 실행 중 — skip`);
+              return;
+            }
             try {
               const res = await appointmentsApi.getAppointment(id);
-              if (!res.data) return;
+              if (!res.data) {
+                console.log(`[FCM] appointmentId:${id} 조회 실패`);
+                return;
+              }
               await alarmService.start({ alarmType: 'group', destination: res.data.dest_name, appointmentId: id });
-            } catch {}
+            } catch (e) {
+              console.log(`[FCM] appointmentId:${id} start 실패`, e);
+            }
           }),
         ]);
         return;
@@ -136,6 +228,7 @@ export default function RootLayout() {
 
       // FCM Notification 메시지 (그룹 도착 알람 등) → 포그라운드에서 notifee로 직접 표시
       if (title && body) {
+        console.log(`[FCM] Notification 포그라운드 표시 — title:${title}`);
         await notifee.displayNotification({
           title,
           body,

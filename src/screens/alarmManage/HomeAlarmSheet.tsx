@@ -39,6 +39,7 @@ function fromAlarmItem(item: AlarmItem): HomeAlarm {
     enabled: item.is_active,
     transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
     isActive: ['MOVING', 'NEARDEST', 'ARRIVED'].includes(item.my_status),
+    myStatus: item.my_status,
   };
 }
 
@@ -83,6 +84,7 @@ interface HomeAlarm {
   enabled: boolean;
   transport: Transport;
   isActive?: boolean;
+  myStatus?: string;
 }
 
 interface Props {
@@ -289,6 +291,11 @@ export default function HomeAlarmSheet({ onClose, initialMode, editJourneyId }: 
       journeysApi.toggleActive(alarm.journeyId, newEnabled).catch(() => {
         setAlarms((prev) => prev.map((a) => a.id === alarm.id ? { ...a, enabled: !newEnabled } : a));
       });
+      if (!newEnabled) {
+        alarmService.stop(alarm.journeyId);
+      } else if (alarm.myStatus === 'READY') {
+        alarmService.start({ alarmType: 'home', destination: alarm.home_name, journeyId: alarm.journeyId });
+      }
     }
   };
 

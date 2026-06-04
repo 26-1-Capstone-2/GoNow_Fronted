@@ -368,6 +368,8 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
     setAlarms((prev) => prev.map((a) => a.id === id ? { ...a, enabled: newValue } : a));
     try {
       await appointmentsApi.toggleParticipantAlarm(alarm.appointmentId, newValue);
+      // 그룹 알람 스위치 OFF여도 GPS 폴링은 유지 (상태 전이·대시보드 갱신 계속 필요)
+      // 알람을 울릴지 여부는 alarmService 내부에서 isActive 응답으로 판단
     } catch {
       setAlarms((prev) => prev.map((a) => a.id === id ? { ...a, enabled: alarm.enabled } : a));
     }

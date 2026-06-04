@@ -13,11 +13,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { createAuthApi } from '@/src/api/auth';
-import { createAlarmsApi } from '@/src/api/alarms';
 import { createMembersApi } from '@/src/api/members';
+import { createAlarmsApi } from '@/src/api/alarms';
+import { alarmService } from '@/src/services/alarmService';
 import { useAppNavigation } from '@/src/navigation';
 import { useAuthStore } from '@/src/store/authStore';
-import { alarmService } from '@/src/services/alarmService';
 import * as Notifications from 'expo-notifications';
 
 const authApi = createAuthApi();
@@ -43,20 +43,28 @@ export default function LoginScreen() {
         console.log('[FCM] 토큰 등록 실패:', e);
       }
 
-      // 로그인 완료 후 오늘 READY 알람 조회 → GPS 폴링 시작
-      const today = new Date();
-      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-      createAlarmsApi().getAlarms(todayStr).then((alarmsRes) => {
-        (alarmsRes.data ?? []).filter((a) => a.my_status === 'READY').forEach((a) => {
+      // 로그인 후 READY 알람 즉시 폴링 시작
+      // (goToMainTabs() 화면 전환 시 AppState active가 발화하지 않을 수 있으므로 직접 호출)
+      try {
+        const today = new Date();
+        const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+        const alarmsRes = await createAlarmsApi().getAlarms(todayStr);
+        console.log(`[LoginScreen] getAlarms 응답 — 전체:${alarmsRes.data?.length ?? 0}`);
+        (alarmsRes.data ?? []).filter((a) => a.my_status === 'READY' && a.is_active).forEach((a) => {
           if (a.alarm_type === 'GROUP' && a.appointment_id != null) {
+            if (alarmService.isRunning(undefined, a.appointment_id)) return;
             alarmService.start({ alarmType: 'group', destination: a.dest_name, appointmentId: a.appointment_id });
           } else if (a.alarm_type === 'HOME' && a.journey_id != null) {
+            if (alarmService.isRunning(a.journey_id)) return;
             alarmService.start({ alarmType: 'home', destination: a.dest_name, journeyId: a.journey_id });
           } else if (a.alarm_type === 'PERSONAL' && a.journey_id != null) {
+            if (alarmService.isRunning(a.journey_id)) return;
             alarmService.start({ alarmType: 'personal', destination: a.dest_name, journeyId: a.journey_id });
           }
         });
-      }).catch(() => {});
+      } catch (e) {
+        console.log('[LoginScreen] READY 알람 복구 실패:', e);
+      }
 
       goToMainTabs();
     } catch (e: any) {

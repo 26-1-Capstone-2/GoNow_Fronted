@@ -47,5 +47,10 @@ export function createAuthApi(clientOptions?: ApiClientOptions) {
 
     checkNickname: (nickname: string) =>
       request<CheckResponse>(`/api/members/check?nickname=${encodeURIComponent(nickname)}`),
+
+    logout: () =>
+      request<{ success: boolean; message: string; data: null }>('/api/auth/logout', {
+        method: 'POST',
+      }),
   };
 }

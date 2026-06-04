@@ -1,6 +1,7 @@
 import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createAppointmentsApi } from '@/src/api/appointments';
 import { createJourneysApi, targetTimeToAmpmHourMinute } from '@/src/api/journeys';
+import { alarmService } from '@/src/services/alarmService';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, FontAwesome5, FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -31,6 +32,7 @@ type AlarmCard = {
   transport: 'public' | 'car';
   isLastMode?: boolean;
   participantCount?: number;
+  myStatus?: string;
 };
 
 function toAlarmCard(item: AlarmItem): AlarmCard {
@@ -46,6 +48,7 @@ function toAlarmCard(item: AlarmItem): AlarmCard {
     transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
     isLastMode: item.is_last_mode,
     participantCount: item.participant_count ?? undefined,
+    myStatus: item.my_status,
   };
 }
 
@@ -93,10 +96,17 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
     const newEnabled = !alarm.enabled;
     setter((prev) => prev.map((a) => a.id === alarm.id ? { ...a, enabled: newEnabled } : a));
     if (alarm.journeyId) {
+      const alarmType = alarm.isLastMode ? 'home' : 'personal';
       journeysApi.toggleActive(alarm.journeyId, newEnabled).catch(() => {
         setter((prev) => prev.map((a) => a.id === alarm.id ? { ...a, enabled: !newEnabled } : a));
       });
+      if (!newEnabled) {
+        alarmService.stop(alarm.journeyId);
+      } else if (alarm.myStatus === 'READY') {
+        alarmService.start({ alarmType, destination: alarm.place, journeyId: alarm.journeyId });
+      }
     } else if (alarm.appointmentId) {
+      // 그룹 알람 스위치 OFF여도 GPS 폴링은 유지 (상태 전이·대시보드 갱신 계속 필요)
       appointmentsApi.toggleParticipantAlarm(alarm.appointmentId, newEnabled).catch(() => {
         setter((prev) => prev.map((a) => a.id === alarm.id ? { ...a, enabled: !newEnabled } : a));
       });

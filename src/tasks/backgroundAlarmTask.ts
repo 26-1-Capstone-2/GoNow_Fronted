@@ -1,10 +1,11 @@
 import * as TaskManager from 'expo-task-manager';
+import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AppState } from 'react-native';
 import {
   BACKGROUND_LOCATION_TASK,
   ACTIVE_JOURNEYS_KEY,
   ACTIVE_APPOINTMENTS_KEY,
-  startBackgroundLocationUpdates,
 } from '@/src/tasks/backgroundLocationTask';
 
 export const BACKGROUND_ALARM_TASK = 'BACKGROUND-ALARM-TASK';
@@ -14,6 +15,13 @@ TaskManager.defineTask(BACKGROUND_ALARM_TASK, async ({ data, error }) => {
   console.log('[BACKGROUND_ALARM_TASK] fired');
   if (error) {
     console.log('[BACKGROUND_ALARM_TASK] error:', JSON.stringify(error));
+    return;
+  }
+
+  // 포그라운드면 _layout.tsx의 fcmSub가 처리하므로 백그라운드 태스크는 빠짐
+  // (포그라운드 alarmService와 백그라운드 30초 폴링 중복 방지)
+  if (AppState.currentState === 'active') {
+    console.log('[BACKGROUND_ALARM_TASK] 포그라운드 상태 — fcmSub가 처리하므로 skip');
     return;
   }
 
@@ -45,6 +53,20 @@ TaskManager.defineTask(BACKGROUND_ALARM_TASK, async ({ data, error }) => {
   ]);
 
   // 백그라운드 위치 추적 시작 → backgroundLocationTask가 GPS 폴링하며 상태 감지
-  // 백그라운드 태스크 내에서 getBackgroundPermissionsAsync()가 false를 반환하는 경우가 있어 체크 생략
-  await startBackgroundLocationUpdates().catch(() => {});
+  // FCM으로 깨어난 백그라운드에서는 foregroundService 없이 시작 (Android 정책상 불가)
+  // 포그라운드 진입 시 startBackgroundLocationUpdates()가 foregroundService 포함으로 재시작됨
+  const isRunning = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK).catch(() => false);
+  if (!isRunning) {
+    await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
+      accuracy: Location.Accuracy.Balanced,
+      timeInterval: 30000,
+      distanceInterval: 0,
+    }).then(() => {
+      console.log('[BACKGROUND_ALARM_TASK] 위치추적 시작 완료 (foregroundService 없음)');
+    }).catch((e) => {
+      console.log('[BACKGROUND_ALARM_TASK] 위치추적 시작 실패:', e?.message);
+    });
+  } else {
+    console.log('[BACKGROUND_ALARM_TASK] 위치추적 이미 실행 중');
+  }
 });
