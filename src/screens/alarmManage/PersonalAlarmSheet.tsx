@@ -37,7 +37,7 @@ function fromAlarmItem(item: AlarmItem): Alarm {
     repeat: maskToRepeatDays(item.repeat_days ?? 0),
     enabled: item.is_active,
     transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
-    isActive: ['MOVING', 'NEARDEST'].includes(item.my_status),
+    isActive: ['MOVING'].includes(item.my_status),
     myStatus: item.my_status,
   };
 }
