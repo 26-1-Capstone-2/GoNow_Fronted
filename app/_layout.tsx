@@ -73,7 +73,7 @@ export default function RootLayout() {
           readyItems.forEach((a) => {
             if (a.alarm_type === 'GROUP' && a.appointment_id != null) {
               if (alarmService.isRunning(undefined, a.appointment_id)) return;
-              alarmService.start({ alarmType: 'group', destination: a.dest_name, appointmentId: a.appointment_id });
+              alarmService.start({ alarmType: 'group', destination: a.dest_name, appointmentId: a.appointment_id, isActive: a.is_active });
             } else if (a.alarm_type === 'HOME' && a.journey_id != null) {
               if (alarmService.isRunning(a.journey_id)) return;
               alarmService.start({ alarmType: 'home', destination: a.dest_name, journeyId: a.journey_id });

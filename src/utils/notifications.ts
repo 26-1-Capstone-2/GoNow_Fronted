@@ -241,11 +241,11 @@ export async function sendArrivalCheckAlarm(
     android: {
       channelId: CHANNEL_DEFAULT,
       importance: AndroidImportance.HIGH,
-      pressAction: { id: 'default' },
+      pressAction: { id: 'default', launchActivity: 'default' },
       actions: [
         {
           title: '예',
-          pressAction: { id: 'arrival-yes' },
+          pressAction: { id: 'arrival-yes', launchActivity: 'default' },
         },
         {
           title: '아니오',
@@ -268,7 +268,7 @@ export async function sendArrivalConfirmAlarm(
     android: {
       channelId: CHANNEL_DEFAULT,
       importance: AndroidImportance.HIGH,
-      pressAction: { id: 'default' },
+      pressAction: { id: 'default', launchActivity: 'default' },
     },
   });
 }
@@ -285,7 +285,7 @@ export async function sendArrivalAlarm(
     android: {
       channelId: CHANNEL_DEFAULT,
       importance: AndroidImportance.HIGH,
-      pressAction: { id: 'default' },
+      pressAction: { id: 'default', launchActivity: 'default' },
     },
   });
 }
