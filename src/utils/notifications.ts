@@ -23,20 +23,27 @@ async function saveTriggerIds(key: string, ids: string[]): Promise<void> {
   try {
     const raw = await AsyncStorage.getItem(TRIGGER_IDS_KEY);
     const map: Record<string, string[]> = raw ? JSON.parse(raw) : {};
-    map[key] = [...(map[key] ?? []), ...ids]; // 누적 저장
+    map[key] = [...(map[key] ?? []), ...ids];
     await AsyncStorage.setItem(TRIGGER_IDS_KEY, JSON.stringify(map));
+    console.log(`[trigger] 저장 완료 — key:${key} ids:${ids}`);
   } catch {}
+}
+
+export async function cancelStagedAlarms(key: string): Promise<void> {
+  return cancelAndRemoveTriggerIds(key);
 }
 
 async function cancelAndRemoveTriggerIds(key: string): Promise<void> {
   try {
     const raw = await AsyncStorage.getItem(TRIGGER_IDS_KEY);
-    if (!raw) return;
+    if (!raw) { console.log(`[trigger] 취소 시도 — key:${key} AsyncStorage 없음`); return; }
     const map: Record<string, string[]> = JSON.parse(raw);
     const ids = map[key] ?? [];
+    console.log(`[trigger] 취소 시도 — key:${key} ids:${ids}`);
     await Promise.all(ids.map(id => notifee.cancelTriggerNotification(id).catch(() => {})));
     delete map[key];
     await AsyncStorage.setItem(TRIGGER_IDS_KEY, JSON.stringify(map));
+    console.log(`[trigger] 취소 완료 — key:${key}`);
   } catch {}
 }
 

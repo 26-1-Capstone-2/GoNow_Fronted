@@ -1,7 +1,6 @@
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState } from 'react-native';
-import notifee from '@notifee/react-native';
 import { createJourneysApi, JourneyStatus } from '@/src/api/journeys';
 import { createAppointmentsApi } from '@/src/api/appointments';
 import { useAppointmentStatusStore } from '@/src/store/appointmentStatusStore';
@@ -11,6 +10,7 @@ import {
   sendArrivalCheckAlarm,
   sendArrivalAlarm,
   sendArrivalConfirmAlarm,
+  cancelStagedAlarms,
   AlarmType,
 } from '@/src/utils/notifications';
 import {
@@ -35,7 +35,6 @@ interface AlarmTarget {
 
 class AlarmRunner {
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
-  private stageTriggerIds: string[] = [];
   private target: AlarmTarget | null = null;
   private status: JourneyStatus = 'SCHEDULED';
   private intervalSec = DEFAULT_INTERVAL;
@@ -100,8 +99,10 @@ class AlarmRunner {
   }
 
   cancelRemainingStages(): void {
-    this.stageTriggerIds.forEach(id => notifee.cancelTriggerNotification(id).catch(() => {}));
-    this.stageTriggerIds = [];
+    const journeyId = this.target?.journeyId;
+    const appointmentId = this.target?.appointmentId;
+    const key = journeyId != null ? `j_${journeyId}` : appointmentId != null ? `a_${appointmentId}` : null;
+    if (key) cancelStagedAlarms(key).catch(() => {});
   }
 
   private scheduleNextPoll(): void {
@@ -163,7 +164,7 @@ class AlarmRunner {
       }
       if (!this.target) return;
       this.scheduleNextPoll();
-      this.handlePersonalStatus(journey_status, preparation_time, which_station, departure_alarm_time);
+      await this.handlePersonalStatus(journey_status, preparation_time, which_station, departure_alarm_time);
     } catch (e: any) {
       const msg = e?.message ?? String(e);
       if (msg.includes('"success":false') || msg.startsWith('HTTP 4')) {
@@ -206,7 +207,7 @@ class AlarmRunner {
       }
       if (!this.target) return;
       this.scheduleNextPoll();
-      this.handleGroupStatus(participant_status, preparation_time, estimated_arrival, which_station, departure_alarm_time);
+      await this.handleGroupStatus(participant_status, preparation_time, estimated_arrival, which_station, departure_alarm_time);
     } catch (e: any) {
       const msg = e?.message ?? String(e);
       if (msg.includes('"success":false') || msg.startsWith('HTTP 4')) {
@@ -219,7 +220,7 @@ class AlarmRunner {
     }
   }
 
-  private handlePersonalStatus(newStatus: JourneyStatus, preparationTime: number, whichStation?: string | null, departureAlarmTime?: string | null): void {
+  private async handlePersonalStatus(newStatus: JourneyStatus, preparationTime: number, whichStation?: string | null, departureAlarmTime?: string | null): Promise<void> {
     if (newStatus === 'READY' && this.status !== 'READY') {
       console.log(`[alarmService] 상태전이 ${this.status} → READY — journeyId:${this.target?.journeyId}`);
       this.status = newStatus;
@@ -246,7 +247,7 @@ class AlarmRunner {
       if (newStatus === 'DEPARTING' && !this.stagingStarted) {
         this.stagingStarted = true;
         console.log(`[alarmService] 단계별 알람 스케줄 시작 — journeyId:${this.target?.journeyId} preparationTime:${preparationTime}분`);
-        this.scheduleAlarmStages(preparationTime, whichStation);
+        await this.scheduleAlarmStages(preparationTime, whichStation);
       }
 
       if (newStatus === 'MOVING') {
@@ -261,7 +262,7 @@ class AlarmRunner {
         if (!this.stagingStarted && departureAlarmTime && new Date() >= new Date(departureAlarmTime)) {
           this.stagingStarted = true;
           console.log(`[alarmService] NEARDEST P>=Q — 단계별 알람 발송 journeyId:${this.target?.journeyId}`);
-          this.scheduleAlarmStages(preparationTime, whichStation);
+          await this.scheduleAlarmStages(preparationTime, whichStation);
         }
         console.log(`[alarmService] NEARDEST 도착 확인 알람 발송 — journeyId:${this.target?.journeyId}`);
         sendArrivalCheckAlarm('나', this.target!.destination, this.target?.journeyId);
@@ -275,7 +276,7 @@ class AlarmRunner {
     }
   }
 
-  private handleGroupStatus(newStatus: JourneyStatus, preparationTime: number, estimatedArrival: string, whichStation?: string | null, departureAlarmTime?: string | null): void {
+  private async handleGroupStatus(newStatus: JourneyStatus, preparationTime: number, estimatedArrival: string, whichStation?: string | null, departureAlarmTime?: string | null): Promise<void> {
     if (newStatus === 'READY' && this.status !== 'READY') {
       console.log(`[alarmService] 상태전이 ${this.status} → READY — appointmentId:${this.target?.appointmentId}`);
       this.status = newStatus;
@@ -303,7 +304,7 @@ class AlarmRunner {
         this.stagingStarted = true;
         if (this.isActive) {
           console.log(`[alarmService] 단계별 알람 스케줄 시작 — appointmentId:${this.target?.appointmentId} preparationTime:${preparationTime}분`);
-          this.scheduleAlarmStages(preparationTime, whichStation);
+          await this.scheduleAlarmStages(preparationTime, whichStation);
         } else {
           console.log(`[alarmService] DEPARTING 진입 — appointmentId:${this.target?.appointmentId} 알람 스위치 OFF → 알람 억제`);
         }
@@ -326,7 +327,7 @@ class AlarmRunner {
         if (!this.stagingStarted && this.isActive && departureAlarmTime && new Date() >= new Date(departureAlarmTime)) {
           this.stagingStarted = true;
           console.log(`[alarmService] NEARDEST P>=Q — 단계별 알람 발송 appointmentId:${this.target?.appointmentId}`);
-          this.scheduleAlarmStages(preparationTime, whichStation);
+          await this.scheduleAlarmStages(preparationTime, whichStation);
         }
         if (this.isActive) {
           console.log(`[alarmService] NEARDEST 도착 확인 알람 발송 — appointmentId:${this.target?.appointmentId}`);
@@ -347,7 +348,7 @@ class AlarmRunner {
     }
   }
 
-  private scheduleAlarmStages(preparationTime: number, whichStation?: string | null): void {
+  private async scheduleAlarmStages(preparationTime: number, whichStation?: string | null): Promise<void> {
     const stepMs = preparationTime * 60 * 1000 * 0.25;
     const type = this.target!.alarmType;
     const dest = this.target!.destination;
@@ -365,22 +366,19 @@ class AlarmRunner {
     const step4At = new Date(Date.now() + stepMs * 3).toLocaleTimeString('ko-KR', { hour12: false });
     console.log(`[알람] 단계별 알람 예정 — 1단계:${step1At}(즉시) 2단계:${step2At} 3단계:${step3At} 4단계:${step4At}`);
 
-    (async () => {
-      try {
-        console.log(`[알람] 1단계 발송`);
-        await sendAlarm(type, 1, dest, whichStation, mins(1.0), journeyId, appointmentId);
-        console.log(`[알람] 2단계 등록 @ ${step2At}`);
-        const id2 = await scheduleFutureAlarm(type, 2, dest, Date.now() + stepMs, journeyId, appointmentId, whichStation, mins(0.75));
-        console.log(`[알람] 3단계 등록 @ ${step3At}`);
-        const id3 = await scheduleFutureAlarm(type, 3, dest, Date.now() + stepMs * 2, journeyId, appointmentId, whichStation, mins(0.5));
-        console.log(`[알람] 4단계 등록 @ ${step4At}`);
-        const id4 = await scheduleFutureAlarm(type, 4, dest, Date.now() + stepMs * 3, journeyId, appointmentId, whichStation, mins(0.25));
-        this.stageTriggerIds = [...id2, ...id3, ...id4];
-        console.log(`[알람] 단계별 알람 등록 완료 — ids:${this.stageTriggerIds}`);
-      } catch (e) {
-        console.log('[알람] 단계별 알람 등록 실패', e);
-      }
-    })();
+    try {
+      console.log(`[알람] 1단계 발송`);
+      await sendAlarm(type, 1, dest, whichStation, mins(1.0), journeyId, appointmentId);
+      console.log(`[알람] 2단계 등록 @ ${step2At}`);
+      const id2 = await scheduleFutureAlarm(type, 2, dest, Date.now() + stepMs, journeyId, appointmentId, whichStation, mins(0.75));
+      console.log(`[알람] 3단계 등록 @ ${step3At}`);
+      const id3 = await scheduleFutureAlarm(type, 3, dest, Date.now() + stepMs * 2, journeyId, appointmentId, whichStation, mins(0.5));
+      console.log(`[알람] 4단계 등록 @ ${step4At}`);
+      const id4 = await scheduleFutureAlarm(type, 4, dest, Date.now() + stepMs * 3, journeyId, appointmentId, whichStation, mins(0.25));
+      console.log(`[알람] 단계별 알람 등록 완료 — ids:${[...id2, ...id3, ...id4]}`);
+    } catch (e) {
+      console.log('[알람] 단계별 알람 등록 실패', e);
+    }
   }
 }
 

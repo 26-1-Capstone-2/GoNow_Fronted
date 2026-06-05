@@ -38,7 +38,6 @@ export default function RootLayout() {
       await AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify([]));
       await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify([]));
       await AsyncStorage.setItem(DESIRED_INTERVALS_KEY, JSON.stringify({}));
-      await AsyncStorage.setItem('gonow_trigger_ids', JSON.stringify({}));
 
       requestNotificationPermission();
       setupNotificationCategories();
