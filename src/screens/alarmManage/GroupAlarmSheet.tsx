@@ -65,7 +65,7 @@ function fromAlarmItem(item: AlarmItem): GroupAlarm {
     enabled: item.is_active,
     members: [],
     inviteCode: '',
-    isArrivalActive: item.appointment_status === 'ACTIVE',
+    isArrivalActive: item.appointment_status !== 'WAITING',
     transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
     appointment_status: item.appointment_status ?? undefined,
     participant_count: item.participant_count ?? undefined,

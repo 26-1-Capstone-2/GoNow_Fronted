@@ -134,6 +134,8 @@ export async function sendAlarm(
   destination?: string,
   whichStation?: string | null,
   minutesRemaining?: number,
+  journeyId?: number,
+  appointmentId?: number,
 ): Promise<string[]> {
   await ensureChannels();
 
@@ -148,6 +150,10 @@ export async function sendAlarm(
     const id = await notifee.displayNotification({
       title,
       body: stage === 4 ? `${body} (${i + 1}/${repeatCount})` : body,
+      data: {
+        ...(journeyId != null && { journeyId: String(journeyId) }),
+        ...(appointmentId != null && { appointmentId: String(appointmentId) }),
+      },
       android: {
         channelId: stage >= 3 ? CHANNEL_URGENT : CHANNEL_DEFAULT,
         importance: AndroidImportance.HIGH,

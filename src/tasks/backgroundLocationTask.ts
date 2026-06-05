@@ -8,7 +8,6 @@ import { sendAlarm, scheduleFutureAlarm, AlarmType } from '@/src/utils/notificat
 export const BACKGROUND_LOCATION_TASK = 'BACKGROUND-LOCATION-TASK';
 export const ACTIVE_JOURNEYS_KEY = 'gonow_active_journeys';
 export const ACTIVE_APPOINTMENTS_KEY = 'gonow_active_appointments';
-export const STAGING_DONE_KEY = 'gonow_staging_done';
 export const DESIRED_INTERVALS_KEY = 'gonow_desired_intervals'; // Record<key, seconds>
 export const SESSION_READY_KEY = 'gonow_session_ready';         // init() 완료 후 '1' 세팅
 const LAST_CALL_TIMES_KEY = 'gonow_last_call_times';           // Record<key, ms timestamp>
@@ -27,23 +26,6 @@ async function patchLocation(path: string, token: string, lat: number, lng: numb
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
-}
-
-async function getStagingDone(): Promise<Set<string>> {
-  const raw = await AsyncStorage.getItem(STAGING_DONE_KEY);
-  return new Set(raw ? JSON.parse(raw) : []);
-}
-
-async function markStagingDone(key: string): Promise<void> {
-  const done = await getStagingDone();
-  done.add(key);
-  await AsyncStorage.setItem(STAGING_DONE_KEY, JSON.stringify([...done]));
-}
-
-async function removeStagingKey(key: string): Promise<void> {
-  const done = await getStagingDone();
-  done.delete(key);
-  await AsyncStorage.setItem(STAGING_DONE_KEY, JSON.stringify([...done]));
 }
 
 let _startingLocationUpdates = false; // 동시 호출 race condition 방지
@@ -102,6 +84,12 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
     console.log('[BackgroundLocation] 에러:', JSON.stringify(error));
     return;
   }
+  // init() 완료 전이면 이전 세션 데이터가 남아있을 수 있으므로 skip
+  const sessionReady = await AsyncStorage.getItem(SESSION_READY_KEY);
+  if (sessionReady !== '1') {
+    console.log('[BackgroundLocation] 세션 미준비 — init() 완료 전 skip');
+    return;
+  }
   // 포그라운드 상태면 alarmService가 폴링 담당 → 백그라운드 태스크는 skip
   if (AppState.currentState === 'active') {
     console.log('[BackgroundLocation] 포그라운드 상태 — alarmService가 처리하므로 skip');
@@ -139,9 +127,10 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
     return;
   }
 
-  const stagingDone = await getStagingDone();
   const remainingJourneys: number[] = [];
   const remainingAppointments: number[] = [];
+  // 이번 태스크 실행에서 이미 알람 발송한 key 추적 (중복 방지)
+  const alarmSentThisRun = new Set<string>();
 
   const [lastCallTimesRaw, desiredIntervalsRaw] = await Promise.all([
     AsyncStorage.getItem(LAST_CALL_TIMES_KEY),
@@ -176,15 +165,14 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
           desiredIntervals[key] = interval;
         }
 
-        if (journey_status === 'DEPARTING' && !stagingDone.has(key)) {
+        if (journey_status === 'DEPARTING' && !alarmSentThisRun.has(key)) {
+          alarmSentThisRun.add(key);
           console.log(`[백그라운드] DEPARTING 진입 — journeyId:${id} 단계별 알람 발송`);
-          stagingDone.add(key);
-          await markStagingDone(key);
           const pt = preparation_time ?? 0;
           const stepMs = pt * 60 * 1000 * 0.25;
           const mins = (f: number) => which_station ? Math.round(pt * f) : undefined;
           // notifee 네이티브 메모리 충돌 방지 — 순차 실행
-          await sendAlarm(type, 1, dest_name, which_station, mins(1.0));
+          await sendAlarm(type, 1, dest_name, which_station, mins(1.0), id, undefined);
           await scheduleFutureAlarm(type, 2, dest_name, Date.now() + stepMs, id, undefined, which_station, mins(0.75));
           await scheduleFutureAlarm(type, 3, dest_name, Date.now() + stepMs * 2, id, undefined, which_station, mins(0.5));
           await scheduleFutureAlarm(type, 4, dest_name, Date.now() + stepMs * 3, id, undefined, which_station, mins(0.25));
@@ -192,7 +180,6 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
 
         if (journey_status === 'ARRIVED') {
           console.log(`[백그라운드] ARRIVED — journeyId:${id} ID 제거`);
-          await removeStagingKey(key);
           delete lastCallTimes[key];
           delete desiredIntervals[key];
         } else {
@@ -201,7 +188,6 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
       } catch (e: any) {
         if (e?.message?.startsWith('HTTP 4')) {
           console.log(`[백그라운드] journeyId:${id} 서버 ${e.message} → ID 제거 (삭제된 알람)`);
-          await removeStagingKey(key);
           delete lastCallTimes[key];
           delete desiredIntervals[key];
         } else {
@@ -233,15 +219,14 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
           desiredIntervals[key] = interval;
         }
 
-        if (participant_status === 'DEPARTING' && !stagingDone.has(key)) {
+        if (participant_status === 'DEPARTING' && !alarmSentThisRun.has(key)) {
+          alarmSentThisRun.add(key);
           console.log(`[백그라운드] DEPARTING 진입 — appointmentId:${id} 단계별 알람 발송`);
-          stagingDone.add(key);
-          await markStagingDone(key);
           const pt = preparation_time ?? 0;
           const stepMs = pt * 60 * 1000 * 0.25;
           const mins = (f: number) => which_station ? Math.round(pt * f) : undefined;
           // notifee 네이티브 메모리 충돌 방지 — 순차 실행
-          await sendAlarm('group', 1, dest_name, which_station, mins(1.0));
+          await sendAlarm('group', 1, dest_name, which_station, mins(1.0), undefined, id);
           await scheduleFutureAlarm('group', 2, dest_name, Date.now() + stepMs, undefined, id, which_station, mins(0.75));
           await scheduleFutureAlarm('group', 3, dest_name, Date.now() + stepMs * 2, undefined, id, which_station, mins(0.5));
           await scheduleFutureAlarm('group', 4, dest_name, Date.now() + stepMs * 3, undefined, id, which_station, mins(0.25));
@@ -249,7 +234,6 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
 
         if (participant_status === 'ARRIVED') {
           console.log(`[백그라운드] ARRIVED — appointmentId:${id} ID 제거`);
-          await removeStagingKey(key);
           delete lastCallTimes[key];
           delete desiredIntervals[key];
         } else {

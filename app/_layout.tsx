@@ -5,7 +5,7 @@ import { createAlarmsApi } from '@/src/api/alarms';
 import { alarmService } from '@/src/services/alarmService';
 import * as Notifications from 'expo-notifications';
 import { BACKGROUND_ALARM_TASK } from '@/src/tasks/backgroundAlarmTask';
-import { ACTIVE_JOURNEYS_KEY, ACTIVE_APPOINTMENTS_KEY, DESIRED_INTERVALS_KEY, SESSION_READY_KEY, STAGING_DONE_KEY, startBackgroundLocationUpdates, stopBackgroundLocationUpdates } from '@/src/tasks/backgroundLocationTask';
+import { ACTIVE_JOURNEYS_KEY, ACTIVE_APPOINTMENTS_KEY, DESIRED_INTERVALS_KEY, SESSION_READY_KEY, startBackgroundLocationUpdates, stopBackgroundLocationUpdates } from '@/src/tasks/backgroundLocationTask';
 import { getToken } from '@/src/store/authStore';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
@@ -38,7 +38,6 @@ export default function RootLayout() {
       await AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify([]));
       await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify([]));
       await AsyncStorage.setItem(DESIRED_INTERVALS_KEY, JSON.stringify({}));
-      await AsyncStorage.setItem(STAGING_DONE_KEY, JSON.stringify([]));
 
       requestNotificationPermission();
       setupNotificationCategories();
@@ -107,13 +106,11 @@ export default function RootLayout() {
       const appStateSub = AppState.addEventListener('change', async (nextState) => {
         console.log('[AppState] 상태 변경:', nextState);
         if (nextState === 'active') {
-          // 백그라운드 위치추적 종료 (포그라운드 alarmService가 인계)
           console.log('[AppState] active → stopBackgroundLocationUpdates 호출');
           await stopBackgroundLocationUpdates().catch(() => {});
           const now = Date.now();
           if (now - lastForegroundAt < 3000) {
             console.log('[AppState] active 3초 내 중복 — skip');
-            // 활성 알람이 있을 때만 백그라운드 추적 재시작 (알람 없으면 상단바 알림 불필요)
             if (alarmService.hasRunning()) {
               await startBackgroundLocationUpdates().catch(() => {});
             }
@@ -122,8 +119,6 @@ export default function RootLayout() {
           lastForegroundAt = now;
           console.log('[AppState] active → startReadyAlarms 호출');
           startReadyAlarms();
-          // startReadyAlarms는 isRunning=true면 alarmService.start() skip → startBackgroundLocationUpdates 미호출
-          // → alarmService가 폴링 중이면 백그라운드 추적도 항상 켜둠 (상단바 알림 유지)
           if (alarmService.hasRunning()) {
             await startBackgroundLocationUpdates().catch(() => {});
           }

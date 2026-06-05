@@ -16,8 +16,6 @@ import { createAuthApi } from '@/src/api/auth';
 import { createMembersApi } from '@/src/api/members';
 import { createAlarmsApi } from '@/src/api/alarms';
 import { alarmService } from '@/src/services/alarmService';
-import { STAGING_DONE_KEY } from '@/src/tasks/backgroundLocationTask';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAppNavigation } from '@/src/navigation';
 import { useAuthStore } from '@/src/store/authStore';
 import * as Notifications from 'expo-notifications';
@@ -52,15 +50,6 @@ export default function LoginScreen() {
         const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
         const alarmsRes = await createAlarmsApi().getAlarms(todayStr);
         console.log(`[LoginScreen] getAlarms 응답 — 전체:${alarmsRes.data?.length ?? 0}`);
-
-        // 현재 이미 알람이 울린 상태(DEPARTING/MOVING/NEARDEST)인 알람 ID만 STAGING_DONE_KEY에 유지
-        // 새 알람은 포함 안 되므로 정상 발송, 이미 울린 알람은 재발송 방지
-        const activeKeys = (alarmsRes.data ?? [])
-          .filter(a => ['DEPARTING', 'MOVING', 'NEARDEST'].includes(a.my_status))
-          .map(a => a.journey_id ? `j_${a.journey_id}` : `a_${a.appointment_id}`);
-        await AsyncStorage.setItem(STAGING_DONE_KEY, JSON.stringify(activeKeys));
-        console.log(`[LoginScreen] STAGING_DONE 갱신 — ${JSON.stringify(activeKeys)}`);
-
         (alarmsRes.data ?? []).filter((a) => ['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(a.my_status) && a.is_active).forEach((a) => {
           if (a.alarm_type === 'GROUP' && a.appointment_id != null) {
             if (alarmService.isRunning(undefined, a.appointment_id)) return;
