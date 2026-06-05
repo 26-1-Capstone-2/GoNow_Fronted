@@ -3,11 +3,10 @@ import GroupAlarmSheet from '@/src/screens/alarmManage/GroupAlarmSheet';
 import HomeAlarmSheet from '@/src/screens/alarmManage/HomeAlarmSheet';
 import PersonalAlarmSheet from '@/src/screens/alarmManage/PersonalAlarmSheet';
 import DailyAlarmScreen from '@/src/screens/main/DailyAlarmScreen';
-import { useAppointmentStatusStore } from '@/src/store/appointmentStatusStore';
 import { useState } from 'react';
 import { View } from 'react-native';
 
-type SheetState = { mode: 'add' | 'edit'; id?: number } | null;
+type SheetState = { mode: 'add' | 'create' | 'edit'; id?: number; alarm?: any } | null;
 
 export default function DailyAlarmPage() {
   const [personalSheet, setPersonalSheet] = useState<SheetState>(null);
@@ -16,28 +15,26 @@ export default function DailyAlarmPage() {
   const [showArrivalSheet, setShowArrivalSheet] = useState(false);
   const [selectedGroupAlarm, setSelectedGroupAlarm] = useState<any>(null);
 
-  const { statuses, activeAppointmentId } = useAppointmentStatusStore();
-  const isArrivalActive = activeAppointmentId != null
-    ? (statuses[activeAppointmentId] ?? 'WAITING') !== 'WAITING'
-    : false;
-
   return (
     <View style={{ flex: 1 }}>
       <DailyAlarmScreen
         onPersonalAdd={() => setPersonalSheet({ mode: 'add' })}
-        onPersonalEdit={(journeyId) => setPersonalSheet({ mode: 'edit', id: journeyId })}
-        onGroupAdd={() => setGroupSheet({ mode: 'add' })}
-        onGroupEdit={(appointmentId) => setGroupSheet({ mode: 'edit', id: appointmentId })}
+        onPersonalEdit={(journeyId, alarm) => setPersonalSheet({ mode: 'edit', id: journeyId, alarm })}
+        onGroupAdd={() => setGroupSheet({ mode: 'create' })}
+        onGroupEdit={(appointmentId, alarm) => setGroupSheet({ mode: 'edit', id: appointmentId, alarm })}
         onHomeAdd={() => setHomeSheet({ mode: 'add' })}
-        onHomeEdit={(journeyId) => setHomeSheet({ mode: 'edit', id: journeyId })}
-        onArrivalPress={() => setShowArrivalSheet(true)}
-        isArrivalActive={isArrivalActive}
+        onHomeEdit={(journeyId, alarm) => setHomeSheet({ mode: 'edit', id: journeyId, alarm })}
+        onArrivalPress={(appointmentId) => {
+          setSelectedGroupAlarm({ appointmentId });
+          setShowArrivalSheet(true);
+        }}
       />
       {personalSheet && (
         <PersonalAlarmSheet
           onClose={() => setPersonalSheet(null)}
           initialMode={personalSheet.mode}
           editJourneyId={personalSheet.id}
+          initialAlarm={personalSheet.alarm}
         />
       )}
       {groupSheet && (
@@ -45,6 +42,7 @@ export default function DailyAlarmPage() {
           onClose={() => setGroupSheet(null)}
           initialMode={groupSheet.mode}
           editAppointmentId={groupSheet.id}
+          initialAlarm={groupSheet.alarm}
           onArrivalPress={(alarm) => {
             setSelectedGroupAlarm(alarm);
             setShowArrivalSheet(true);
@@ -62,6 +60,7 @@ export default function DailyAlarmPage() {
           onClose={() => setHomeSheet(null)}
           initialMode={homeSheet.mode}
           editJourneyId={homeSheet.id}
+          initialAlarm={homeSheet.alarm}
         />
       )}
     </View>

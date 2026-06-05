@@ -91,6 +91,7 @@ interface Props {
   onClose: () => void;
   initialMode?: 'add' | 'edit';
   editJourneyId?: number;
+  initialAlarm?: any;
 }
 
 function getRepeatLabel(repeat: string[]): string {
@@ -110,16 +111,21 @@ const DEFAULT_ALARM: HomeAlarm = {
   repeat: ['안함'], enabled: true, transport: 'public',
 };
 
-export default function HomeAlarmSheet({ onClose, initialMode, editJourneyId }: Props) {
+export default function HomeAlarmSheet({ onClose, initialMode, editJourneyId, initialAlarm }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['85%'], []);
   const { selectedDate, bumpAlarmVersion } = useCalendarStore();
 
   const { places, searchKey, loadPlaces, savePlace, deletePlace } = usePlaces('HOME');
 
-  const [view, setView] = useState<ViewType>('list');
+  const [view, setView] = useState<ViewType>(initialMode ? 'edit' : 'list');
   const [alarms, setAlarms] = useState<HomeAlarm[]>([]);
-  const [editAlarm, setEditAlarm] = useState<HomeAlarm>(DEFAULT_ALARM);
+  const [editAlarm, setEditAlarm] = useState<HomeAlarm>(() => {
+    if (initialMode === 'edit' && editJourneyId && initialAlarm) {
+      return { ...DEFAULT_ALARM, id: String(editJourneyId), journeyId: editJourneyId, mode: initialAlarm.isLastMode ? 'lastTrain' : 'deadline', home_name: initialAlarm.place, ampm: initialAlarm.ampm, hour: initialAlarm.time?.split(':')[0] ?? '11', minute: initialAlarm.time?.split(':')[1] ?? '00', transport: initialAlarm.transport };
+    }
+    return DEFAULT_ALARM;
+  });
   const [tempPlace, setTempPlace] = useState<SearchResult | null>(null);
   const [saving, setSaving] = useState(false);
   const isEditMode = !!editAlarm.id;
@@ -149,13 +155,11 @@ export default function HomeAlarmSheet({ onClose, initialMode, editJourneyId }: 
   }, [onClose]);
 
   useEffect(() => {
-    if (initialMode === 'add') {
-      setEditAlarm(DEFAULT_ALARM);
-      setView('edit');
-    } else if (initialMode === 'edit' && editJourneyId) {
-      journeysApi.getJourney(editJourneyId)
-        .then((res) => { setEditAlarm(fromJourneyDetail(res.data)); setView('edit'); })
-        .catch(() => {});
+    if (initialMode === 'edit' && editJourneyId) {
+      const base = initialAlarm
+        ? { ...DEFAULT_ALARM, id: String(editJourneyId), journeyId: editJourneyId, mode: initialAlarm.isLastMode ? 'lastTrain' : 'deadline' as AlarmMode, home_name: initialAlarm.place, ampm: initialAlarm.ampm, hour: initialAlarm.time?.split(':')[0] ?? '11', minute: initialAlarm.time?.split(':')[1] ?? '00', transport: initialAlarm.transport }
+        : { ...DEFAULT_ALARM, id: String(editJourneyId), journeyId: editJourneyId };
+      openEdit(base);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -257,7 +261,7 @@ export default function HomeAlarmSheet({ onClose, initialMode, editJourneyId }: 
       }
       await loadAlarms();
       bumpAlarmVersion();
-      setView('list');
+      initialMode ? onClose() : setView('list');
     } catch (e: any) {
       console.error('귀가 알람 저장 실패:', e);
       Alert.alert('저장 실패', e?.message ?? '다시 시도해주세요.');
@@ -281,7 +285,7 @@ export default function HomeAlarmSheet({ onClose, initialMode, editJourneyId }: 
     }
     setAlarms((prev) => prev.filter((a) => a.id !== editAlarm.id));
     bumpAlarmVersion();
-    setView('list');
+    initialMode ? onClose() : setView('list');
   };
 
   const toggleAlarm = (alarm: HomeAlarm) => {
@@ -320,6 +324,7 @@ export default function HomeAlarmSheet({ onClose, initialMode, editJourneyId }: 
       onClose={onClose}
       enablePanDownToClose
       enableDynamicSizing={false}
+      animateOnMount={false}
       handleIndicatorStyle={styles.indicator}
       backgroundStyle={styles.background}
     >
@@ -403,9 +408,10 @@ export default function HomeAlarmSheet({ onClose, initialMode, editJourneyId }: 
       {view === 'edit' && (
         <>
           <View style={styles.header}>
-            <TouchableOpacity style={styles.headerBtn} onPress={() => setView('list')}>
+            <TouchableOpacity style={styles.headerBtn} onPress={() => initialMode ? onClose() : setView('list')}>
               <Feather name="x" size={22} color="#1A1A1A" />
             </TouchableOpacity>
+            <Text style={styles.title}>{isEditMode ? '귀가 알람 수정' : '귀가 알람 추가'}</Text>
             <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={saving}>
               {saving
                 ? <ActivityIndicator size="small" color="#FFFFFF" />

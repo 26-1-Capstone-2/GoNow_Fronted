@@ -86,6 +86,7 @@ interface Props {
   onClose: () => void;
   initialMode?: 'add' | 'edit';
   editJourneyId?: number;
+  initialAlarm?: any;
 }
 
 const DEFAULT_ALARM: Alarm = {
@@ -107,17 +108,22 @@ function getRepeatLabel(repeat: string[]): string {
   return repeat.map((r) => r.replace('요일마다', '')).join(', ');
 }
 
-export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId }: Props) {
+export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId, initialAlarm }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['85%'], []);
   const { selectedDate, bumpAlarmVersion } = useCalendarStore();
 
   const { places, searchKey, loadPlaces, savePlace, deletePlace } = usePlaces('DEST');
 
-  const [view, setView] = useState<ViewType>('list');
+  const [view, setView] = useState<ViewType>(initialMode ? 'edit' : 'list');
   const [tempPlace, setTempPlace] = useState<SearchResult | null>(null);
   const [alarms, setAlarms] = useState<Alarm[]>([]);
-  const [editAlarm, setEditAlarm] = useState<Alarm>(DEFAULT_ALARM);
+  const [editAlarm, setEditAlarm] = useState<Alarm>(() => {
+    if (initialMode === 'edit' && editJourneyId && initialAlarm) {
+      return { ...DEFAULT_ALARM, id: String(editJourneyId), journeyId: editJourneyId, dest_name: initialAlarm.place, ampm: initialAlarm.ampm, hour: initialAlarm.time?.split(':')[0] ?? '7', minute: initialAlarm.time?.split(':')[1] ?? '00', transport: initialAlarm.transport };
+    }
+    return DEFAULT_ALARM;
+  });
   const [saving, setSaving] = useState(false);
   const isEditMode = !!editAlarm.id;
 
@@ -149,13 +155,11 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
   }, [onClose]);
 
   useEffect(() => {
-    if (initialMode === 'add') {
-      setEditAlarm(DEFAULT_ALARM);
-      setView('edit');
-    } else if (initialMode === 'edit' && editJourneyId) {
-      journeysApi.getJourney(editJourneyId)
-        .then((res) => { setEditAlarm(fromJourneyDetail(res.data)); setView('edit'); })
-        .catch(() => {});
+    if (initialMode === 'edit' && editJourneyId) {
+      const base = initialAlarm
+        ? { ...DEFAULT_ALARM, id: String(editJourneyId), journeyId: editJourneyId, dest_name: initialAlarm.place, ampm: initialAlarm.ampm, hour: initialAlarm.time?.split(':')[0] ?? '7', minute: initialAlarm.time?.split(':')[1] ?? '00', transport: initialAlarm.transport }
+        : { ...DEFAULT_ALARM, id: String(editJourneyId), journeyId: editJourneyId };
+      openEdit(base);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -236,7 +240,7 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
       }
       await loadAlarms();
       bumpAlarmVersion();
-      setView('list');
+      initialMode ? onClose() : setView('list');
     } catch {
       Alert.alert('저장 실패', '다시 시도해주세요.');
     } finally {
@@ -259,7 +263,7 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
     }
     setAlarms((prev) => prev.filter((a) => a.id !== editAlarm.id));
     bumpAlarmVersion();
-    setView('list');
+    initialMode ? onClose() : setView('list');
   };
 
   const handlePlaceConfirm = () => {
@@ -312,6 +316,7 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
       onClose={onClose}
       enablePanDownToClose
       enableDynamicSizing={false}
+      animateOnMount={false}
       handleIndicatorStyle={styles.indicator}
       backgroundStyle={styles.background}
     >
@@ -394,10 +399,10 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
       {view === 'edit' && (
         <>
           <View style={styles.header}>
-            <TouchableOpacity style={styles.headerBtn} onPress={() => setView('list')}>
+            <TouchableOpacity style={styles.headerBtn} onPress={() => initialMode ? onClose() : setView('list')}>
               <Feather name="x" size={22} color="#1A1A1A" />
             </TouchableOpacity>
-            <Text style={styles.title}>{isEditMode ? '알람 수정' : '알람 추가'}</Text>
+            <Text style={styles.title}>{isEditMode ? '개인 알람 수정' : '개인 알람 추가'}</Text>
             <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={saving}>
               {saving
                 ? <ActivityIndicator size="small" color="#FFFFFF" />

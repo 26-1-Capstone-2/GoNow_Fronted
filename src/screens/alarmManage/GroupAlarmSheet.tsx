@@ -39,8 +39,9 @@ interface GroupAlarm {
 interface Props {
   onClose: () => void;
   onArrivalPress?: (alarm: GroupAlarm) => void;
-  initialMode?: 'add' | 'edit';
+  initialMode?: 'add' | 'create' | 'edit';
   editAppointmentId?: number;
+  initialAlarm?: any;
 }
 
 const alarmsApi = createAlarmsApi();
@@ -81,16 +82,23 @@ const DEFAULT_ALARM: GroupAlarm = {
 
 type ViewType = 'list' | 'edit' | 'place' | 'addChoice' | 'join' | 'transport';
 
-export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, editAppointmentId }: Props) {
+export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, editAppointmentId, initialAlarm }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['85%'], []);
   const { selectedDate, bumpAlarmVersion } = useCalendarStore();
 
   const { places, searchKey, loadPlaces, savePlace, deletePlace } = usePlaces('DEST');
 
-  const [view, setView] = useState<ViewType>('list');
+  const [view, setView] = useState<ViewType>(
+    initialMode === 'add' ? 'addChoice' : (initialMode === 'create' || initialMode === 'edit') ? 'edit' : 'list'
+  );
   const [alarms, setAlarms] = useState<GroupAlarm[]>([]);
-  const [editAlarm, setEditAlarm] = useState<GroupAlarm>(DEFAULT_ALARM);
+  const [editAlarm, setEditAlarm] = useState<GroupAlarm>(() => {
+    if (initialMode === 'edit' && editAppointmentId && initialAlarm) {
+      return { ...DEFAULT_ALARM, id: String(editAppointmentId), appointmentId: editAppointmentId, dest_name: initialAlarm.place, ampm: initialAlarm.ampm, hour: initialAlarm.time?.split(':')[0] ?? '7', minute: initialAlarm.time?.split(':')[1] ?? '00', transport: initialAlarm.transport };
+    }
+    return DEFAULT_ALARM;
+  });
   const [tempPlace, setTempPlace] = useState<SearchResult | null>(null);
   const [inviteCode, setInviteCode] = useState('');
   const [inviteError, setInviteError] = useState('');
@@ -131,6 +139,16 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
   useEffect(() => {
     loadAlarms();
   }, [loadAlarms]);
+
+  useEffect(() => {
+    if (initialMode === 'edit' && editAppointmentId) {
+      const base = initialAlarm
+        ? { ...DEFAULT_ALARM, id: String(editAppointmentId), appointmentId: editAppointmentId, dest_name: initialAlarm.place, ampm: initialAlarm.ampm, hour: initialAlarm.time?.split(':')[0] ?? '7', minute: initialAlarm.time?.split(':')[1] ?? '00', transport: initialAlarm.transport }
+        : { ...DEFAULT_ALARM, id: String(editAppointmentId), appointmentId: editAppointmentId };
+      openEdit(base);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const dateObj = new Date(selectedDate);
   const month = dateObj.getMonth() + 1;
@@ -207,16 +225,6 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
     } catch {}
   };
 
-  useEffect(() => {
-    if (initialMode === 'add') {
-      setEditAlarm(DEFAULT_ALARM);
-      setView('edit');
-    } else if (initialMode === 'edit' && editAppointmentId) {
-      openEdit({ ...DEFAULT_ALARM, id: String(editAppointmentId), appointmentId: editAppointmentId });
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const openPlace = () => {
     setTempPlace(
       editAlarm.dest_name
@@ -235,7 +243,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
           if (res.success) {
             await loadAlarms();
             bumpAlarmVersion();
-            setView('list');
+            initialMode ? onClose() : setView('list');
           } else {
             Alert.alert('수정 실패', res.message ?? '다시 시도해주세요.');
           }
@@ -257,7 +265,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
             }
             await loadAlarms();
             bumpAlarmVersion();
-            setView('list');
+            initialMode ? onClose() : setView('list');
           } else {
             Alert.alert('수정 실패', res.message ?? '다시 시도해주세요.');
           }
@@ -285,7 +293,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
         }
         await loadAlarms();
         bumpAlarmVersion();
-        setView('list');
+        initialMode ? onClose() : setView('list');
       } else {
         Alert.alert('저장 실패', res.message ?? '다시 시도해주세요.');
       }
@@ -330,7 +338,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
               await loadAlarms();
               bumpAlarmVersion();
               Alert.alert('탈퇴 완료', '그룹에서 탈퇴했습니다.', [
-                { text: '확인', onPress: () => setView('list') },
+                { text: '확인', onPress: () => initialMode ? onClose() : setView('list') },
               ]);
             } else {
               Alert.alert('탈퇴 실패', '다시 시도해주세요.');
@@ -353,7 +361,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
         await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify(ids.filter(id => id !== editAlarm.appointmentId)));
         await loadAlarms();
         bumpAlarmVersion();
-        setView('list');
+        initialMode ? onClose() : setView('list');
       } else {
         Alert.alert('삭제 실패', res.message ?? '다시 시도해주세요.');
       }
@@ -403,6 +411,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
   return (
     <BottomSheet ref={bottomSheetRef} index={0} snapPoints={snapPoints} onChange={handleSheetChange}
       onClose={onClose} enablePanDownToClose enableDynamicSizing={false}
+      animateOnMount={false}
       handleIndicatorStyle={styles.indicator} backgroundStyle={styles.background}>
 
       {/* ── 목록 화면 ── */}
@@ -500,7 +509,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
       {view === 'edit' && (
         <>
           <View style={styles.header}>
-            <TouchableOpacity style={styles.headerBtn} onPress={() => setView('list')}>
+            <TouchableOpacity style={styles.headerBtn} onPress={() => initialMode ? onClose() : setView('list')}>
               <Feather name="x" size={22} color="#1A1A1A" />
             </TouchableOpacity>
             <Text style={styles.title}>
@@ -610,7 +619,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
       {view === 'addChoice' && (
         <>
           <View style={styles.header}>
-            <TouchableOpacity style={styles.headerBtn} onPress={() => setView('list')}>
+            <TouchableOpacity style={styles.headerBtn} onPress={() => initialMode ? onClose() : setView('list')}>
               <Feather name="chevron-left" size={22} color="#1A1A1A" />
             </TouchableOpacity>
             <Text style={styles.title}>그룹 추가</Text>

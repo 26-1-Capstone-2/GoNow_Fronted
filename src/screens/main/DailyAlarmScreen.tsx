@@ -1,16 +1,23 @@
 import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createAppointmentsApi } from '@/src/api/appointments';
 import { createJourneysApi, targetTimeToAmpmHourMinute } from '@/src/api/journeys';
+import { createMembersApi } from '@/src/api/members';
 import { alarmService } from '@/src/services/alarmService';
+import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ACTIVE_JOURNEYS_KEY, ACTIVE_APPOINTMENTS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, FontAwesome5, FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
+  Alert,
+  Platform,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
+  ToastAndroid,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -20,6 +27,7 @@ const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
 const alarmsApi = createAlarmsApi();
 const journeysApi = createJourneysApi();
 const appointmentsApi = createAppointmentsApi();
+const membersApi = createMembersApi();
 
 type AlarmCard = {
   id: string;
@@ -33,6 +41,7 @@ type AlarmCard = {
   isLastMode?: boolean;
   participantCount?: number;
   myStatus?: string;
+  appointmentStatus?: string;
 };
 
 function toAlarmCard(item: AlarmItem): AlarmCard {
@@ -49,23 +58,23 @@ function toAlarmCard(item: AlarmItem): AlarmCard {
     isLastMode: item.is_last_mode,
     participantCount: item.participant_count ?? undefined,
     myStatus: item.my_status,
+    appointmentStatus: item.appointment_status ?? undefined,
   };
 }
 
 interface Props {
   onPersonalAdd: () => void;
-  onPersonalEdit: (journeyId: number) => void;
+  onPersonalEdit: (journeyId: number, alarm: AlarmCard) => void;
   onGroupAdd: () => void;
-  onGroupEdit: (appointmentId: number) => void;
+  onGroupEdit: (appointmentId: number, alarm: AlarmCard) => void;
   onHomeAdd: () => void;
-  onHomeEdit: (journeyId: number) => void;
-  onArrivalPress: () => void;
-  isArrivalActive?: boolean;
+  onHomeEdit: (journeyId: number, alarm: AlarmCard) => void;
+  onArrivalPress: (appointmentId: number) => void;
 }
 
-export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGroupAdd, onGroupEdit, onHomeAdd, onHomeEdit, onArrivalPress, isArrivalActive = false }: Props) {
+export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGroupAdd, onGroupEdit, onHomeAdd, onHomeEdit, onArrivalPress }: Props) {
   const router = useRouter();
-  const { selectedDate, selectedMonth, setSelectedDate, alarmVersion } = useCalendarStore();
+  const { selectedDate, selectedMonth, setSelectedDate, alarmVersion, bumpAlarmVersion } = useCalendarStore();
   const today = new Date();
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
@@ -141,27 +150,40 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
             </TouchableOpacity>
           </View>
           {personal.map((alarm) => (
-            <TouchableOpacity key={alarm.id} style={styles.alarmCard} activeOpacity={0.7}
-              onPress={() => alarm.journeyId && onPersonalEdit(alarm.journeyId)}>
-              <View style={styles.alarmInfo}>
-                <Text style={styles.alarmPlace}>{alarm.place}</Text>
-                <View style={styles.alarmMeta}>
-                  <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.time} 까지</Text>
-                  {alarm.transport === 'public'
-                    ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
-                    : <FontAwesome5 name="car-side" size={13} color="#F5A623" />
-                  }
+            <SwipeableAlarmCard key={alarm.id} onDelete={async () => {
+              if (!alarm.journeyId) return;
+              try {
+                await journeysApi.deleteJourney(alarm.journeyId);
+                alarmService.stop(alarm.journeyId);
+                const raw = await AsyncStorage.getItem(ACTIVE_JOURNEYS_KEY);
+                const ids: number[] = raw ? JSON.parse(raw) : [];
+                await AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify(ids.filter(id => id !== alarm.journeyId)));
+              } catch { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
+              setPersonal(prev => prev.filter(a => a.id !== alarm.id));
+              bumpAlarmVersion();
+            }}>
+              <TouchableOpacity style={styles.alarmCard} activeOpacity={0.7}
+                onPress={() => alarm.journeyId && onPersonalEdit(alarm.journeyId, alarm)}>
+                <View style={styles.alarmInfo}>
+                  <Text style={styles.alarmPlace}>{alarm.place}</Text>
+                  <View style={styles.alarmMeta}>
+                    <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.time} 까지</Text>
+                    {alarm.transport === 'public'
+                      ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
+                      : <FontAwesome5 name="car-side" size={13} color="#F5A623" />
+                    }
+                  </View>
                 </View>
-              </View>
-              <View style={styles.cardRight}>
-                <Switch
-                  value={alarm.enabled}
-                  onValueChange={() => toggleAlarm(setPersonal, alarm)}
-                  trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-                  thumbColor="#FFFFFF"
-                />
-              </View>
-            </TouchableOpacity>
+                <View style={styles.cardRight}>
+                  <Switch
+                    value={alarm.enabled}
+                    onValueChange={() => toggleAlarm(setPersonal, alarm)}
+                    trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                    thumbColor="#FFFFFF"
+                  />
+                </View>
+              </TouchableOpacity>
+            </SwipeableAlarmCard>
           ))}
         </View>
 
@@ -173,40 +195,79 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
               <Feather name="plus" size={22} color="#888888" />
             </TouchableOpacity>
           </View>
-          {group.map((alarm) => (
-            <TouchableOpacity key={alarm.id} style={styles.alarmCard} activeOpacity={0.7}
-              onPress={() => alarm.appointmentId && onGroupEdit(alarm.appointmentId)}>
-              <View style={styles.alarmInfo}>
-                <Text style={styles.alarmPlace}>{alarm.place}</Text>
-                <View style={styles.alarmMeta}>
-                  <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.time} 까지</Text>
-                  {alarm.transport === 'public'
-                    ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
-                    : <FontAwesome5 name="car-side" size={13} color="#F5A623" />
+          {group.map((alarm) => {
+            const isGroupActive = alarm.appointmentStatus !== 'WAITING';
+            return (
+            <SwipeableAlarmCard key={alarm.id} onDelete={async () => {
+              if (!alarm.appointmentId) return;
+              try {
+                const [detailRes, profileRes] = await Promise.all([
+                  appointmentsApi.getAppointment(alarm.appointmentId),
+                  membersApi.getMyProfile(),
+                ]);
+                if (!detailRes.success || !detailRes.data || !profileRes.data) return;
+                const myMemberId = profileRes.data.member_id;
+                const isHost = detailRes.data.participants.some(p => p.member_id === myMemberId && p.is_host);
+                if (isHost) {
+                  const res = await appointmentsApi.deleteAppointment(alarm.appointmentId);
+                  if (!res.success) { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
+                } else {
+                  const res = await appointmentsApi.removeParticipant(alarm.appointmentId, myMemberId);
+                  if (!res.success) { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
+                }
+                alarmService.stop(undefined, alarm.appointmentId);
+                const raw = await AsyncStorage.getItem(ACTIVE_APPOINTMENTS_KEY);
+                const ids: number[] = raw ? JSON.parse(raw) : [];
+                await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify(ids.filter(id => id !== alarm.appointmentId)));
+              } catch { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
+              setGroup(prev => prev.filter(a => a.id !== alarm.id));
+              bumpAlarmVersion();
+            }} icon="trash">
+              <TouchableOpacity
+                style={[styles.alarmCard, isGroupActive && { opacity: 0.45 }]}
+                activeOpacity={0.7}
+                onPress={() => {
+                  if (isGroupActive) {
+                    Platform.OS === 'android'
+                      ? ToastAndroid.show('약속이 진행 중에는 수정할 수 없어요.', ToastAndroid.SHORT)
+                      : Alert.alert('', '약속이 진행 중에는 수정할 수 없어요.');
+                    return;
                   }
+                  alarm.appointmentId && onGroupEdit(alarm.appointmentId, alarm);
+                }}>
+                <View style={styles.alarmInfo}>
+                  <Text style={styles.alarmPlace}>{alarm.place}</Text>
+                  <View style={styles.alarmMeta}>
+                    <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.time} 까지</Text>
+                    {alarm.transport === 'public'
+                      ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
+                      : <FontAwesome5 name="car-side" size={13} color="#F5A623" />
+                    }
+                  </View>
                 </View>
-              </View>
-              <View style={styles.cardRight}>
-                <View style={styles.memberBadge}>
-                  <Feather name="users" size={11} color="#555555" />
-                  <Text style={styles.memberCount}>{alarm.participantCount ?? 0}명</Text>
+                <View style={styles.cardRight}>
+                  <View style={styles.memberBadge}>
+                    <Feather name="users" size={11} color="#555555" />
+                    <Text style={styles.memberCount}>{alarm.participantCount ?? 0}명</Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => { if (alarm.appointmentId) { onArrivalPress(alarm.appointmentId); } }}
+                    disabled={!isGroupActive}
+                    style={[styles.arrivalBtn, isGroupActive && styles.arrivalBtnActive]}
+                  >
+                    <FontAwesome6 name="person-walking" size={14} color={isGroupActive ? '#FFFFFF' : '#CCCCCC'} />
+                  </TouchableOpacity>
+                  <Switch
+                    value={alarm.enabled}
+                    onValueChange={() => toggleAlarm(setGroup, alarm)}
+                    trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                    thumbColor="#FFFFFF"
+                  />
                 </View>
-                <TouchableOpacity
-                  onPress={onArrivalPress}
-                  disabled={!isArrivalActive}
-                  style={[styles.arrivalBtn, isArrivalActive && styles.arrivalBtnActive]}
-                >
-                  <FontAwesome6 name="person-walking" size={14} color={isArrivalActive ? '#FFFFFF' : '#CCCCCC'} />
-                </TouchableOpacity>
-                <Switch
-                  value={alarm.enabled}
-                  onValueChange={() => toggleAlarm(setGroup, alarm)}
-                  trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-                  thumbColor="#FFFFFF"
-                />
-              </View>
-            </TouchableOpacity>
-          ))}
+              </TouchableOpacity>
+            </SwipeableAlarmCard>
+            );
+          })}
         </View>
 
         {/* 귀가 섹션 */}
@@ -218,29 +279,42 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
             </TouchableOpacity>
           </View>
           {home.map((alarm) => (
-            <TouchableOpacity key={alarm.id} style={styles.alarmCard} activeOpacity={0.7}
-              onPress={() => alarm.journeyId && onHomeEdit(alarm.journeyId)}>
-              <View style={styles.alarmInfo}>
-                <Text style={styles.alarmPlace}>{alarm.place}</Text>
-                <View style={styles.alarmMeta}>
-                  <Text style={styles.alarmDeadline}>
-                    {alarm.isLastMode ? '막차 기준' : `${alarm.ampm} ${alarm.time} 까지`}
-                  </Text>
-                  {alarm.isLastMode || alarm.transport === 'public'
-                    ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
-                    : <FontAwesome5 name="car-side" size={13} color="#F5A623" />
-                  }
+            <SwipeableAlarmCard key={alarm.id} onDelete={async () => {
+              if (!alarm.journeyId) return;
+              try {
+                await journeysApi.deleteJourney(alarm.journeyId);
+                alarmService.stop(alarm.journeyId);
+                const raw = await AsyncStorage.getItem(ACTIVE_JOURNEYS_KEY);
+                const ids: number[] = raw ? JSON.parse(raw) : [];
+                await AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify(ids.filter(id => id !== alarm.journeyId)));
+              } catch { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
+              setHome(prev => prev.filter(a => a.id !== alarm.id));
+              bumpAlarmVersion();
+            }}>
+              <TouchableOpacity style={styles.alarmCard} activeOpacity={0.7}
+                onPress={() => alarm.journeyId && onHomeEdit(alarm.journeyId, alarm)}>
+                <View style={styles.alarmInfo}>
+                  <Text style={styles.alarmPlace}>{alarm.place}</Text>
+                  <View style={styles.alarmMeta}>
+                    <Text style={styles.alarmDeadline}>
+                      {alarm.isLastMode ? '막차 기준' : `${alarm.ampm} ${alarm.time} 까지`}
+                    </Text>
+                    {alarm.isLastMode || alarm.transport === 'public'
+                      ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
+                      : <FontAwesome5 name="car-side" size={13} color="#F5A623" />
+                    }
+                  </View>
                 </View>
-              </View>
-              <View style={styles.cardRight}>
-                <Switch
-                  value={alarm.enabled}
-                  onValueChange={() => toggleAlarm(setHome, alarm)}
-                  trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
-                  thumbColor="#FFFFFF"
-                />
-              </View>
-            </TouchableOpacity>
+                <View style={styles.cardRight}>
+                  <Switch
+                    value={alarm.enabled}
+                    onValueChange={() => toggleAlarm(setHome, alarm)}
+                    trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                    thumbColor="#FFFFFF"
+                  />
+                </View>
+              </TouchableOpacity>
+            </SwipeableAlarmCard>
           ))}
         </View>
       </ScrollView>
@@ -300,11 +374,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 10,
   },
-  groupTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
   sectionTitle: {
     fontSize: 20,
     fontWeight: '700',
@@ -319,14 +388,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     backgroundColor: '#F8F8F8',
     borderRadius: 14,
-    marginBottom: 8,
   },
   alarmInfo: { flex: 1, marginRight: 8, justifyContent: 'center' },
   cardRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   alarmPlace: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 5 },
   alarmDeadline: { fontSize: 13, fontWeight: '500', color: '#555555' },
   alarmMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  cardPlaceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 },
   memberBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#E8E8E8', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 10 },
   memberCount: { fontSize: 11, color: '#555555', fontWeight: '500' },
   arrivalBtn: {

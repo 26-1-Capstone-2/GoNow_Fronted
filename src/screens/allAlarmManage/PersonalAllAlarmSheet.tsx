@@ -324,7 +324,7 @@ export default function PersonalAllAlarmSheet({ onClose }: Props) {
         <>
           <View style={styles.header}>
             <TouchableOpacity style={styles.headerBtn} onPress={() => setView('list')}><Feather name="x" size={22} color="#1A1A1A" /></TouchableOpacity>
-            <Text style={styles.title}>{isEditMode ? '알람 수정' : '알람 추가'}</Text>
+            <Text style={styles.title}>{isEditMode ? '개인 알람 수정' : '개인 알람 추가'}</Text>
             <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={saving}>
               {saving ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Feather name="check" size={20} color="#FFFFFF" />}
             </TouchableOpacity>
