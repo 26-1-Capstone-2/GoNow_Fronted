@@ -22,6 +22,7 @@ import {
   Switch,
   Text,
   TextInput,
+  ToastAndroid,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -94,7 +95,7 @@ function fromAlarmItem(item: AlarmItem): GroupAlarm {
       isMe: i === 0,
     })),
     inviteCode: '',
-    isArrivalActive: item.appointment_status === 'IN_PROGRESS',
+    isArrivalActive: item.appointment_status !== 'WAITING',
     transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
     date: item.plan_date,
   };
@@ -198,7 +199,12 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
     }
   };
   const openEdit = async (alarm: GroupAlarm) => {
-    if (alarm.isArrivalActive) return;
+    if (alarm.isArrivalActive) {
+      Platform.OS === 'android'
+        ? ToastAndroid.show('약속이 진행 중에는 수정할 수 없어요.', ToastAndroid.SHORT)
+        : Alert.alert('', '약속이 진행 중에는 수정할 수 없어요.');
+      return;
+    }
     setEditAlarm(alarm);
     setView('edit');
     if (!alarm.appointmentId) return;
@@ -496,7 +502,7 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
                   }
                 } catch {}
               }}>
-                <TouchableOpacity style={styles.alarmCard} onPress={() => openEdit(alarm)} activeOpacity={0.7}>
+                <TouchableOpacity style={[styles.alarmCard, alarm.isArrivalActive && { opacity: 0.45 }]} onPress={() => openEdit(alarm)} activeOpacity={0.7}>
                   <View style={styles.alarmInfo}>
                     {alarm.date ? <Text style={styles.alarmDate}>{formatCardDate(alarm.date)}</Text> : null}
                     <Text style={styles.alarmPlace}>{alarm.place}</Text>

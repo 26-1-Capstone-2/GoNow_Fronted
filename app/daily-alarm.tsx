@@ -18,7 +18,7 @@ export default function DailyAlarmPage() {
 
   const { statuses, activeAppointmentId } = useAppointmentStatusStore();
   const isArrivalActive = activeAppointmentId != null
-    ? (statuses[activeAppointmentId] ?? 'WAITING') === 'ACTIVE'
+    ? (statuses[activeAppointmentId] ?? 'WAITING') !== 'WAITING'
     : false;
 
   return (
@@ -51,20 +51,10 @@ export default function DailyAlarmPage() {
           }}
         />
       )}
-      {showArrivalSheet && (
+      {showArrivalSheet && selectedGroupAlarm?.appointmentId != null && (
         <ArrivalDashboardSheet
           onClose={() => setShowArrivalSheet(false)}
-          destination={selectedGroupAlarm?.place ?? '홍대역 2번 출구'}
-          alarmTime={selectedGroupAlarm ? selectedGroupAlarm.ampm + ' ' + selectedGroupAlarm.hour + '시' : '오후 7시'}
-          members={selectedGroupAlarm?.members.map((m: any) => ({
-            ...m,
-            transport: m.transport ?? 'public',
-            arrivalTime: m.isMe ? '오후 7시 2분' : '오후 7시 3분',
-          })) ?? [
-            { id: '1', name: '가가가(본인)', isMe: true, transport: 'public', arrivalTime: '오후 7시 2분' },
-            { id: '2', name: '나나나', isMe: false, transport: 'public', arrivalTime: '오후 7시 3분' },
-            { id: '3', name: '다다다', isMe: false, transport: 'car', arrivalTime: '오후 6시 58분' },
-          ]}
+          appointmentId={selectedGroupAlarm.appointmentId}
         />
       )}
       {homeSheet && (
