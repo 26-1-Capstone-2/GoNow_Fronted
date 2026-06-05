@@ -58,7 +58,7 @@ TaskManager.defineTask(BACKGROUND_ALARM_TASK, async ({ data, error }) => {
   const isRunning = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK).catch(() => false);
   if (!isRunning) {
     await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-      accuracy: Location.Accuracy.Balanced,
+      accuracy: Location.Accuracy.High,
       timeInterval: 30000,
       distanceInterval: 0,
     }).then(() => {

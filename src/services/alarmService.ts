@@ -118,7 +118,7 @@ class AlarmRunner {
     this.polling = true;
     try {
       const loc = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
+        accuracy: Location.Accuracy.High,
       });
 
       if (this.target.alarmType === 'group') {

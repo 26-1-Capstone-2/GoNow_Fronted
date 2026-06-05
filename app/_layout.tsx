@@ -6,7 +6,7 @@ import { alarmService } from '@/src/services/alarmService';
 import * as Notifications from 'expo-notifications';
 import { BACKGROUND_ALARM_TASK } from '@/src/tasks/backgroundAlarmTask';
 import { ACTIVE_JOURNEYS_KEY, ACTIVE_APPOINTMENTS_KEY, DESIRED_INTERVALS_KEY, SESSION_READY_KEY, startBackgroundLocationUpdates, stopBackgroundLocationUpdates } from '@/src/tasks/backgroundLocationTask';
-import { getToken } from '@/src/store/authStore';
+import { getToken, useAuthStore, TOKEN_KEY } from '@/src/store/authStore';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -99,6 +99,10 @@ export default function RootLayout() {
 
       // init() 완료 — backgroundLocationTask가 이 시점부터 정상 동작 가능
       await AsyncStorage.setItem(SESSION_READY_KEY, '1');
+
+      // AsyncStorage에서 토큰 복원 → 자동 로그인
+      const savedToken = await AsyncStorage.getItem(TOKEN_KEY);
+      if (savedToken) useAuthStore.getState().setToken(savedToken);
 
       // AppState 감지 → active/background 3초 디바운스로 중복 발화 방지
       let lastForegroundAt = 0;

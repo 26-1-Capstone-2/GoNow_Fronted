@@ -1,3 +1,6 @@
+import { router } from 'expo-router';
+import { useAuthStore } from '@/src/store/authStore';
+
 const defaultBaseUrl = 'https://gonow-api.uk';
 
 export type ApiClientOptions = {
@@ -21,6 +24,11 @@ export function createApiClient(options: ApiClientOptions = {}) {
     if (token) headers.set('Authorization', `Bearer ${token}`);
 
     const res = await fetch(`${baseUrl}${path}`, { ...init, headers });
+    if (res.status === 401) {
+      useAuthStore.getState().setToken(null);
+      router.replace('/(auth)/login');
+      throw new Error('401 Unauthorized');
+    }
     if (!res.ok) {
       const text = await res.text();
       throw new Error(text || `HTTP ${res.status}`);
