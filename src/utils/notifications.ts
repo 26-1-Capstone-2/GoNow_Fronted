@@ -8,12 +8,37 @@ import notifee, {
   TriggerType,
 } from '@notifee/react-native';
 import { Alert, Linking, Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type AlarmStage = 1 | 2 | 3 | 4;
 export type AlarmType = 'personal' | 'group' | 'home';
 
 const CHANNEL_DEFAULT = 'gonow-alarm';
 const CHANNEL_URGENT = 'gonow-alarm-urgent';
+
+// 단계별 알람 trigger ID AsyncStorage 키 — journeyId/appointmentId 기준으로 저장
+const TRIGGER_IDS_KEY = 'gonow_trigger_ids'; // Record<'j_N' | 'a_N', string[]>
+
+async function saveTriggerIds(key: string, ids: string[]): Promise<void> {
+  try {
+    const raw = await AsyncStorage.getItem(TRIGGER_IDS_KEY);
+    const map: Record<string, string[]> = raw ? JSON.parse(raw) : {};
+    map[key] = [...(map[key] ?? []), ...ids]; // 누적 저장
+    await AsyncStorage.setItem(TRIGGER_IDS_KEY, JSON.stringify(map));
+  } catch {}
+}
+
+async function cancelAndRemoveTriggerIds(key: string): Promise<void> {
+  try {
+    const raw = await AsyncStorage.getItem(TRIGGER_IDS_KEY);
+    if (!raw) return;
+    const map: Record<string, string[]> = JSON.parse(raw);
+    const ids = map[key] ?? [];
+    await Promise.all(ids.map(id => notifee.cancelTriggerNotification(id).catch(() => {})));
+    delete map[key];
+    await AsyncStorage.setItem(TRIGGER_IDS_KEY, JSON.stringify(map));
+  } catch {}
+}
 
 // 백그라운드 이벤트 핸들러 (모듈 레벨 등록 필수)
 notifee.onBackgroundEvent(async ({ type, detail }) => {
@@ -24,7 +49,17 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
 
     if (notifId) await notifee.cancelNotification(notifId);
 
+    const journeyId = data?.journeyId ? Number(data.journeyId) : undefined;
+    const appointmentId = data?.appointmentId ? Number(data.appointmentId) : undefined;
+    const storageKey = journeyId != null ? `j_${journeyId}` : appointmentId != null ? `a_${appointmentId}` : null;
+
+    if (actionId === 'dismiss' && storageKey) {
+      // X 버튼 — 남은 단계별 알람 취소
+      await cancelAndRemoveTriggerIds(storageKey);
+    }
+
     if (actionId === 'arrival-yes') {
+      if (storageKey) await cancelAndRemoveTriggerIds(storageKey);
       if (data?.journeyId) {
         const { createJourneysApi } = await import('@/src/api/journeys');
         await createJourneysApi().arrive(Number(data.journeyId));
@@ -325,6 +360,9 @@ export async function scheduleFutureAlarm(
     );
     ids.push(id);
   }
+  // AsyncStorage에 trigger ID 저장 → 백그라운드 dismiss/arrival-yes 시 취소 가능
+  const storageKey = journeyId != null ? `j_${journeyId}` : appointmentId != null ? `a_${appointmentId}` : null;
+  if (storageKey) await saveTriggerIds(storageKey, ids);
   return ids;
 }
 
