@@ -164,9 +164,14 @@ function buildAlarmBody(
   minutesRemaining: number | undefined,
 ): string {
   const stageMsg = STAGE_MESSAGES[type][stage];
-  const message = (whichStation && minutesRemaining != null && minutesRemaining > 0)
-    ? `${whichStation} 탑승까지 ${minutesRemaining}분 남았어요.`
-    : stageMsg;
+  let message: string;
+  if (whichStation && minutesRemaining != null && minutesRemaining > 0) {
+    message = `${whichStation} 탑승까지 ${minutesRemaining}분 남았어요.`;
+  } else if (whichStation && stage === 4) {
+    message = `${whichStation}으로 즉시 출발하세요!`;
+  } else {
+    message = stageMsg;
+  }
   return destination ? `[${destination}] ${message}` : message;
 }
 
@@ -321,7 +326,7 @@ export async function sendLastTransitAlarm(
 
 export async function scheduleFutureAlarm(
   type: AlarmType,
-  stage: Exclude<AlarmStage, 1>,
+  stage: AlarmStage,
   destination: string | undefined,
   triggerTimestamp: number,
   journeyId?: number,
@@ -335,41 +340,40 @@ export async function scheduleFutureAlarm(
   const body = buildAlarmBody(stage, type, destination, whichStation, minutesRemaining);
   const repeatCount = stage === 4 ? 3 : 1;
   const ids: string[] = [];
+  const isPast = triggerTimestamp <= Date.now();
 
   for (let i = 0; i < repeatCount; i++) {
-    const trigger: TimestampTrigger = {
-      type: TriggerType.TIMESTAMP,
-      timestamp: triggerTimestamp + i * 2500,
+    const notifBody = stage === 4 ? `${body} (${i + 1}/${repeatCount})` : body;
+    const notifData = {
+      ...(journeyId != null && { journeyId: String(journeyId) }),
+      ...(appointmentId != null && { appointmentId: String(appointmentId) }),
     };
-    const id = await notifee.createTriggerNotification(
-      {
-        title,
-        body: stage === 4 ? `${body} (${i + 1}/${repeatCount})` : body,
-        data: {
-          ...(journeyId != null && { journeyId: String(journeyId) }),
-          ...(appointmentId != null && { appointmentId: String(appointmentId) }),
-        },
-        android: {
-          channelId: stage >= 3 ? CHANNEL_URGENT : CHANNEL_DEFAULT,
-          importance: AndroidImportance.HIGH,
-          category: AndroidCategory.ALARM,
-          visibility: AndroidVisibility.PUBLIC,
-          sound: config.sound ? 'default' : undefined,
-          vibrationPattern: config.vibrate ? [100, 500, 200, 500, 200, 500] : undefined,
-          fullScreenAction: { id: 'default', launchActivity: 'default' },
-          pressAction: { id: 'default' },
-          ...(stage <= 3 && {
-            actions: [{ title: '✕ 닫기', pressAction: { id: 'dismiss' } }],
-          }),
-        },
-      },
-      trigger,
-    );
+    const androidConfig = {
+      channelId: stage >= 3 ? CHANNEL_URGENT : CHANNEL_DEFAULT,
+      importance: AndroidImportance.HIGH,
+      category: AndroidCategory.ALARM,
+      visibility: AndroidVisibility.PUBLIC,
+      sound: config.sound ? 'default' : undefined,
+      vibrationPattern: config.vibrate ? [100, 500, 200, 500, 200, 500] : undefined,
+      fullScreenAction: { id: 'default', launchActivity: 'default' },
+      pressAction: { id: 'default' },
+      ...(stage <= 3 && { actions: [{ title: '✕ 닫기', pressAction: { id: 'dismiss' } }] }),
+    };
+
+    let id: string;
+    if (isPast) {
+      // 과거 시각 → 즉시 발송
+      if (i > 0) await new Promise<void>((res) => setTimeout(res, 2000));
+      id = await notifee.displayNotification({ title, body: notifBody, data: notifData, android: androidConfig });
+    } else {
+      const trigger: TimestampTrigger = { type: TriggerType.TIMESTAMP, timestamp: triggerTimestamp + i * 2500 };
+      id = await notifee.createTriggerNotification({ title, body: notifBody, data: notifData, android: androidConfig }, trigger);
+    }
     ids.push(id);
   }
-  // AsyncStorage에 trigger ID 저장 → 백그라운드 dismiss/arrival-yes 시 취소 가능
+
   const storageKey = journeyId != null ? `j_${journeyId}` : appointmentId != null ? `a_${appointmentId}` : null;
-  if (storageKey) await saveTriggerIds(storageKey, ids);
+  if (storageKey && !isPast) await saveTriggerIds(storageKey, ids);
   return ids;
 }
 

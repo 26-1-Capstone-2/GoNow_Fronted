@@ -6,12 +6,13 @@ import DailyAlarmScreen from '@/src/screens/main/DailyAlarmScreen';
 import { useState } from 'react';
 import { View } from 'react-native';
 
-type SheetState = { mode: 'add' | 'create' | 'edit'; id?: number; alarm?: any } | null;
+type PersonalHomeSheetState = { mode: 'add' | 'edit'; id?: number; alarm?: any } | null;
+type GroupSheetState = { mode: 'add' | 'create' | 'edit'; id?: number; alarm?: any } | null;
 
 export default function DailyAlarmPage() {
-  const [personalSheet, setPersonalSheet] = useState<SheetState>(null);
-  const [groupSheet, setGroupSheet] = useState<SheetState>(null);
-  const [homeSheet, setHomeSheet] = useState<SheetState>(null);
+  const [personalSheet, setPersonalSheet] = useState<PersonalHomeSheetState>(null);
+  const [groupSheet, setGroupSheet] = useState<GroupSheetState>(null);
+  const [homeSheet, setHomeSheet] = useState<PersonalHomeSheetState>(null);
   const [showArrivalSheet, setShowArrivalSheet] = useState(false);
   const [selectedGroupAlarm, setSelectedGroupAlarm] = useState<any>(null);
 

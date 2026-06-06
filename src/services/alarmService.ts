@@ -1,11 +1,9 @@
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { AppState } from 'react-native';
 import { createJourneysApi, JourneyStatus } from '@/src/api/journeys';
 import { createAppointmentsApi } from '@/src/api/appointments';
 import { useAppointmentStatusStore } from '@/src/store/appointmentStatusStore';
 import {
-  sendAlarm,
   scheduleFutureAlarm,
   sendArrivalCheckAlarm,
   sendArrivalAlarm,
@@ -14,10 +12,7 @@ import {
   AlarmType,
 } from '@/src/utils/notifications';
 import {
-  ACTIVE_JOURNEYS_KEY,
-  ACTIVE_APPOINTMENTS_KEY,
   DESIRED_INTERVALS_KEY,
-  startBackgroundLocationUpdates,
   stopBackgroundLocationUpdates,
 } from '@/src/tasks/backgroundLocationTask';
 
@@ -30,20 +25,23 @@ interface AlarmTarget {
   destination: string;
   journeyId?: number;
   appointmentId?: number;
-  isActive?: boolean; // false면 단계별 출발 알람 억제 (그룹 스위치 OFF)
+  isActive?: boolean;
 }
 
 class AlarmRunner {
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private target: AlarmTarget | null = null;
-  private status: JourneyStatus = 'SCHEDULED';
   private intervalSec = DEFAULT_INTERVAL;
-  private stagingStarted = false;
+  stagingStarted = false;
   private movingSent = false;
   private arrivedSent = false;
   private nearDestSent = false;
-  private isActive = true; // false면 단계별 출발 알람 억제
-  private polling = false; // poll() 진행 중 여부 — 중복 poll 방지
+  isActive = true;
+  lastPreparationTime = 0;
+  lastWhichStation: string | null | undefined = undefined;
+  lastDepartureAlarmTime: string | null | undefined = undefined;
+  status: JourneyStatus = 'SCHEDULED';
+  private polling = false;
   private onFinish?: () => void;
 
   setOnFinish(cb: () => void): void {
@@ -53,9 +51,6 @@ class AlarmRunner {
   async start(target: AlarmTarget): Promise<void> {
     const id = target.journeyId ?? `apt${target.appointmentId}`;
     console.log(`[alarmService.start] 시작 — type:${target.alarmType} id:${id} dest:${target.destination}`);
-    // this.stop() 제거 — AlarmManager.start()에서 이미 기존 runner를 정리함
-    // 여기서 stop()을 호출하면 onFinish → runners.delete(k)가 트리거되어
-    // starting 가드가 있어도 중복 진입이 가능해지는 race condition 발생
     this.target = target;
     this.status = 'SCHEDULED';
     this.stagingStarted = false;
@@ -65,20 +60,16 @@ class AlarmRunner {
     this.intervalSec = DEFAULT_INTERVAL;
     this.isActive = target.isActive !== false;
     this.polling = false;
+    this.lastPreparationTime = 0;
+    this.lastWhichStation = undefined;
+    this.lastDepartureAlarmTime = undefined;
 
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== 'granted') {
       console.log(`[alarmService.start] GPS 권한 없음 — id:${id} 폴링 시작 불가`);
       return;
     }
-
-    // startBackgroundLocationUpdates는 _layout.tsx AppState active 핸들러에서 일괄 호출
-    // 여기서 호출하면 동시 start() 실행 시 race condition으로 중복 완료됨
-
-    // AsyncStorage ID 등록은 백그라운드 진입 시 _layout.tsx background 핸들러에서 처리
-    // (포그라운드 폴링 중에는 불필요, 타이밍 문제로 backgroundLocationTask가 ID 없음 오류 방지)
     console.log(`[alarmService.start] 완료 — id:${id} 폴링 시작`);
-
     await this.poll();
   }
 
@@ -118,10 +109,7 @@ class AlarmRunner {
     }
     this.polling = true;
     try {
-      const loc = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
-
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       if (this.target.alarmType === 'group') {
         await this.pollGroup(loc.coords.latitude, loc.coords.longitude);
       } else {
@@ -138,23 +126,14 @@ class AlarmRunner {
 
   private async pollPersonal(lat: number, lng: number): Promise<void> {
     if (!this.target?.journeyId) return;
-
     console.log(`[포그라운드] /location 호출 — journeyId:${this.target.journeyId} (${lat.toFixed(5)}, ${lng.toFixed(5)}) interval:${this.intervalSec}s`);
     try {
       const res = await journeysApi.updateLocation(this.target.journeyId, lat, lng);
-      if (!res.data) {
-        console.log(`[포그라운드] /location 응답 data 없음 — journeyId:${this.target.journeyId}`);
-        return;
-      }
-
+      if (!res.data) { console.log(`[포그라운드] /location 응답 data 없음 — journeyId:${this.target.journeyId}`); return; }
       const { journey_status, preparation_time, interval, which_station, departure_alarm_time } = res.data;
-      console.log(`[포그라운드] /location 응답 — journeyId:${this.target.journeyId} status:${journey_status} interval:${interval}`);
-
+      console.log(`[포그라운드] /location 응답 — journeyId:${this.target.journeyId} status:${journey_status} interval:${interval} which_station:${which_station} departure_alarm_time:${departure_alarm_time}`);
       if (interval !== null) {
-        // TODO: 테스트 완료 후 아래 두 줄 원복 (interval 갱신 + AsyncStorage 저장)
-        // console.log(`[포그라운드] interval 갱신 — journeyId:${this.target.journeyId} ${this.intervalSec}s → ${interval}s`);
-        // this.intervalSec = interval;
-        this.intervalSec = 30; // 테스트용 30초 고정
+        this.intervalSec = interval;
         const key = `j_${this.target!.journeyId}`;
         AsyncStorage.getItem(DESIRED_INTERVALS_KEY).then(raw => {
           const intervals = raw ? JSON.parse(raw) : {};
@@ -179,25 +158,15 @@ class AlarmRunner {
 
   private async pollGroup(lat: number, lng: number): Promise<void> {
     if (!this.target?.appointmentId) return;
-
     console.log(`[포그라운드] /location 호출 — appointmentId:${this.target.appointmentId} (${lat.toFixed(5)}, ${lng.toFixed(5)}) interval:${this.intervalSec}s`);
     try {
       const res = await appointmentsApi.updateParticipantLocation(this.target.appointmentId, lat, lng);
-      if (!res.data) {
-        console.log(`[포그라운드] /location 응답 data 없음 — appointmentId:${this.target.appointmentId}`);
-        return;
-      }
-
+      if (!res.data) { console.log(`[포그라운드] /location 응답 data 없음 — appointmentId:${this.target.appointmentId}`); return; }
       const { participant_status, appointment_status, estimated_arrival, preparation_time, interval, which_station, departure_alarm_time } = res.data;
-      console.log(`[포그라운드] /location 응답 — appointmentId:${this.target.appointmentId} participantStatus:${participant_status} appointmentStatus:${appointment_status} interval:${interval}`);
-
+      console.log(`[포그라운드] /location 응답 — appointmentId:${this.target.appointmentId} participantStatus:${participant_status} appointmentStatus:${appointment_status} interval:${interval} which_station:${which_station} departure_alarm_time:${departure_alarm_time}`);
       useAppointmentStatusStore.getState().setStatus(this.target.appointmentId, appointment_status);
-
       if (interval !== null) {
-        // TODO: 테스트 완료 후 아래 두 줄 원복
-        // console.log(`[포그라운드] interval 갱신 — appointmentId:${this.target.appointmentId} ${this.intervalSec}s → ${interval}s`);
-        // this.intervalSec = interval;
-        this.intervalSec = 30; // 테스트용 30초 고정
+        this.intervalSec = interval;
         const key = `a_${this.target!.appointmentId}`;
         AsyncStorage.getItem(DESIRED_INTERVALS_KEY).then(raw => {
           const intervals = raw ? JSON.parse(raw) : {};
@@ -221,19 +190,24 @@ class AlarmRunner {
   }
 
   private async handlePersonalStatus(newStatus: JourneyStatus, preparationTime: number, whichStation?: string | null, departureAlarmTime?: string | null): Promise<void> {
-    if (newStatus === 'READY' && this.status !== 'READY') {
-      console.log(`[alarmService] 상태전이 ${this.status} → READY — journeyId:${this.target?.journeyId}`);
-      this.status = newStatus;
-      // READY 복귀 시 stagingStarted 리셋 → 다시 DEPARTING 되면 알람 재발송
-      if (this.stagingStarted) {
-        this.stagingStarted = false;
-        console.log(`[alarmService] READY 복귀 — stagingStarted 리셋 journeyId:${this.target?.journeyId}`);
+    if (newStatus === 'READY') {
+      if (this.status !== 'READY') {
+        console.log(`[alarmService] 상태전이 ${this.status} → READY — journeyId:${this.target?.journeyId}`);
+        this.status = newStatus;
+        if (this.stagingStarted) {
+          this.stagingStarted = false;
+          console.log(`[alarmService] READY 복귀 — stagingStarted 리셋 journeyId:${this.target?.journeyId}`);
+        }
+        this.poll();
       }
-      this.poll();
+      // whichStation이 있을 때만 재등록 — plask 호출된 응답에만 which_station이 있음
+      if (departureAlarmTime && whichStation != null) {
+        this.cancelRemainingStages();
+        await this.scheduleAlarmStages(preparationTime, whichStation, departureAlarmTime);
+      }
       return;
     }
 
-    // DB가 SCHEDULED로 리셋됐거나 날짜가 미래로 변경된 경우 폴링 중단
     if (newStatus === 'SCHEDULED' && this.status !== 'SCHEDULED') {
       console.log(`[alarmService] 서버 응답 SCHEDULED — journeyId:${this.target?.journeyId} 폴링 중단`);
       this.stop();
@@ -246,30 +220,32 @@ class AlarmRunner {
 
       if (newStatus === 'DEPARTING' && !this.stagingStarted) {
         this.stagingStarted = true;
-        console.log(`[alarmService] 단계별 알람 스케줄 시작 — journeyId:${this.target?.journeyId} preparationTime:${preparationTime}분`);
-        await this.scheduleAlarmStages(preparationTime, whichStation);
+        if (departureAlarmTime) {
+          this.cancelRemainingStages(); // 기존 알람 취소 후 재등록 (READY 등록분 포함)
+          console.log(`[alarmService] DEPARTING 진입 — journeyId:${this.target?.journeyId} scheduleAlarmStages 호출`);
+          await this.scheduleAlarmStages(preparationTime, whichStation, departureAlarmTime);
+        }
       }
 
       if (newStatus === 'MOVING') {
-        this.cancelRemainingStages(); // 출발 확인 — 남은 단계별 알람 취소
+        this.cancelRemainingStages();
         console.log(`[alarmService] MOVING — 단계별 알람 취소 journeyId:${this.target?.journeyId}`);
       }
 
       if (newStatus === 'NEARDEST' && !this.nearDestSent) {
         this.nearDestSent = true;
-        this.cancelRemainingStages(); // 목적지 근처 도달 — 남은 단계별 알람 취소
-        // NEARDEST 상태에서 P >= Q 이면 단계별 알람 발송 (일찍 도착했지만 출발 알람 시각 도달)
+        // NEARDEST 진입 시 출발 알람 취소 안 함 — 출발 알람 시각 되면 그대로 울려야 함
         if (!this.stagingStarted && departureAlarmTime && new Date() >= new Date(departureAlarmTime)) {
           this.stagingStarted = true;
           console.log(`[alarmService] NEARDEST P>=Q — 단계별 알람 발송 journeyId:${this.target?.journeyId}`);
-          await this.scheduleAlarmStages(preparationTime, whichStation);
+          await this.scheduleAlarmStages(preparationTime, whichStation, departureAlarmTime);
         }
         console.log(`[alarmService] NEARDEST 도착 확인 알람 발송 — journeyId:${this.target?.journeyId}`);
         sendArrivalCheckAlarm('나', this.target!.destination, this.target?.journeyId);
       }
 
       if (newStatus === 'ARRIVED') {
-        this.cancelRemainingStages(); // 도착 — 남은 단계별 알람 취소
+        this.cancelRemainingStages();
         console.log(`[alarmService] ARRIVED → 폴링 종료 — journeyId:${this.target?.journeyId}`);
         this.stop();
       }
@@ -277,19 +253,24 @@ class AlarmRunner {
   }
 
   private async handleGroupStatus(newStatus: JourneyStatus, preparationTime: number, estimatedArrival: string, whichStation?: string | null, departureAlarmTime?: string | null): Promise<void> {
-    if (newStatus === 'READY' && this.status !== 'READY') {
-      console.log(`[alarmService] 상태전이 ${this.status} → READY — appointmentId:${this.target?.appointmentId}`);
-      this.status = newStatus;
-      // READY 복귀 시 stagingStarted 리셋 → 다시 DEPARTING 되면 알람 재발송
-      if (this.stagingStarted) {
-        this.stagingStarted = false;
-        console.log(`[alarmService] READY 복귀 — stagingStarted 리셋 appointmentId:${this.target?.appointmentId}`);
+    if (newStatus === 'READY') {
+      if (this.status !== 'READY') {
+        console.log(`[alarmService] 상태전이 ${this.status} → READY — appointmentId:${this.target?.appointmentId}`);
+        this.status = newStatus;
+        if (this.stagingStarted) {
+          this.stagingStarted = false;
+          console.log(`[alarmService] READY 복귀 — stagingStarted 리셋 appointmentId:${this.target?.appointmentId}`);
+        }
+        this.poll();
       }
-      this.poll();
+      // whichStation이 있을 때만 재등록 — flask 호출된 응답에만 which_station이 있음
+      if (departureAlarmTime && whichStation != null && this.isActive) {
+        this.cancelRemainingStages();
+        await this.scheduleAlarmStages(preparationTime, whichStation, departureAlarmTime);
+      }
       return;
     }
 
-    // DB가 SCHEDULED로 리셋됐거나 날짜가 미래로 변경된 경우 폴링 중단
     if (newStatus === 'SCHEDULED' && this.status !== 'SCHEDULED') {
       console.log(`[alarmService] 서버 응답 SCHEDULED — appointmentId:${this.target?.appointmentId} 폴링 중단`);
       this.stop();
@@ -302,17 +283,19 @@ class AlarmRunner {
 
       if (newStatus === 'DEPARTING' && !this.stagingStarted) {
         this.stagingStarted = true;
-        if (this.isActive) {
-          console.log(`[alarmService] 단계별 알람 스케줄 시작 — appointmentId:${this.target?.appointmentId} preparationTime:${preparationTime}분`);
-          await this.scheduleAlarmStages(preparationTime, whichStation);
-        } else {
-          console.log(`[alarmService] DEPARTING 진입 — appointmentId:${this.target?.appointmentId} 알람 스위치 OFF → 알람 억제`);
+        this.lastPreparationTime = preparationTime;
+        this.lastWhichStation = whichStation;
+        this.lastDepartureAlarmTime = departureAlarmTime;
+        if (departureAlarmTime && this.isActive) {
+          this.cancelRemainingStages(); // 기존 알람 취소 후 재등록 (READY 등록분 포함)
+          console.log(`[alarmService] DEPARTING 진입 — appointmentId:${this.target?.appointmentId} scheduleAlarmStages 호출`);
+          await this.scheduleAlarmStages(preparationTime, whichStation, departureAlarmTime);
         }
       }
 
       if (newStatus === 'MOVING' && !this.movingSent) {
         this.movingSent = true;
-        this.cancelRemainingStages(); // 출발 확인 — 남은 단계별 알람 취소
+        this.cancelRemainingStages();
         if (this.isActive) {
           const arrivalTime = formatEstimatedArrival(estimatedArrival);
           console.log(`[alarmService] MOVING — 단계별 알람 취소 + 도착예정 알람 발송 appointmentId:${this.target?.appointmentId} ETA:${arrivalTime}`);
@@ -322,12 +305,11 @@ class AlarmRunner {
 
       if (newStatus === 'NEARDEST' && !this.nearDestSent) {
         this.nearDestSent = true;
-        this.cancelRemainingStages(); // 목적지 근처 도달 — 남은 단계별 알람 취소
-        // NEARDEST 상태에서 P >= Q 이면 단계별 알람 발송
+        // NEARDEST 진입 시 출발 알람 취소 안 함 — 출발 알람 시각 되면 그대로 울려야 함
         if (!this.stagingStarted && this.isActive && departureAlarmTime && new Date() >= new Date(departureAlarmTime)) {
           this.stagingStarted = true;
           console.log(`[alarmService] NEARDEST P>=Q — 단계별 알람 발송 appointmentId:${this.target?.appointmentId}`);
-          await this.scheduleAlarmStages(preparationTime, whichStation);
+          await this.scheduleAlarmStages(preparationTime, whichStation, departureAlarmTime);
         }
         if (this.isActive) {
           console.log(`[alarmService] NEARDEST 도착 확인 알람 발송 — appointmentId:${this.target?.appointmentId}`);
@@ -337,7 +319,7 @@ class AlarmRunner {
 
       if (newStatus === 'ARRIVED' && !this.arrivedSent) {
         this.arrivedSent = true;
-        this.cancelRemainingStages(); // 도착 — 남은 단계별 알람 취소
+        this.cancelRemainingStages();
         if (this.isActive) {
           const arrivalTime = formatEstimatedArrival(estimatedArrival);
           console.log(`[alarmService] ARRIVED — 도착완료 알람 발송 appointmentId:${this.target?.appointmentId} time:${arrivalTime}`);
@@ -348,34 +330,44 @@ class AlarmRunner {
     }
   }
 
-  private async scheduleAlarmStages(preparationTime: number, whichStation?: string | null): Promise<void> {
+  async scheduleAlarmStages(preparationTime: number, whichStation?: string | null, departureAlarmTime?: string | null): Promise<void> {
     const stepMs = preparationTime * 60 * 1000 * 0.25;
     const type = this.target!.alarmType;
     const dest = this.target!.destination;
     const journeyId = this.target!.journeyId;
     const appointmentId = this.target!.appointmentId;
 
-    const mins = whichStation
-      ? (f: number) => Math.round(preparationTime * f)
-      : () => undefined;
+    const alarmBase = new Date(departureAlarmTime!).getTime();
+    const stepTimes = [
+      alarmBase,
+      alarmBase + stepMs,
+      alarmBase + stepMs * 2,
+      alarmBase + stepMs * 3,
+    ];
+    const now = Date.now();
 
-    // notifee 네이티브 메모리 충돌 방지 — 순차 실행 (Promise.all 동시 호출 시 SIGABRT 크래시)
-    const step1At = new Date().toLocaleTimeString('ko-KR', { hour12: false });
-    const step2At = new Date(Date.now() + stepMs).toLocaleTimeString('ko-KR', { hour12: false });
-    const step3At = new Date(Date.now() + stepMs * 2).toLocaleTimeString('ko-KR', { hour12: false });
-    const step4At = new Date(Date.now() + stepMs * 3).toLocaleTimeString('ko-KR', { hour12: false });
-    console.log(`[알람] 단계별 알람 예정 — 1단계:${step1At}(즉시) 2단계:${step2At} 3단계:${step3At} 4단계:${step4At}`);
+    // 각 단계에서 표시할 분: 1단계=100%, 2단계=75%, 3단계=50%, 4단계=25%
+    const ratios = [1.0, 0.75, 0.5, 0.25];
+    const mins = (idx: number) =>
+      whichStation ? Math.max(0, Math.round(preparationTime * ratios[idx])) : undefined;
+
+    // 현재 시각 기준으로 시작 단계 결정 — 아직 안 지난 첫 번째 단계부터 시작
+    // 모든 단계가 지났으면 4단계(idx=3) 즉시 발송
+    const foundIdx = stepTimes.findIndex((t) => now < t);
+    const startIdx = foundIdx === -1 ? 3 : foundIdx;
+
+    console.log(`[알람] ${startIdx + 1}단계부터 예약 — 1단계:${new Date(stepTimes[0]).toLocaleTimeString('ko-KR', { hour12: false })} 2단계:${new Date(stepTimes[1]).toLocaleTimeString('ko-KR', { hour12: false })} 3단계:${new Date(stepTimes[2]).toLocaleTimeString('ko-KR', { hour12: false })} 4단계:${new Date(stepTimes[3]).toLocaleTimeString('ko-KR', { hour12: false })}`);
 
     try {
-      console.log(`[알람] 1단계 발송`);
-      await sendAlarm(type, 1, dest, whichStation, mins(1.0), journeyId, appointmentId);
-      console.log(`[알람] 2단계 등록 @ ${step2At}`);
-      const id2 = await scheduleFutureAlarm(type, 2, dest, Date.now() + stepMs, journeyId, appointmentId, whichStation, mins(0.75));
-      console.log(`[알람] 3단계 등록 @ ${step3At}`);
-      const id3 = await scheduleFutureAlarm(type, 3, dest, Date.now() + stepMs * 2, journeyId, appointmentId, whichStation, mins(0.5));
-      console.log(`[알람] 4단계 등록 @ ${step4At}`);
-      const id4 = await scheduleFutureAlarm(type, 4, dest, Date.now() + stepMs * 3, journeyId, appointmentId, whichStation, mins(0.25));
-      console.log(`[알람] 단계별 알람 등록 완료 — ids:${[...id2, ...id3, ...id4]}`);
+      const allIds: string[] = [];
+      for (let i = startIdx; i < 4; i++) {
+        const stage = (i + 1) as 1 | 2 | 3 | 4;
+        // 4단계(i=3)이고 시각이 이미 지났으면 minutesRemaining=0 → 긴급 문구 표시
+        const minutesRemaining = (i === 3 && now >= stepTimes[3]) ? 0 : mins(i);
+        const ids = await scheduleFutureAlarm(type, stage, dest, stepTimes[i], journeyId, appointmentId, whichStation, minutesRemaining);
+        allIds.push(...ids);
+      }
+      console.log(`[알람] 단계별 알람 등록 완료 — ids:${allIds}`);
     } catch (e) {
       console.log('[알람] 단계별 알람 등록 실패', e);
     }
@@ -384,7 +376,7 @@ class AlarmRunner {
 
 class AlarmManager {
   private runners = new Map<string, AlarmRunner>();
-  private starting = new Set<string>(); // start() 진행 중인 key — 중복 진입 방지
+  private starting = new Set<string>();
 
   private key(journeyId?: number, appointmentId?: number): string {
     return journeyId != null ? `j_${journeyId}` : `a_${appointmentId}`;
@@ -400,7 +392,6 @@ class AlarmManager {
     try {
       if (this.runners.has(k)) {
         console.log(`[AlarmManager.start] 기존 runner 교체 — key:${k}`);
-        // onFinish 제거 후 stop — runners.delete가 트리거되지 않도록
         const old = this.runners.get(k)!;
         old.setOnFinish(() => {});
         old.stop();
@@ -462,6 +453,24 @@ class AlarmManager {
   cancelRemainingStages(journeyId?: number, appointmentId?: number): void {
     const k = this.key(journeyId, appointmentId);
     this.runners.get(k)?.cancelRemainingStages();
+  }
+
+  setActive(isActive: boolean, journeyId?: number, appointmentId?: number): void {
+    const k = this.key(journeyId, appointmentId);
+    const runner = this.runners.get(k);
+    if (!runner) return;
+    runner.isActive = isActive;
+    if (!isActive) {
+      runner.cancelRemainingStages();
+    } else if (runner.status === 'DEPARTING') {
+      runner.cancelRemainingStages();
+      runner.stagingStarted = false;
+      runner.scheduleAlarmStages(
+        runner.lastPreparationTime,
+        runner.lastWhichStation,
+        runner.lastDepartureAlarmTime,
+      ).then(() => { runner.stagingStarted = true; }).catch(() => {});
+    }
   }
 }
 

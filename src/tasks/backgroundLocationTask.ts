@@ -3,7 +3,7 @@ import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState } from 'react-native';
 import { TOKEN_KEY } from '@/src/store/authStore';
-import { sendAlarm, scheduleFutureAlarm, AlarmType } from '@/src/utils/notifications';
+import { sendAlarm, scheduleFutureAlarm, cancelStagedAlarms, AlarmType } from '@/src/utils/notifications';
 
 export const BACKGROUND_LOCATION_TASK = 'BACKGROUND-LOCATION-TASK';
 export const ACTIVE_JOURNEYS_KEY = 'gonow_active_journeys';
@@ -77,6 +77,8 @@ export async function stopBackgroundLocationUpdates(): Promise<void> {
   console.log('[stopBackgroundLocationUpdates] 완료 — 상단바 알림 제거됨');
 }
 
+let _taskRunning = false;
+
 TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   const ts = new Date().toLocaleTimeString('ko-KR', { hour12: false });
   console.log(`[BackgroundLocation] 태스크 발화 @ ${ts}`);
@@ -84,6 +86,12 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
     console.log('[BackgroundLocation] 에러:', JSON.stringify(error));
     return;
   }
+  if (_taskRunning) {
+    console.log('[BackgroundLocation] 이전 태스크 실행 중 — skip');
+    return;
+  }
+  _taskRunning = true;
+  try {
   // init() 완료 전이면 이전 세션 데이터가 남아있을 수 있으므로 skip
   const sessionReady = await AsyncStorage.getItem(SESSION_READY_KEY);
   if (sessionReady !== '1') {
@@ -156,7 +164,7 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
       try {
         console.log(`[백그라운드] /location 호출 — journeyId:${id}`);
         const res = await patchLocation(`/api/journeys/${id}/location`, token, lat, lng);
-        const { journey_status, preparation_time, journey_type, dest_name, which_station, interval } = res?.data ?? {};
+        const { journey_status, preparation_time, journey_type, dest_name, which_station, interval, departure_alarm_time } = res?.data ?? {};
         console.log(`[백그라운드] /location 응답 — journeyId:${id} status:${journey_status} interval:${interval}`);
         const type: AlarmType = journey_type === 'HOME' ? 'home' : 'personal';
 
@@ -165,17 +173,24 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
           desiredIntervals[key] = interval;
         }
 
-        if (journey_status === 'DEPARTING' && !alarmSentThisRun.has(key)) {
+        if (journey_status === 'DEPARTING' && !alarmSentThisRun.has(key) && which_station != null) {
           alarmSentThisRun.add(key);
           console.log(`[백그라운드] DEPARTING 진입 — journeyId:${id} 단계별 알람 발송`);
+          await cancelStagedAlarms(key); // 포그라운드 등록분 취소 후 재등록
           const pt = preparation_time ?? 0;
           const stepMs = pt * 60 * 1000 * 0.25;
-          const mins = (f: number) => which_station ? Math.round(pt * f) : undefined;
-          // notifee 네이티브 메모리 충돌 방지 — 순차 실행
-          await sendAlarm(type, 1, dest_name, which_station, mins(1.0), id, undefined);
-          await scheduleFutureAlarm(type, 2, dest_name, Date.now() + stepMs, id, undefined, which_station, mins(0.75));
-          await scheduleFutureAlarm(type, 3, dest_name, Date.now() + stepMs * 2, id, undefined, which_station, mins(0.5));
-          await scheduleFutureAlarm(type, 4, dest_name, Date.now() + stepMs * 3, id, undefined, which_station, mins(0.25));
+          const ratios = [1.0, 0.75, 0.5, 0.25];
+          const mins = (idx: number) => which_station ? Math.max(0, Math.round(pt * ratios[idx])) : undefined;
+          const alarmBase = departure_alarm_time ? new Date(departure_alarm_time).getTime() : Date.now();
+          const stepTimes = [alarmBase, alarmBase + stepMs, alarmBase + stepMs * 2, alarmBase + stepMs * 3];
+          const now = Date.now();
+          const foundIdx = stepTimes.findIndex((t) => now < t);
+          const startIdx = foundIdx === -1 ? 3 : foundIdx;
+          for (let i = startIdx; i < 4; i++) {
+            const stage = (i + 1) as 1 | 2 | 3 | 4;
+            const minutesRemaining = (i === 3 && now >= stepTimes[3]) ? 0 : mins(i);
+            await scheduleFutureAlarm(type, stage, dest_name, stepTimes[i], id, undefined, which_station, minutesRemaining);
+          }
         }
 
         if (journey_status === 'ARRIVED') {
@@ -211,7 +226,7 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
       try {
         console.log(`[백그라운드] /location 호출 — appointmentId:${id}`);
         const res = await patchLocation(`/api/appointments/${id}/participants/location`, token, lat, lng);
-        const { participant_status, preparation_time, dest_name, which_station, interval } = res?.data ?? {};
+        const { participant_status, preparation_time, dest_name, which_station, interval, departure_alarm_time } = res?.data ?? {};
         console.log(`[백그라운드] /location 응답 — appointmentId:${id} status:${participant_status} interval:${interval}`);
 
         if (interval != null) {
@@ -219,17 +234,24 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
           desiredIntervals[key] = interval;
         }
 
-        if (participant_status === 'DEPARTING' && !alarmSentThisRun.has(key)) {
+        if (participant_status === 'DEPARTING' && !alarmSentThisRun.has(key) && which_station != null) {
           alarmSentThisRun.add(key);
           console.log(`[백그라운드] DEPARTING 진입 — appointmentId:${id} 단계별 알람 발송`);
+          await cancelStagedAlarms(key); // 포그라운드 등록분 취소 후 재등록
           const pt = preparation_time ?? 0;
           const stepMs = pt * 60 * 1000 * 0.25;
-          const mins = (f: number) => which_station ? Math.round(pt * f) : undefined;
-          // notifee 네이티브 메모리 충돌 방지 — 순차 실행
-          await sendAlarm('group', 1, dest_name, which_station, mins(1.0), undefined, id);
-          await scheduleFutureAlarm('group', 2, dest_name, Date.now() + stepMs, undefined, id, which_station, mins(0.75));
-          await scheduleFutureAlarm('group', 3, dest_name, Date.now() + stepMs * 2, undefined, id, which_station, mins(0.5));
-          await scheduleFutureAlarm('group', 4, dest_name, Date.now() + stepMs * 3, undefined, id, which_station, mins(0.25));
+          const ratios = [1.0, 0.75, 0.5, 0.25];
+          const mins = (idx: number) => which_station ? Math.max(0, Math.round(pt * ratios[idx])) : undefined;
+          const alarmBase = departure_alarm_time ? new Date(departure_alarm_time).getTime() : Date.now();
+          const stepTimes = [alarmBase, alarmBase + stepMs, alarmBase + stepMs * 2, alarmBase + stepMs * 3];
+          const now = Date.now();
+          const foundIdx = stepTimes.findIndex((t) => now < t);
+          const startIdx = foundIdx === -1 ? 3 : foundIdx;
+          for (let i = startIdx; i < 4; i++) {
+            const stage = (i + 1) as 1 | 2 | 3 | 4;
+            const minutesRemaining = (i === 3 && now >= stepTimes[3]) ? 0 : mins(i);
+            await scheduleFutureAlarm('group', stage, dest_name, stepTimes[i], undefined, id, which_station, minutesRemaining);
+          }
         }
 
         if (participant_status === 'ARRIVED') {
@@ -265,5 +287,8 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   if (remainingJourneys.length === 0 && remainingAppointments.length === 0) {
     console.log('[BackgroundLocation] 모든 알람 완료 → 위치추적 종료');
     await stopBackgroundLocationUpdates();
+  }
+  } finally {
+    _taskRunning = false;
   }
 });

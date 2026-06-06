@@ -115,10 +115,10 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
         alarmService.start({ alarmType, destination: alarm.place, journeyId: alarm.journeyId });
       }
     } else if (alarm.appointmentId) {
-      // 그룹 알람 스위치 OFF여도 GPS 폴링은 유지 (상태 전이·대시보드 갱신 계속 필요)
       appointmentsApi.toggleParticipantAlarm(alarm.appointmentId, newEnabled).catch(() => {
         setter((prev) => prev.map((a) => a.id === alarm.id ? { ...a, enabled: !newEnabled } : a));
       });
+      alarmService.setActive(newEnabled, undefined, alarm.appointmentId);
     }
   };
 
