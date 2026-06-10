@@ -162,8 +162,16 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
               setPersonal(prev => prev.filter(a => a.id !== alarm.id));
               bumpAlarmVersion();
             }}>
-              <TouchableOpacity style={styles.alarmCard} activeOpacity={0.7}
-                onPress={() => alarm.journeyId && onPersonalEdit(alarm.journeyId, alarm)}>
+              <TouchableOpacity style={[styles.alarmCard, alarm.myStatus === 'MOVING' && { opacity: 0.45 }]} activeOpacity={0.7}
+                onPress={() => {
+                  if (alarm.myStatus === 'MOVING') {
+                    Platform.OS === 'android'
+                      ? ToastAndroid.show('이동 중에는 수정할 수 없어요.', ToastAndroid.SHORT)
+                      : Alert.alert('', '이동 중에는 수정할 수 없어요.');
+                    return;
+                  }
+                  alarm.journeyId && onPersonalEdit(alarm.journeyId, alarm);
+                }}>
                 <View style={styles.alarmInfo}>
                   <Text style={styles.alarmPlace}>{alarm.place}</Text>
                   <View style={styles.alarmMeta}>
@@ -291,8 +299,16 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
               setHome(prev => prev.filter(a => a.id !== alarm.id));
               bumpAlarmVersion();
             }}>
-              <TouchableOpacity style={styles.alarmCard} activeOpacity={0.7}
-                onPress={() => alarm.journeyId && onHomeEdit(alarm.journeyId, alarm)}>
+              <TouchableOpacity style={[styles.alarmCard, alarm.myStatus === 'MOVING' && { opacity: 0.45 }]} activeOpacity={0.7}
+                onPress={() => {
+                  if (alarm.myStatus === 'MOVING') {
+                    Platform.OS === 'android'
+                      ? ToastAndroid.show('이동 중에는 수정할 수 없어요.', ToastAndroid.SHORT)
+                      : Alert.alert('', '이동 중에는 수정할 수 없어요.');
+                    return;
+                  }
+                  alarm.journeyId && onHomeEdit(alarm.journeyId, alarm);
+                }}>
                 <View style={styles.alarmInfo}>
                   <Text style={styles.alarmPlace}>{alarm.place}</Text>
                   <View style={styles.alarmMeta}>

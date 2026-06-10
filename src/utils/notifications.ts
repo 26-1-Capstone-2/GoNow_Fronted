@@ -13,8 +13,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export type AlarmStage = 1 | 2 | 3 | 4;
 export type AlarmType = 'personal' | 'group' | 'home';
 
-const CHANNEL_DEFAULT = 'gonow-alarm';
-const CHANNEL_URGENT = 'gonow-alarm-urgent';
+const CHANNEL_STAGE1 = 'gonow-alarm-1';
+const CHANNEL_DEFAULT = 'gonow-alarm-2';
+const CHANNEL_STAGE3 = 'gonow-alarm-3';
+const CHANNEL_URGENT = 'gonow-alarm-4';
+export const CHANNEL_SILENT = 'gonow-silent';
 
 // 단계별 알람 trigger ID AsyncStorage 키 — journeyId/appointmentId 기준으로 저장
 const TRIGGER_IDS_KEY = 'gonow_trigger_ids'; // Record<'j_N' | 'a_N', string[]>
@@ -113,24 +116,51 @@ async function ensureChannels(): Promise<void> {
   if (Platform.OS !== 'android') return;
 
   await notifee.createChannel({
+    id: CHANNEL_STAGE1,
+    name: 'GoNow 알람 (1단계)',
+    importance: AndroidImportance.HIGH,
+    vibration: false,
+    bypassDnd: true,
+  });
+
+  await notifee.createChannel({
     id: CHANNEL_DEFAULT,
-    name: 'GoNow 알람',
+    name: 'GoNow 알람 (2단계)',
     importance: AndroidImportance.HIGH,
     vibration: true,
     vibrationPattern: [100, 250, 250, 250],
     lights: true,
     lightColor: '#4CAF50',
+    bypassDnd: true,
   });
 
   await notifee.createChannel({
-    id: CHANNEL_URGENT,
-    name: 'GoNow 긴급 알람',
+    id: CHANNEL_STAGE3,
+    name: 'GoNow 알람 (3단계)',
     importance: AndroidImportance.HIGH,
     vibration: true,
     vibrationPattern: [100, 500, 200, 500, 200, 500],
     lights: true,
     lightColor: '#E74C3C',
     bypassDnd: true,
+  });
+
+  await notifee.createChannel({
+    id: CHANNEL_URGENT,
+    name: 'GoNow 알람 (4단계)',
+    importance: AndroidImportance.HIGH,
+    vibration: true,
+    vibrationPattern: [100, 500, 200, 500, 200, 500],
+    lights: true,
+    lightColor: '#E74C3C',
+    bypassDnd: true,
+  });
+
+  await notifee.createChannel({
+    id: CHANNEL_SILENT,
+    name: 'GoNow 알람 실행 중',
+    importance: AndroidImportance.LOW,
+    vibration: false,
   });
 }
 
@@ -202,11 +232,11 @@ export async function sendAlarm(
         ...(appointmentId != null && { appointmentId: String(appointmentId) }),
       },
       android: {
-        channelId: stage >= 3 ? CHANNEL_URGENT : CHANNEL_DEFAULT,
+        channelId: stage === 1 ? CHANNEL_STAGE1 : stage === 2 ? CHANNEL_DEFAULT : stage === 3 ? CHANNEL_STAGE3 : CHANNEL_URGENT,
         importance: AndroidImportance.HIGH,
         category: AndroidCategory.ALARM,
         visibility: AndroidVisibility.PUBLIC,
-        sound: config.sound ? 'default' : undefined,
+        sound: 'default',
         vibrationPattern: config.vibrate ? [100, 500, 200, 500, 200, 500] : undefined,
         // 타이머 알람 스타일: 잠금화면에서 전체화면으로 표시
         fullScreenAction: {
@@ -251,7 +281,7 @@ export async function sendArrivalCheckAlarm(
       ...(appointmentId != null && { appointmentId: String(appointmentId) }),
     },
     android: {
-      channelId: CHANNEL_DEFAULT,
+      channelId: CHANNEL_STAGE3,
       importance: AndroidImportance.HIGH,
       pressAction: { id: 'default', launchActivity: 'default' },
       actions: [
@@ -349,11 +379,11 @@ export async function scheduleFutureAlarm(
       ...(appointmentId != null && { appointmentId: String(appointmentId) }),
     };
     const androidConfig = {
-      channelId: stage >= 3 ? CHANNEL_URGENT : CHANNEL_DEFAULT,
+      channelId: stage === 1 ? CHANNEL_STAGE1 : stage === 2 ? CHANNEL_DEFAULT : stage === 3 ? CHANNEL_STAGE3 : CHANNEL_URGENT,
       importance: AndroidImportance.HIGH,
       category: AndroidCategory.ALARM,
       visibility: AndroidVisibility.PUBLIC,
-      sound: config.sound ? 'default' : undefined,
+      sound: 'default',
       vibrationPattern: config.vibrate ? [100, 500, 200, 500, 200, 500] : undefined,
       fullScreenAction: { id: 'default', launchActivity: 'default' },
       pressAction: { id: 'default' },

@@ -12,7 +12,7 @@ import { Feather, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icon
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, StyleSheet, Switch, Text, ToastAndroid, TouchableOpacity, View } from 'react-native';
 
 const journeysApi = createJourneysApi();
 const alarmsApi = createAlarmsApi();
@@ -60,7 +60,7 @@ function fromAlarmItem(item: AlarmItem): HomeAlarm {
     enabled: item.is_active,
     transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
     date: item.plan_date,
-    isActive: ['MOVING', 'NEARDEST', 'ARRIVED'].includes(item.my_status),
+    isActive: ['MOVING'].includes(item.my_status),
     myStatus: item.my_status,
   };
 }
@@ -308,7 +308,15 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
                 setAlarms((prev) => prev.filter((a) => a.id !== alarm.id));
                 bumpAlarmVersion();
               }}>
-                <TouchableOpacity style={styles.alarmCard} onPress={() => openEdit(alarm)} activeOpacity={0.7}>
+                <TouchableOpacity style={[styles.alarmCard, alarm.isActive && { opacity: 0.45 }]} onPress={() => {
+                    if (alarm.isActive) {
+                      Platform.OS === 'android'
+                        ? ToastAndroid.show('이동 중에는 수정할 수 없어요.', ToastAndroid.SHORT)
+                        : Alert.alert('', '이동 중에는 수정할 수 없어요.');
+                      return;
+                    }
+                    openEdit(alarm);
+                  }} activeOpacity={0.7}>
                   <View style={styles.alarmInfo}>
                     {alarm.date ? <Text style={styles.alarmDate}>{formatCardDate(alarm.date)}</Text> : null}
                     <Text style={styles.alarmPlace}>{alarm.home_name}</Text>

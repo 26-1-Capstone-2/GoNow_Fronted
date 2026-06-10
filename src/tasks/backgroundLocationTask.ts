@@ -3,7 +3,7 @@ import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState } from 'react-native';
 import { TOKEN_KEY } from '@/src/store/authStore';
-import { sendAlarm, scheduleFutureAlarm, cancelStagedAlarms, AlarmType } from '@/src/utils/notifications';
+import { sendAlarm, scheduleFutureAlarm, cancelStagedAlarms, AlarmType, CHANNEL_SILENT } from '@/src/utils/notifications';
 
 export const BACKGROUND_LOCATION_TASK = 'BACKGROUND-LOCATION-TASK';
 export const ACTIVE_JOURNEYS_KEY = 'gonow_active_journeys';
@@ -58,6 +58,7 @@ export async function startBackgroundLocationUpdates(): Promise<void> {
         notificationTitle: 'GoNow 알람 실행 중',
         notificationBody: '출발 시간을 모니터링하고 있어요.',
         notificationColor: '#4CAF50',
+        notificationChannelId: CHANNEL_SILENT,
       },
     });
     console.log('[startBackgroundLocationUpdates] 완료 — 상단바 알림 표시됨');

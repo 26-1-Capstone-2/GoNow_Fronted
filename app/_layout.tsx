@@ -233,7 +233,7 @@ export default function RootLayout() {
           title,
           body,
           android: {
-            channelId: 'gonow-alarm',
+            channelId: 'gonow-alarm-2',
             pressAction: { id: 'default' },
           },
         });

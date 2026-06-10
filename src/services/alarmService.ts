@@ -133,6 +133,7 @@ class AlarmRunner {
       const { journey_status, preparation_time, interval, which_station, departure_alarm_time } = res.data;
       console.log(`[포그라운드] /location 응답 — journeyId:${this.target.journeyId} status:${journey_status} interval:${interval} which_station:${which_station} departure_alarm_time:${departure_alarm_time}`);
       if (interval !== null) {
+        console.log(`[포그라운드] interval 갱신 — journeyId:${this.target!.journeyId} ${this.intervalSec}s → ${interval}s`);
         this.intervalSec = interval;
         const key = `j_${this.target!.journeyId}`;
         AsyncStorage.getItem(DESIRED_INTERVALS_KEY).then(raw => {
@@ -143,7 +144,7 @@ class AlarmRunner {
       }
       if (!this.target) return;
       this.scheduleNextPoll();
-      await this.handlePersonalStatus(journey_status, preparation_time, which_station, departure_alarm_time);
+      await this.handlePersonalStatus(journey_status, preparation_time, interval, which_station, departure_alarm_time);
     } catch (e: any) {
       const msg = e?.message ?? String(e);
       if (msg.includes('"success":false') || msg.startsWith('HTTP 4')) {
@@ -166,6 +167,7 @@ class AlarmRunner {
       console.log(`[포그라운드] /location 응답 — appointmentId:${this.target.appointmentId} participantStatus:${participant_status} appointmentStatus:${appointment_status} interval:${interval} which_station:${which_station} departure_alarm_time:${departure_alarm_time}`);
       useAppointmentStatusStore.getState().setStatus(this.target.appointmentId, appointment_status);
       if (interval !== null) {
+        console.log(`[포그라운드] interval 갱신 — appointmentId:${this.target!.appointmentId} ${this.intervalSec}s → ${interval}s`);
         this.intervalSec = interval;
         const key = `a_${this.target!.appointmentId}`;
         AsyncStorage.getItem(DESIRED_INTERVALS_KEY).then(raw => {
@@ -176,7 +178,7 @@ class AlarmRunner {
       }
       if (!this.target) return;
       this.scheduleNextPoll();
-      await this.handleGroupStatus(participant_status, preparation_time, estimated_arrival, which_station, departure_alarm_time);
+      await this.handleGroupStatus(participant_status, preparation_time, estimated_arrival, interval, which_station, departure_alarm_time);
     } catch (e: any) {
       const msg = e?.message ?? String(e);
       if (msg.includes('"success":false') || msg.startsWith('HTTP 4')) {
@@ -189,7 +191,7 @@ class AlarmRunner {
     }
   }
 
-  private async handlePersonalStatus(newStatus: JourneyStatus, preparationTime: number, whichStation?: string | null, departureAlarmTime?: string | null): Promise<void> {
+  private async handlePersonalStatus(newStatus: JourneyStatus, preparationTime: number, interval: number | null, whichStation?: string | null, departureAlarmTime?: string | null): Promise<void> {
     if (newStatus === 'READY') {
       if (this.status !== 'READY') {
         console.log(`[alarmService] 상태전이 ${this.status} → READY — journeyId:${this.target?.journeyId}`);
@@ -200,8 +202,9 @@ class AlarmRunner {
         }
         this.poll();
       }
-      // whichStation이 있을 때만 재등록 — plask 호출된 응답에만 which_station이 있음
-      if (departureAlarmTime && whichStation != null) {
+      // departure_alarm_time 변경 시 알람 재등록
+      if (departureAlarmTime && departureAlarmTime !== this.lastDepartureAlarmTime) {
+        this.lastDepartureAlarmTime = departureAlarmTime;
         this.cancelRemainingStages();
         await this.scheduleAlarmStages(preparationTime, whichStation, departureAlarmTime);
       }
@@ -252,7 +255,7 @@ class AlarmRunner {
     }
   }
 
-  private async handleGroupStatus(newStatus: JourneyStatus, preparationTime: number, estimatedArrival: string, whichStation?: string | null, departureAlarmTime?: string | null): Promise<void> {
+  private async handleGroupStatus(newStatus: JourneyStatus, preparationTime: number, estimatedArrival: string, interval: number | null, whichStation?: string | null, departureAlarmTime?: string | null): Promise<void> {
     if (newStatus === 'READY') {
       if (this.status !== 'READY') {
         console.log(`[alarmService] 상태전이 ${this.status} → READY — appointmentId:${this.target?.appointmentId}`);
@@ -263,8 +266,9 @@ class AlarmRunner {
         }
         this.poll();
       }
-      // whichStation이 있을 때만 재등록 — flask 호출된 응답에만 which_station이 있음
-      if (departureAlarmTime && whichStation != null && this.isActive) {
+      // departure_alarm_time 변경 시 알람 재등록
+      if (departureAlarmTime && departureAlarmTime !== this.lastDepartureAlarmTime && this.isActive) {
+        this.lastDepartureAlarmTime = departureAlarmTime;
         this.cancelRemainingStages();
         await this.scheduleAlarmStages(preparationTime, whichStation, departureAlarmTime);
       }
