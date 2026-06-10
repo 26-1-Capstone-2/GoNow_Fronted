@@ -7,6 +7,7 @@ import * as Notifications from 'expo-notifications';
 import { BACKGROUND_ALARM_TASK } from '@/src/tasks/backgroundAlarmTask';
 import { ACTIVE_JOURNEYS_KEY, ACTIVE_APPOINTMENTS_KEY, DESIRED_INTERVALS_KEY, SESSION_READY_KEY, startBackgroundLocationUpdates, stopBackgroundLocationUpdates } from '@/src/tasks/backgroundLocationTask';
 import { getToken, useAuthStore, TOKEN_KEY } from '@/src/store/authStore';
+import { createMembersApi } from '@/src/api/members';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -102,7 +103,15 @@ export default function RootLayout() {
 
       // AsyncStorage에서 토큰 복원 → 자동 로그인
       const savedToken = await AsyncStorage.getItem(TOKEN_KEY);
-      if (savedToken) useAuthStore.getState().setToken(savedToken);
+      if (savedToken) {
+        useAuthStore.getState().setToken(savedToken);
+        try {
+          const profileRes = await createMembersApi().getMyProfile();
+          if (profileRes.data?.nickname) useAuthStore.getState().setNickname(profileRes.data.nickname);
+        } catch (e) {
+          console.log('[_layout] 닉네임 조회 실패:', e);
+        }
+      }
 
       // AppState 감지 → active/background 3초 디바운스로 중복 발화 방지
       let lastForegroundAt = 0;

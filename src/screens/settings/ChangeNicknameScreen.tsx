@@ -1,4 +1,5 @@
 import { createMembersApi } from '@/src/api/members';
+import { useAuthStore } from '@/src/store/authStore';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
@@ -18,6 +19,7 @@ const membersApi = createMembersApi();
 
 export default function ChangeNicknameScreen() {
   const router = useRouter();
+  const setStoredNickname = useAuthStore((s) => s.setNickname);
   const [nickname, setNickname] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -26,6 +28,7 @@ export default function ChangeNicknameScreen() {
     setLoading(true);
     try {
       await membersApi.updateNickname(nickname.trim());
+      setStoredNickname(nickname.trim());
       router.back();
     } catch (e: any) {
       Alert.alert('변경 실패', e?.message ?? '다시 시도해주세요.');

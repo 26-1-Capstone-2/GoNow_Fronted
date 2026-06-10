@@ -25,6 +25,7 @@ const authApi = createAuthApi();
 export default function LoginScreen() {
   const { goToMainTabs, goToSignUp } = useAppNavigation();
   const setToken = useAuthStore((s) => s.setToken);
+  const setNickname = useAuthStore((s) => s.setNickname);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -35,6 +36,14 @@ export default function LoginScreen() {
     try {
       const res = await authApi.login({ email, password });
       setToken(res.data.access_token);
+
+      // 닉네임 저장
+      try {
+        const profileRes = await createMembersApi().getMyProfile();
+        if (profileRes.data?.nickname) setNickname(profileRes.data.nickname);
+      } catch (e) {
+        console.log('[LoginScreen] 닉네임 조회 실패:', e);
+      }
 
       try {
         const tokenData = await Notifications.getDevicePushTokenAsync();

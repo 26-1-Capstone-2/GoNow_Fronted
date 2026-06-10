@@ -15,6 +15,7 @@ import {
   DESIRED_INTERVALS_KEY,
   stopBackgroundLocationUpdates,
 } from '@/src/tasks/backgroundLocationTask';
+import { getNickname } from '@/src/store/authStore';
 
 const journeysApi = createJourneysApi();
 const appointmentsApi = createAppointmentsApi();
@@ -244,7 +245,7 @@ class AlarmRunner {
           await this.scheduleAlarmStages(preparationTime, whichStation, departureAlarmTime);
         }
         console.log(`[alarmService] NEARDEST 도착 확인 알람 발송 — journeyId:${this.target?.journeyId}`);
-        sendArrivalCheckAlarm('나', this.target!.destination, this.target?.journeyId);
+        sendArrivalCheckAlarm(getNickname()!, this.target!.destination, this.target?.journeyId);
       }
 
       if (newStatus === 'ARRIVED') {
@@ -317,7 +318,7 @@ class AlarmRunner {
         }
         if (this.isActive) {
           console.log(`[alarmService] NEARDEST 도착 확인 알람 발송 — appointmentId:${this.target?.appointmentId}`);
-          sendArrivalCheckAlarm('나', this.target!.destination, undefined, this.target?.appointmentId);
+          sendArrivalCheckAlarm(getNickname()!, this.target!.destination, undefined, this.target?.appointmentId);
         }
       }
 
