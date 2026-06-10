@@ -162,7 +162,7 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
               setPersonal(prev => prev.filter(a => a.id !== alarm.id));
               bumpAlarmVersion();
             }}>
-              <TouchableOpacity style={[styles.alarmCard, alarm.myStatus === 'MOVING' && { opacity: 0.45 }]} activeOpacity={0.7}
+              <TouchableOpacity style={styles.alarmCard} activeOpacity={0.7}
                 onPress={() => {
                   if (alarm.myStatus === 'MOVING') {
                     Platform.OS === 'android'
@@ -172,7 +172,7 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   }
                   alarm.journeyId && onPersonalEdit(alarm.journeyId, alarm);
                 }}>
-                <View style={styles.alarmInfo}>
+                <View style={[styles.alarmInfo, alarm.myStatus === 'MOVING' && { opacity: 0.45 }]}>
                   <Text style={styles.alarmPlace}>{alarm.place}</Text>
                   <View style={styles.alarmMeta}>
                     <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.time} 까지</Text>
@@ -232,7 +232,7 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
               bumpAlarmVersion();
             }} icon="trash">
               <TouchableOpacity
-                style={[styles.alarmCard, isGroupActive && { opacity: 0.45 }]}
+                style={styles.alarmCard}
                 activeOpacity={0.7}
                 onPress={() => {
                   if (isGroupActive) {
@@ -243,7 +243,7 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   }
                   alarm.appointmentId && onGroupEdit(alarm.appointmentId, alarm);
                 }}>
-                <View style={styles.alarmInfo}>
+                <View style={[styles.alarmInfo, isGroupActive && { opacity: 0.45 }]}>
                   <Text style={styles.alarmPlace}>{alarm.place}</Text>
                   <View style={styles.alarmMeta}>
                     <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.time} 까지</Text>
@@ -299,7 +299,7 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
               setHome(prev => prev.filter(a => a.id !== alarm.id));
               bumpAlarmVersion();
             }}>
-              <TouchableOpacity style={[styles.alarmCard, alarm.myStatus === 'MOVING' && { opacity: 0.45 }]} activeOpacity={0.7}
+              <TouchableOpacity style={styles.alarmCard} activeOpacity={0.7}
                 onPress={() => {
                   if (alarm.myStatus === 'MOVING') {
                     Platform.OS === 'android'
@@ -309,7 +309,7 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   }
                   alarm.journeyId && onHomeEdit(alarm.journeyId, alarm);
                 }}>
-                <View style={styles.alarmInfo}>
+                <View style={[styles.alarmInfo, alarm.myStatus === 'MOVING' && { opacity: 0.45 }]}>
                   <Text style={styles.alarmPlace}>{alarm.place}</Text>
                   <View style={styles.alarmMeta}>
                     <Text style={styles.alarmDeadline}>

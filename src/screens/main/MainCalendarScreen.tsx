@@ -283,7 +283,10 @@ export default function MainCalendarScreen() {
         return;
       }
 
-      // 반복 알람: 각 요일별로 범위 내 모든 날짜에 카운트
+      // 반복 알람: plan_date(생성일)는 무조건 카운트
+      addCount(baseKey, type, counts);
+
+      // 반복 알람: 각 요일별로 범위 내 모든 날짜에 카운트 (plan_date 제외 — 이미 위에서 카운트)
       const planDate = new Date(baseKey);
       planDate.setHours(0, 0, 0, 0);
 
@@ -297,7 +300,7 @@ export default function MainCalendarScreen() {
         cur.setDate(cur.getDate() + daysUntil);
 
         while (cur <= rangeEnd) {
-          addCount(toDateKey(cur), type, counts);
+          if (toDateKey(cur) !== baseKey) addCount(toDateKey(cur), type, counts);
           cur.setDate(cur.getDate() + 7);
         }
       }

@@ -101,7 +101,7 @@ export default function ArrivalDashboardSheet({ onClose, appointmentId }: Props)
         <TouchableOpacity style={styles.headerBtn} onPress={onClose}>
           <Feather name="x" size={22} color="#1A1A1A" />
         </TouchableOpacity>
-        <Text style={styles.title}>도착예정</Text>
+        <Text style={styles.title}>멤버 도착 현황</Text>
         <TouchableOpacity
           style={[styles.headerBtn, styles.refreshBtn]}
           onPress={() => loadDashboard(true)}
@@ -145,7 +145,11 @@ export default function ArrivalDashboardSheet({ onClose, appointmentId }: Props)
                   <TransportBadge transport={p.transport_type} />
                 </View>
                 <Text style={styles.arrivalTime}>
-                  {p.estimated_arrival ? `${formatEstimatedArrival(p.estimated_arrival)} 도착예정` : '계산 중…'}
+                  {p.participant_status === 'ARRIVED'
+                    ? `${formatEstimatedArrival(p.estimated_arrival!)} 도착 완료`
+                    : p.estimated_arrival
+                      ? `${formatEstimatedArrival(p.estimated_arrival)} 도착 예정`
+                      : '계산 중…'}
                 </Text>
               </View>
             ))}

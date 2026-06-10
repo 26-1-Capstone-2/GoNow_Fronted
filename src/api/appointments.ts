@@ -95,7 +95,8 @@ export type GetAppointmentResponse = {
 export type DashboardParticipant = {
   nickname: string;
   transport_type: 'TRANSIT' | 'DRIVING';
-  estimated_arrival: string;
+  estimated_arrival: string | null;
+  participant_status: JourneyStatus;
   is_me: boolean;
 };
 

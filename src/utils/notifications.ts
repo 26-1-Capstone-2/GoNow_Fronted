@@ -158,7 +158,14 @@ async function ensureChannels(): Promise<void> {
 
   await notifee.createChannel({
     id: CHANNEL_SILENT,
-    name: 'GoNow 알람 실행 중',
+    name: 'GoNow 알람 실행 중 (위치 추적)',
+    importance: AndroidImportance.LOW,
+    vibration: false,
+  });
+
+  await notifee.createChannel({
+    id: 'gonow',
+    name: 'GoNow 알람 실행 중 (알림)',
     importance: AndroidImportance.LOW,
     vibration: false,
   });

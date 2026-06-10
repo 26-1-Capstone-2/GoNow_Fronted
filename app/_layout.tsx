@@ -111,6 +111,12 @@ export default function RootLayout() {
         } catch (e) {
           console.log('[_layout] 닉네임 조회 실패:', e);
         }
+        try {
+          const tokenData = await Notifications.getDevicePushTokenAsync();
+          await createMembersApi().registerFcmToken(tokenData.data);
+        } catch (e) {
+          console.log('[_layout] FCM 토큰 등록 실패:', e);
+        }
       }
 
       // AppState 감지 → active/background 3초 디바운스로 중복 발화 방지

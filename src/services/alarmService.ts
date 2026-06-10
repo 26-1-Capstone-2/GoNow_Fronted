@@ -303,8 +303,8 @@ class AlarmRunner {
         this.cancelRemainingStages();
         if (this.isActive) {
           const arrivalTime = formatEstimatedArrival(estimatedArrival);
-          console.log(`[alarmService] MOVING — 단계별 알람 취소 + 도착예정 알람 발송 appointmentId:${this.target?.appointmentId} ETA:${arrivalTime}`);
-          sendArrivalAlarm('나', arrivalTime, this.target!.destination);
+          console.log(`[alarmService] MOVING — 단계별 알람 취소 appointmentId:${this.target?.appointmentId} ETA:${arrivalTime}`);
+          // sendArrivalAlarm('나', arrivalTime, this.target!.destination); // FCM으로 대체
         }
       }
 
@@ -327,8 +327,8 @@ class AlarmRunner {
         this.cancelRemainingStages();
         if (this.isActive) {
           const arrivalTime = formatEstimatedArrival(estimatedArrival);
-          console.log(`[alarmService] ARRIVED — 도착완료 알람 발송 appointmentId:${this.target?.appointmentId} time:${arrivalTime}`);
-          sendArrivalConfirmAlarm('나', arrivalTime, this.target!.destination);
+          console.log(`[alarmService] ARRIVED — 도착완료 appointmentId:${this.target?.appointmentId} time:${arrivalTime}`);
+          // sendArrivalConfirmAlarm('나', arrivalTime, this.target!.destination); // FCM으로 대체
         }
         this.stop();
       }
@@ -475,6 +475,8 @@ class AlarmManager {
         runner.lastWhichStation,
         runner.lastDepartureAlarmTime,
       ).then(() => { runner.stagingStarted = true; }).catch(() => {});
+    } else if (runner.status === 'NEARDEST') {
+      // NEARDEST 상태에서 ON 전환 시 도착 확인 알람 재발송 방지 — nearDestSent 이미 true
     }
   }
 }

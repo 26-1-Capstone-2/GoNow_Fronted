@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -34,31 +34,44 @@ export default function SignUpScreen() {
   const [nicknameStatus, setNicknameStatus] = useState<FieldStatus>('idle');
   const [nicknameMsg, setNicknameMsg] = useState('');
 
-  const handleEmailBlur = async () => {
-    if (!email) return;
-    setEmailStatus('checking');
-    try {
-      const res = await authApi.checkEmail(email);
-      setEmailStatus(res.success ? 'ok' : 'error');
-      setEmailMsg(res.message);
-    } catch {
-      setEmailStatus('error');
-      setEmailMsg('이미 사용 중인 이메일입니다.');
-    }
-  };
+  const emailDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const handleNicknameBlur = async () => {
-    if (!nickname) return;
-    setNicknameStatus('checking');
-    try {
-      const res = await authApi.checkNickname(nickname);
-      setNicknameStatus(res.success ? 'ok' : 'error');
-      setNicknameMsg(res.message);
-    } catch {
-      setNicknameStatus('error');
-      setNicknameMsg('이미 사용 중인 닉네임입니다.');
-    }
-  };
+  useEffect(() => {
+    if (!email) { setEmailStatus('idle'); setEmailMsg(''); return; }
+    setEmailStatus('idle'); setEmailMsg('');
+    if (emailDebounceRef.current) clearTimeout(emailDebounceRef.current);
+    emailDebounceRef.current = setTimeout(async () => {
+      setEmailStatus('checking');
+      try {
+        const res = await authApi.checkEmail(email);
+        setEmailStatus(res.success ? 'ok' : 'error');
+        setEmailMsg(res.message);
+      } catch {
+        setEmailStatus('error');
+        setEmailMsg('이미 사용 중인 이메일입니다.');
+      }
+    }, 500);
+    return () => { if (emailDebounceRef.current) clearTimeout(emailDebounceRef.current); };
+  }, [email]);
+
+  const nicknameDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!nickname) { setNicknameStatus('idle'); setNicknameMsg(''); return; }
+    if (nicknameDebounceRef.current) clearTimeout(nicknameDebounceRef.current);
+    nicknameDebounceRef.current = setTimeout(async () => {
+      setNicknameStatus('checking');
+      try {
+        const res = await authApi.checkNickname(nickname);
+        setNicknameStatus(res.success ? 'ok' : 'error');
+        setNicknameMsg(res.message);
+      } catch {
+        setNicknameStatus('error');
+        setNicknameMsg('이미 사용 중인 닉네임입니다.');
+      }
+    }, 500);
+    return () => { if (nicknameDebounceRef.current) clearTimeout(nicknameDebounceRef.current); };
+  }, [nickname]);
 
   const canProceed =
     emailStatus === 'ok' &&
@@ -103,8 +116,7 @@ export default function SignUpScreen() {
               placeholder="email@email.com"
               placeholderTextColor="#BBBBBB"
               value={email}
-              onChangeText={(t) => { setEmail(t); setEmailStatus('idle'); setEmailMsg(''); }}
-              onBlur={handleEmailBlur}
+              onChangeText={(t) => setEmail(t)}
               keyboardType="email-address"
               autoCapitalize="none"
             />
@@ -158,8 +170,7 @@ export default function SignUpScreen() {
               placeholder="12글자 이내로 입력하세요."
               placeholderTextColor="#BBBBBB"
               value={nickname}
-              onChangeText={(t) => { if (t.length <= 12) { setNickname(t); setNicknameStatus('idle'); setNicknameMsg(''); } }}
-              onBlur={handleNicknameBlur}
+              onChangeText={(t) => { if (t.length <= 12) setNickname(t); }}
               maxLength={12}
             />
             {nicknameMsg ? (

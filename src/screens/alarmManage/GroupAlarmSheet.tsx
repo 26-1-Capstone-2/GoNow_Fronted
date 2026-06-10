@@ -460,7 +460,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
                 } catch {}
               }}>
                 <TouchableOpacity
-                  style={[styles.alarmCard, alarm.isArrivalActive && { opacity: 0.45 }]}
+                  style={styles.alarmCard}
                   activeOpacity={0.7}
                   onPress={() => {
                     if (alarm.isArrivalActive) {
@@ -472,7 +472,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
                     openEdit(alarm);
                   }}
                 >
-                  <View style={styles.alarmInfo}>
+                  <View style={[styles.alarmInfo, alarm.isArrivalActive && { opacity: 0.45 }]}>
                     <Text style={styles.alarmPlace}>{alarm.dest_name}</Text>
                     <View style={styles.alarmMeta}>
                       <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.hour}:{alarm.minute} 까지</Text>

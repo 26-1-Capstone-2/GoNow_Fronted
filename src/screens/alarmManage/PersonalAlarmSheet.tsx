@@ -355,7 +355,7 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
                 bumpAlarmVersion();
               }}>
                 <TouchableOpacity
-                  style={[styles.alarmCard, alarm.isActive && { opacity: 0.45 }]}
+                  style={styles.alarmCard}
                   activeOpacity={0.7}
                   onPress={() => {
                     if (alarm.isActive) {
@@ -367,7 +367,7 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
                     openEdit(alarm);
                   }}
                 >
-                  <View style={styles.alarmInfo}>
+                  <View style={[styles.alarmInfo, alarm.isActive && { opacity: 0.45 }]}>
                     <Text style={styles.alarmPlace}>{alarm.dest_name}</Text>
                     <View style={styles.alarmMeta}>
                       <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.hour}:{alarm.minute} 까지</Text>

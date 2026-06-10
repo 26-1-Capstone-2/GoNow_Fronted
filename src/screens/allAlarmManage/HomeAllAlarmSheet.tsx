@@ -308,7 +308,7 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
                 setAlarms((prev) => prev.filter((a) => a.id !== alarm.id));
                 bumpAlarmVersion();
               }}>
-                <TouchableOpacity style={[styles.alarmCard, alarm.isActive && { opacity: 0.45 }]} onPress={() => {
+                <TouchableOpacity style={styles.alarmCard} onPress={() => {
                     if (alarm.isActive) {
                       Platform.OS === 'android'
                         ? ToastAndroid.show('이동 중에는 수정할 수 없어요.', ToastAndroid.SHORT)
@@ -317,7 +317,7 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
                     }
                     openEdit(alarm);
                   }} activeOpacity={0.7}>
-                  <View style={styles.alarmInfo}>
+                  <View style={[styles.alarmInfo, alarm.isActive && { opacity: 0.45 }]}>
                     {alarm.date ? <Text style={styles.alarmDate}>{formatCardDate(alarm.date)}</Text> : null}
                     <Text style={styles.alarmPlace}>{alarm.home_name}</Text>
                     <View style={styles.alarmMeta}>

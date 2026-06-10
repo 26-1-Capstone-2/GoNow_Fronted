@@ -502,8 +502,8 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
                   }
                 } catch {}
               }}>
-                <TouchableOpacity style={[styles.alarmCard, alarm.isArrivalActive && { opacity: 0.45 }]} onPress={() => openEdit(alarm)} activeOpacity={0.7}>
-                  <View style={styles.alarmInfo}>
+                <TouchableOpacity style={styles.alarmCard} onPress={() => openEdit(alarm)} activeOpacity={0.7}>
+                  <View style={[styles.alarmInfo, alarm.isArrivalActive && { opacity: 0.45 }]}>
                     {alarm.date ? <Text style={styles.alarmDate}>{formatCardDate(alarm.date)}</Text> : null}
                     <Text style={styles.alarmPlace}>{alarm.place}</Text>
                     <View style={styles.alarmMeta}>
