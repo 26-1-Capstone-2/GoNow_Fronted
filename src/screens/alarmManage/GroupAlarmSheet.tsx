@@ -9,6 +9,7 @@ import { targetTimeToAmpmHourMinute } from '@/src/api/journeys';
 import { createMembersApi } from '@/src/api/members';
 import { usePlaces } from '@/src/hooks/usePlaces';
 import { useCalendarStore } from '@/src/store/calendarStore';
+import { useAppointmentStatusStore } from '@/src/store/appointmentStatusStore';
 import { Entypo, Feather, FontAwesome5, FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
@@ -85,7 +86,8 @@ type ViewType = 'list' | 'edit' | 'place' | 'addChoice' | 'join' | 'transport';
 export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, editAppointmentId, initialAlarm }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['85%'], []);
-  const { selectedDate, bumpAlarmVersion } = useCalendarStore();
+  const { selectedDate, alarmVersion, bumpAlarmVersion } = useCalendarStore();
+  const { participantsVersion, deletedAppointmentId, setDeletedAppointmentId, removedAppointmentId, setRemovedAppointmentId } = useAppointmentStatusStore();
 
   const { places, searchKey, loadPlaces, savePlace, deletePlace } = usePlaces('DEST');
 
@@ -138,7 +140,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
 
   useEffect(() => {
     loadAlarms();
-  }, [loadAlarms]);
+  }, [loadAlarms, alarmVersion]);
 
   useEffect(() => {
     if (initialMode === 'edit' && editAppointmentId) {
@@ -231,6 +233,34 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
       }
     } catch {}
   };
+
+  // 참가자 참여/탈퇴/추방/이동수단변경/방장수정 FCM 수신 시 상세정보 다시 불러오기
+  // (마운트 시 최초 1회는 건너뜀 — 상세화면 진입 시 이미 openEdit이 직접 호출되므로 중복 호출 방지)
+  const skipFirstParticipantsSync = useRef(true);
+  useEffect(() => {
+    if (skipFirstParticipantsSync.current) { skipFirstParticipantsSync.current = false; return; }
+    if (view !== 'edit' || editAlarm.appointmentId == null) return;
+    openEdit(editAlarm);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [participantsVersion[editAlarm.appointmentId ?? -1]]);
+
+  // 방장이 이 약속을 삭제했다는 FCM 수신 시 강제 종료
+  useEffect(() => {
+    if (deletedAppointmentId != null && deletedAppointmentId === editAlarm.appointmentId) {
+      Alert.alert('약속 삭제', '방장님이 이 약속을 삭제했습니다.');
+      setDeletedAppointmentId(null);
+      onClose();
+    }
+  }, [deletedAppointmentId]);
+
+  // 방장이 나를 추방했다는 FCM 수신 시 강제 종료
+  useEffect(() => {
+    if (removedAppointmentId != null && removedAppointmentId === editAlarm.appointmentId) {
+      Alert.alert('약속 추방', '방장님이 이 약속에서 내보냈습니다.');
+      setRemovedAppointmentId(null);
+      onClose();
+    }
+  }, [removedAppointmentId]);
 
   const openPlace = () => {
     setTempPlace(

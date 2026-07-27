@@ -7,6 +7,8 @@ import * as Notifications from 'expo-notifications';
 import { BACKGROUND_ALARM_TASK } from '@/src/tasks/backgroundAlarmTask';
 import { ACTIVE_JOURNEYS_KEY, ACTIVE_APPOINTMENTS_KEY, DESIRED_INTERVALS_KEY, SESSION_READY_KEY, startBackgroundLocationUpdates, stopBackgroundLocationUpdates } from '@/src/tasks/backgroundLocationTask';
 import { getToken, useAuthStore, TOKEN_KEY } from '@/src/store/authStore';
+import { useAppointmentStatusStore } from '@/src/store/appointmentStatusStore';
+import { useCalendarStore } from '@/src/store/calendarStore';
 import { createMembersApi } from '@/src/api/members';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
@@ -173,6 +175,8 @@ export default function RootLayout() {
         const appointmentId = Number(data.appointment_id);
         const participantStatus = String(data.participant_status);
         console.log(`[FCM] 방장 수정 동기화 — appointmentId:${appointmentId} participantStatus:${participantStatus}`);
+        useAppointmentStatusStore.getState().bumpParticipants(appointmentId);
+        useCalendarStore.getState().bumpAlarmVersion();
         try {
           if (participantStatus === 'READY') {
             if (alarmService.isRunning(undefined, appointmentId)) {
@@ -190,6 +194,33 @@ export default function RootLayout() {
         } catch (e) {
           console.log(`[FCM] 방장 수정 동기화 실패 — appointmentId:${appointmentId}`, e);
         }
+        return;
+      }
+
+      // 참가자 참여/탈퇴/추방/이동수단 변경 FCM → 열려있는 상세화면 refetch + 목록/캘린더 새로고침
+      if (data?.appointment_id && data?.sync_event === 'participants_changed') {
+        const appointmentId = Number(data.appointment_id);
+        console.log(`[FCM] 참가자 목록 변경 — appointmentId:${appointmentId}`);
+        useAppointmentStatusStore.getState().bumpParticipants(appointmentId);
+        useCalendarStore.getState().bumpAlarmVersion();
+        return;
+      }
+
+      // 약속 삭제 FCM → 열려있는 상세화면 강제 종료 + 목록/캘린더 새로고침
+      if (data?.appointment_id && data?.sync_event === 'appointment_deleted') {
+        const appointmentId = Number(data.appointment_id);
+        console.log(`[FCM] 약속 삭제 — appointmentId:${appointmentId}`);
+        useAppointmentStatusStore.getState().setDeletedAppointmentId(appointmentId);
+        useCalendarStore.getState().bumpAlarmVersion();
+        return;
+      }
+
+      // 참가자 추방 FCM (쫓겨난 당사자 전용) → 열려있는 상세화면 강제 종료 + 목록/캘린더 새로고침
+      if (data?.appointment_id && data?.sync_event === 'removed_from_appointment') {
+        const appointmentId = Number(data.appointment_id);
+        console.log(`[FCM] 추방됨 — appointmentId:${appointmentId}`);
+        useAppointmentStatusStore.getState().setRemovedAppointmentId(appointmentId);
+        useCalendarStore.getState().bumpAlarmVersion();
         return;
       }
 
