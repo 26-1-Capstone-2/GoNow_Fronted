@@ -348,13 +348,13 @@ export default function PersonalAllAlarmSheet({ onClose }: Props) {
 
           <View style={styles.pickerContainer}>
             <Picker selectedValue={editAlarm.ampm} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, ampm: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
-              <Picker.Item label="오전" value="오전" /><Picker.Item label="오후" value="오후" />
+              <Picker.Item label="오전" value="오전" color="#1A1A1A" /><Picker.Item label="오후" value="오후" color="#1A1A1A" />
             </Picker>
             <Picker selectedValue={editAlarm.hour} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, hour: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
-              {HOURS.map((h) => <Picker.Item key={h} label={h} value={h} />)}
+              {HOURS.map((h) => <Picker.Item key={h} label={h} value={h} color="#1A1A1A" />)}
             </Picker>
             <Picker selectedValue={editAlarm.minute} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, minute: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
-              {MINUTES.map((m) => <Picker.Item key={m} label={m} value={m} />)}
+              {MINUTES.map((m) => <Picker.Item key={m} label={m} value={m} color="#1A1A1A" />)}
             </Picker>
           </View>
 

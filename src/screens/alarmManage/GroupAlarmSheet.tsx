@@ -181,8 +181,15 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
       } else {
         setInviteError(res.message ?? '참여에 실패했습니다.');
       }
-    } catch {
-      setInviteError('네트워크 오류가 발생했습니다.');
+    } catch (e: any) {
+      let message = '네트워크 오류가 발생했습니다.';
+      try {
+        const parsed = JSON.parse(e?.message ?? '');
+        if (parsed?.message) message = parsed.message;
+      } catch {
+        // e.message가 JSON이 아니면 실제 네트워크 단절 등 — 기본 문구 유지
+      }
+      setInviteError(message);
     }
   };
   const openEdit = async (alarm: GroupAlarm) => {
@@ -523,13 +530,13 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
             pointerEvents={editAlarm.isCurrentUserHost === false ? 'none' : 'auto'}
           >
             <Picker selectedValue={editAlarm.ampm} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, ampm: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
-              <Picker.Item label="오전" value="오전" /><Picker.Item label="오후" value="오후" />
+              <Picker.Item label="오전" value="오전" color="#1A1A1A" /><Picker.Item label="오후" value="오후" color="#1A1A1A" />
             </Picker>
             <Picker selectedValue={editAlarm.hour} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, hour: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
-              {HOURS.map((h) => <Picker.Item key={h} label={h} value={h} />)}
+              {HOURS.map((h) => <Picker.Item key={h} label={h} value={h} color="#1A1A1A" />)}
             </Picker>
             <Picker selectedValue={editAlarm.minute} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, minute: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
-              {MINUTES.map((m) => <Picker.Item key={m} label={m} value={m} />)}
+              {MINUTES.map((m) => <Picker.Item key={m} label={m} value={m} color="#1A1A1A" />)}
             </Picker>
           </View>
           <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
