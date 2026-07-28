@@ -19,7 +19,7 @@ import * as Notifications from 'expo-notifications';
 const authApi = createAuthApi();
 
 export default function LeaveTimeSetupScreen() {
-  const { goBack, goToMainTabs } = useAppNavigation();
+  const { goBack, goToPermissionSetup } = useAppNavigation();
   const email = useSignUpStore((s) => s.email);
   const password = useSignUpStore((s) => s.password);
   const nickname = useSignUpStore((s) => s.nickname);
@@ -54,7 +54,7 @@ export default function LeaveTimeSetupScreen() {
       } catch {}
 
       resetSignUp();
-      goToMainTabs();
+      goToPermissionSetup();
     } catch (e: any) {
       Alert.alert('회원가입 실패', e?.message ?? '다시 시도해주세요.');
     } finally {

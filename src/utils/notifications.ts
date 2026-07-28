@@ -1,6 +1,7 @@
 import notifee, {
   AndroidCategory,
   AndroidImportance,
+  AndroidNotificationSetting,
   AndroidVisibility,
   AuthorizationStatus,
   EventType,
@@ -169,6 +170,20 @@ async function ensureChannels(): Promise<void> {
     importance: AndroidImportance.LOW,
     vibration: false,
   });
+}
+
+// 팝업 없이 현재 알림 권한 상태만 확인 (PermissionSetupScreen 상태 표시용)
+export async function getNotificationPermissionGranted(): Promise<boolean> {
+  const settings = await notifee.getNotificationSettings();
+  return settings.authorizationStatus >= AuthorizationStatus.AUTHORIZED;
+}
+
+// 팝업 없이 현재 "정확한 알람"(Exact Alarm) 권한 상태만 확인 (PermissionSetupScreen 상태 표시용)
+// Android 12 미만이면 항상 true(제약 자체가 없음)
+export async function getExactAlarmGranted(): Promise<boolean> {
+  if (Platform.OS !== 'android') return true;
+  const settings = await notifee.getNotificationSettings();
+  return settings.android.alarm !== AndroidNotificationSetting.DISABLED;
 }
 
 export async function requestNotificationPermission(): Promise<boolean> {

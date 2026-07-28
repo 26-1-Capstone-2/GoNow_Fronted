@@ -1,4 +1,4 @@
-import { requestNotificationPermission, setupNotificationCategories, AlarmType } from '@/src/utils/notifications';
+import { setupNotificationCategories, AlarmType } from '@/src/utils/notifications';
 import { createJourneysApi } from '@/src/api/journeys';
 import { createAppointmentsApi } from '@/src/api/appointments';
 import { createAlarmsApi } from '@/src/api/alarms';
@@ -42,7 +42,8 @@ export default function RootLayout() {
       await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify([]));
       await AsyncStorage.setItem(DESIRED_INTERVALS_KEY, JSON.stringify({}));
 
-      requestNotificationPermission();
+      // 알림 권한 요청은 더 이상 여기서 자동으로 안 함 — PermissionSetupScreen(회원가입 직후/설정 화면)에서
+      // 맥락 설명과 함께 요청하도록 이동함
       setupNotificationCategories();
 
       // registerTaskAsync는 앱 초기화 완료 후 호출해야 함 (너무 이르면 NullPointerException)
@@ -341,6 +342,7 @@ export default function RootLayout() {
           <Stack.Screen name="change-nickname" />
           <Stack.Screen name="change-password" />
           <Stack.Screen name="daily-alarm" />
+          <Stack.Screen name="permission-setup" />
           <Stack.Screen name="alarm-test" options={{ animation: 'slide_from_bottom' }} />
         </Stack>
         <StatusBar style="auto" />
