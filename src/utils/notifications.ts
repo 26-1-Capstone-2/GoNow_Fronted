@@ -429,6 +429,15 @@ export async function scheduleFutureAlarm(
   return ids;
 }
 
+// 서버 에러 응답 바디(JSON)에서 사용자에게 보여줄 메시지 추출, 실패 시 fallback
+export function extractApiErrorMessage(raw: string, fallback: string): string {
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.message === 'string' && parsed.message.trim()) return parsed.message;
+  } catch {}
+  return fallback;
+}
+
 export async function sendAllArrivalAlarms(
   members: { name: string; arrivalTime: string }[],
   destination: string,

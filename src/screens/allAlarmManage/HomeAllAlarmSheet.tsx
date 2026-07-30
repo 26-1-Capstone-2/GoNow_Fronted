@@ -4,6 +4,7 @@ import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
 import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createJourneysApi, ensureFutureDateTime, HomeJourneyPayload, JourneyDetail, maskToRepeatDays, repeatDaysToMask, targetTimeToAmpmHourMinute, toTargetTime } from '@/src/api/journeys';
 import { alarmService } from '@/src/services/alarmService';
+import { extractApiErrorMessage } from '@/src/utils/notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ACTIVE_JOURNEYS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { usePlaces } from '@/src/hooks/usePlaces';
@@ -227,8 +228,8 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
       await loadAlarms();
       bumpAlarmVersion();
       setView('list');
-    } catch {
-      Alert.alert('저장 실패', '다시 시도해주세요.');
+    } catch (e: any) {
+      Alert.alert('저장 실패', extractApiErrorMessage(e?.message ?? '', '다시 시도해주세요.'));
     } finally {
       setSaving(false);
     }
