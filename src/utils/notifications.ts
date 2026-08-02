@@ -14,11 +14,41 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export type AlarmStage = 1 | 2 | 3 | 4;
 export type AlarmType = 'personal' | 'group' | 'home';
 
-const CHANNEL_STAGE1 = 'gonow-alarm-1';
-const CHANNEL_DEFAULT = 'gonow-alarm-2';
-const CHANNEL_STAGE3 = 'gonow-alarm-3';
-const CHANNEL_URGENT = 'gonow-alarm-4';
+const CHANNEL_BASE: Record<AlarmStage, string> = {
+  1: 'gonow-alarm-1',
+  2: 'gonow-alarm-2',
+  3: 'gonow-alarm-3',
+  4: 'gonow-alarm-4',
+};
 export const CHANNEL_SILENT = 'gonow-silent';
+
+// 단계별 채널의 "리셋 횟수" — 안드로이드는 같은 채널ID로 삭제 후 재생성해도 이전
+// 사용자 설정을 그대로 되살리므로(un-delete), 진짜 초기화하려면 한 번도 안 쓰인
+// 새 채널ID가 필요함. 이 값을 늘려서 ID 뒤에 붙이는 방식으로 매번 새 채널을 만듦.
+const CHANNEL_VERSIONS_KEY = 'gonow_channel_versions'; // Record<'1'|'2'|'3'|'4', number>
+
+let channelIds: Record<AlarmStage, string> = { ...CHANNEL_BASE };
+
+// 리셋 횟수는 "초기화" 버튼을 누를 때만 바뀌는데, ensureChannels()는 알람을 보낼
+// 때마다(하루 여러 번) 호출되므로 매번 AsyncStorage를 다시 읽지 않고 세션 중엔 캐싱함.
+// resetAlarmChannel()이 값을 바꾸면 캐시도 그 자리에서 같이 갱신됨.
+let channelVersionsCache: Record<AlarmStage, number> | null = null;
+
+function buildChannelId(stage: AlarmStage, version: number): string {
+  return version <= 0 ? CHANNEL_BASE[stage] : `${CHANNEL_BASE[stage]}-r${version}`;
+}
+
+async function loadChannelVersions(): Promise<Record<AlarmStage, number>> {
+  if (channelVersionsCache) return channelVersionsCache;
+  try {
+    const raw = await AsyncStorage.getItem(CHANNEL_VERSIONS_KEY);
+    const map: Partial<Record<string, number>> = raw ? JSON.parse(raw) : {};
+    channelVersionsCache = { 1: map['1'] ?? 0, 2: map['2'] ?? 0, 3: map['3'] ?? 0, 4: map['4'] ?? 0 };
+  } catch {
+    channelVersionsCache = { 1: 0, 2: 0, 3: 0, 4: 0 };
+  }
+  return channelVersionsCache;
+}
 
 // 단계별 알람 trigger ID AsyncStorage 키 — journeyId/appointmentId 기준으로 저장
 const TRIGGER_IDS_KEY = 'gonow_trigger_ids'; // Record<'j_N' | 'a_N', string[]>
@@ -84,10 +114,10 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
 });
 
 const STAGE_CONFIG = {
-  1: { title: '🟢 여유 구간', sound: false, vibrate: false },
-  2: { title: '🟡 주의 구간', sound: true,  vibrate: false },
-  3: { title: '🟠 위험 구간', sound: true,  vibrate: true  },
-  4: { title: '🔴 임계 구간', sound: true,  vibrate: true  },
+  1: { title: '🟢 여유 구간', vibrate: false },
+  2: { title: '🟡 주의 구간', vibrate: true  },
+  3: { title: '🟠 위험 구간', vibrate: true  },
+  4: { title: '🔴 임계 구간', vibrate: true  },
 };
 
 const TYPE_NAMES = { personal: '개인', group: '그룹', home: '귀가' };
@@ -116,18 +146,28 @@ const STAGE_MESSAGES: Record<AlarmType, Record<AlarmStage, string>> = {
 async function ensureChannels(): Promise<void> {
   if (Platform.OS !== 'android') return;
 
+  const versions = await loadChannelVersions();
+  channelIds = {
+    1: buildChannelId(1, versions[1]),
+    2: buildChannelId(2, versions[2]),
+    3: buildChannelId(3, versions[3]),
+    4: buildChannelId(4, versions[4]),
+  };
+
   await notifee.createChannel({
-    id: CHANNEL_STAGE1,
+    id: channelIds[1],
     name: 'GoNow 알람 (1단계)',
     importance: AndroidImportance.HIGH,
+    sound: 'stage1',
     vibration: false,
     bypassDnd: true,
   });
 
   await notifee.createChannel({
-    id: CHANNEL_DEFAULT,
+    id: channelIds[2],
     name: 'GoNow 알람 (2단계)',
     importance: AndroidImportance.HIGH,
+    sound: 'stage2',
     vibration: true,
     vibrationPattern: [100, 250, 250, 250],
     lights: true,
@@ -136,9 +176,10 @@ async function ensureChannels(): Promise<void> {
   });
 
   await notifee.createChannel({
-    id: CHANNEL_STAGE3,
+    id: channelIds[3],
     name: 'GoNow 알람 (3단계)',
     importance: AndroidImportance.HIGH,
+    sound: 'stage3',
     vibration: true,
     vibrationPattern: [100, 500, 200, 500, 200, 500],
     lights: true,
@@ -147,9 +188,10 @@ async function ensureChannels(): Promise<void> {
   });
 
   await notifee.createChannel({
-    id: CHANNEL_URGENT,
+    id: channelIds[4],
     name: 'GoNow 알람 (4단계)',
     importance: AndroidImportance.HIGH,
+    sound: 'stage4',
     vibration: true,
     vibrationPattern: [100, 500, 200, 500, 200, 500],
     lights: true,
@@ -201,12 +243,39 @@ export async function requestNotificationPermission(): Promise<boolean> {
     return false;
   }
 
-  await ensureChannels();
+  // 채널 생성은 앱 시작 시(setupNotificationCategories) + 각 발송 함수 자체에서
+  // 이미 보장되므로, 권한 확인/요청만 하는 이 함수에서 또 호출할 필요 없음
   return true;
 }
 
-// _layout.tsx 호환용 no-op
-export function setupNotificationCategories(): void {}
+// 앱 시작 시 채널을 미리 만들어둬야, 사용자가 실제 알람을 한 번도 받기 전에도
+// 시스템 설정의 알림 카테고리 화면에서 바로 커스터마이징할 수 있음
+export function setupNotificationCategories(): void {
+  ensureChannels().catch(() => {});
+}
+
+// 특정 단계의 현재 활성 채널ID 조회(설정 화면 등 외부에서 호출). ensureChannels()를
+// 먼저 실행해 최신 상태(리셋 여부 포함)를 보장한 뒤 반환함.
+export async function getChannelId(stage: AlarmStage): Promise<string> {
+  await ensureChannels();
+  return channelIds[stage];
+}
+
+// 사용자가 시스템 설정에서 소리/진동을 직접 바꾼 채널을 앱 기본값으로 되돌림.
+// 안드로이드는 같은 채널ID로 삭제 후 재생성해도 이전 사용자 설정을 그대로
+// 되살리므로(un-delete), 한 번도 안 쓰인 새 채널ID를 발급하는 방식으로 리셋함.
+// 방금까지 쓰던 예전 채널은 새 채널 생성 후 바로 삭제해서 설정 목록이 안 지저분해지게 함
+// (지금 막 새로 만든 채널과는 다른 ID라 un-delete 문제 없이 안전하게 지워짐).
+export async function resetAlarmChannel(stage: AlarmStage): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  const versions = await loadChannelVersions();
+  const oldChannelId = buildChannelId(stage, versions[stage] ?? 0);
+  // versions는 channelVersionsCache와 같은 객체 참조라, 여기서 바로 캐시도 함께 갱신됨
+  versions[stage] = (versions[stage] ?? 0) + 1;
+  await AsyncStorage.setItem(CHANNEL_VERSIONS_KEY, JSON.stringify(versions));
+  await ensureChannels();
+  await notifee.deleteChannel(oldChannelId).catch(() => {});
+}
 
 function buildAlarmBody(
   stage: AlarmStage,
@@ -254,11 +323,13 @@ export async function sendAlarm(
         ...(appointmentId != null && { appointmentId: String(appointmentId) }),
       },
       android: {
-        channelId: stage === 1 ? CHANNEL_STAGE1 : stage === 2 ? CHANNEL_DEFAULT : stage === 3 ? CHANNEL_STAGE3 : CHANNEL_URGENT,
+        channelId: channelIds[stage],
         importance: AndroidImportance.HIGH,
         category: AndroidCategory.ALARM,
         visibility: AndroidVisibility.PUBLIC,
-        sound: 'default',
+        // 채널이 없는 Android 8.0 미만에서는 이 값이 실제로 소리를 결정함(8.0 이상에선 채널이
+        // 우선이라 무시되지만, 같은 리소스를 가리키므로 지정해둬도 무해함)
+        sound: `stage${stage}`,
         vibrationPattern: config.vibrate ? [100, 500, 200, 500, 200, 500] : undefined,
         // 타이머 알람 스타일: 잠금화면에서 전체화면으로 표시
         fullScreenAction: {
@@ -303,7 +374,7 @@ export async function sendArrivalCheckAlarm(
       ...(appointmentId != null && { appointmentId: String(appointmentId) }),
     },
     android: {
-      channelId: CHANNEL_STAGE3,
+      channelId: channelIds[3],
       importance: AndroidImportance.HIGH,
       pressAction: { id: 'default', launchActivity: 'default' },
       actions: [
@@ -330,7 +401,7 @@ export async function sendArrivalConfirmAlarm(
     title: '✅ 도착 완료',
     body: `${nickname}님이 ${arrivalTime}에 ${destination}에 도착하였습니다.`,
     android: {
-      channelId: CHANNEL_DEFAULT,
+      channelId: channelIds[2],
       importance: AndroidImportance.HIGH,
       pressAction: { id: 'default', launchActivity: 'default' },
     },
@@ -347,7 +418,7 @@ export async function sendArrivalAlarm(
     title: '🏃 도착예정 알림',
     body: `${memberName}님이 ${arrivalTime}에 ${destination}에 도착 예정이에요!`,
     android: {
-      channelId: CHANNEL_DEFAULT,
+      channelId: channelIds[2],
       importance: AndroidImportance.HIGH,
       pressAction: { id: 'default', launchActivity: 'default' },
     },
@@ -364,7 +435,7 @@ export async function sendLastTransitAlarm(
     title: `${transitType}: 지금 출발하세요!`,
     body: `${stopName} ${time} 탑승`,
     android: {
-      channelId: CHANNEL_URGENT,
+      channelId: channelIds[4],
       importance: AndroidImportance.HIGH,
       category: AndroidCategory.ALARM,
       visibility: AndroidVisibility.PUBLIC,
@@ -401,11 +472,13 @@ export async function scheduleFutureAlarm(
       ...(appointmentId != null && { appointmentId: String(appointmentId) }),
     };
     const androidConfig = {
-      channelId: stage === 1 ? CHANNEL_STAGE1 : stage === 2 ? CHANNEL_DEFAULT : stage === 3 ? CHANNEL_STAGE3 : CHANNEL_URGENT,
+      channelId: channelIds[stage],
       importance: AndroidImportance.HIGH,
       category: AndroidCategory.ALARM,
       visibility: AndroidVisibility.PUBLIC,
-      sound: 'default',
+      // 채널이 없는 Android 8.0 미만에서는 이 값이 실제로 소리를 결정함(8.0 이상에선 채널이
+      // 우선이라 무시되지만, 같은 리소스를 가리키므로 지정해둬도 무해함)
+      sound: `stage${stage}`,
       vibrationPattern: config.vibrate ? [100, 500, 200, 500, 200, 500] : undefined,
       fullScreenAction: { id: 'default', launchActivity: 'default' },
       pressAction: { id: 'default' },

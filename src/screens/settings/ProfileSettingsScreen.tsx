@@ -101,6 +101,14 @@ export default function ProfileSettingsScreen() {
         >
           <Text style={styles.menuButtonText}>필수 권한 설정 확인</Text>
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.menuButton}
+          onPress={() => router.push('/alarm-sound-setup')}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.menuButtonText}>출발 알람 소리 설정</Text>
+        </TouchableOpacity>
       </View>
 
       {/* 하단 버튼들 */}

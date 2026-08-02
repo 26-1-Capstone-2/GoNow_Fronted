@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import * as Location from 'expo-location';
 import { Linking, Platform } from 'react-native';
 
@@ -76,4 +77,20 @@ export function getBatteryOptimizationIgnored(): boolean {
     // 재빌드 전(네이티브 모듈 미연결) 등 예외 상황 — 미확인 상태를 false로 취급
     return false;
   }
+}
+
+// 특정 알림 채널의 시스템 설정 화면(소리/진동 변경)으로 바로 이동.
+// REQUEST_SCHEDULE_EXACT_ALARM/IGNORE_BATTERY_OPTIMIZATION_SETTINGS와 달리 이 인텐트는
+// extras로 앱+채널을 직접 지정할 수 있어서, 전체 목록이 아니라 그 채널 화면으로 바로 진입함.
+export function openChannelSettings(channelId: string): void {
+  if (Platform.OS !== 'android') return;
+  const packageName = Constants.expoConfig?.android?.package ?? 'com.hyeongwon.gonow';
+  Linking.sendIntent('android.settings.CHANNEL_NOTIFICATION_SETTINGS', [
+    { key: 'android.provider.extra.APP_PACKAGE', value: packageName },
+    { key: 'android.provider.extra.CHANNEL_ID', value: channelId },
+  ]).catch(() => {
+    // 극히 일부 기기/롬엔 채널 설정 화면이 없을 수 있음 — 앱 설정 화면으로라도 보내서
+    // 완전히 아무 반응 없는 상태는 피함(거기서 "알림" 한 단계만 더 들어가면 됨)
+    Linking.openSettings().catch(() => {});
+  });
 }
