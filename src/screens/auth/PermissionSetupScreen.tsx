@@ -16,6 +16,7 @@ import { useLocalSearchParams } from 'expo-router';
 
 import { useAppNavigation } from '@/src/navigation';
 import {
+  getBatteryOptimizationIgnored,
   getLocationAlwaysStatus,
   LocationAlwaysStatus,
   openBatteryOptimizationSettings,
@@ -42,6 +43,7 @@ export default function PermissionSetupScreen() {
   const [notificationGranted, setNotificationGranted] = useState<boolean | 'checking'>('checking');
   const [requestingNotification, setRequestingNotification] = useState(false);
   const [alarmGranted, setAlarmGranted] = useState<boolean | 'checking'>('checking');
+  const [batteryIgnored, setBatteryIgnored] = useState<boolean | 'checking'>('checking');
 
   const refreshLocationStatus = useCallback(() => {
     getLocationAlwaysStatus().then(setLocationStatus);
@@ -55,20 +57,26 @@ export default function PermissionSetupScreen() {
     getExactAlarmGranted().then(setAlarmGranted);
   }, []);
 
+  const refreshBatteryStatus = useCallback(() => {
+    setBatteryIgnored(getBatteryOptimizationIgnored());
+  }, []);
+
   useEffect(() => {
     refreshLocationStatus();
     refreshNotificationStatus();
     refreshAlarmStatus();
+    refreshBatteryStatus();
     // 설정 화면 다녀온 뒤 앱으로 돌아오면 상태 다시 확인
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         refreshLocationStatus();
         refreshNotificationStatus();
         refreshAlarmStatus();
+        refreshBatteryStatus();
       }
     });
     return () => sub.remove();
-  }, [refreshLocationStatus, refreshNotificationStatus, refreshAlarmStatus]);
+  }, [refreshLocationStatus, refreshNotificationStatus, refreshAlarmStatus, refreshBatteryStatus]);
 
   const handleRequestLocation = async () => {
     setRequesting(true);
@@ -115,6 +123,11 @@ export default function PermissionSetupScreen() {
   const alarmBadge =
     alarmGranted === 'checking' ? '확인 중…'
     : alarmGranted ? '✅ 완료'
+    : '❌ 꺼져있음';
+
+  const batteryBadge =
+    batteryIgnored === 'checking' ? '확인 중…'
+    : batteryIgnored ? '✅ 완료'
     : '❌ 꺼져있음';
 
   return (
@@ -179,9 +192,12 @@ export default function PermissionSetupScreen() {
               <Text style={styles.cardDesc}>
                 목록에서 gonow를 찾아 "제한 없음"으로 바꿔주세요. 그래야 오랜 시간 뒤 알람도 끊기지 않아요.
               </Text>
-              <TouchableOpacity style={styles.actionButton} onPress={openBatteryOptimizationSettings}>
-                <Text style={styles.actionButtonText}>설정으로 이동</Text>
-              </TouchableOpacity>
+              <Text style={styles.statusText}>{batteryBadge}</Text>
+              {batteryIgnored !== true && (
+                <TouchableOpacity style={styles.actionButton} onPress={openBatteryOptimizationSettings}>
+                  <Text style={styles.actionButtonText}>설정으로 이동</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </>
         )}

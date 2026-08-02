@@ -1,12 +1,15 @@
 import * as Location from 'expo-location';
 import { Linking, Platform } from 'react-native';
 
+import BatteryOptimizationModule from '@/modules/battery-optimization';
+
 /**
  * 안드로이드가 런타임 팝업으로 자동 승인해주지 않는 3가지 필수 설정(위치 항상 허용,
  * 정확한 알람, 배터리 최적화 제외) 중 위치 관련 확인/요청 + 알람/배터리 설정화면
  * 이동을 담당하는 헬퍼. iOS는 해당 제약이 없어 위치 권한만 의미가 있다.
  * (정확한 알람의 상태 "확인"은 notifee를 쓰는 `src/utils/notifications.ts`의
- * `getExactAlarmGranted()`에 있음 — 배터리는 상태 확인 API 자체가 없어서 이동만 가능)
+ * `getExactAlarmGranted()`에 있음 — 배터리 상태 확인은 `getBatteryOptimizationIgnored()`,
+ * 로컬 네이티브 모듈 `modules/battery-optimization` 사용, 재빌드 필요)
  *
  * 알람/배터리는 앱 하나만 바로 찾아가는 화면이 있긴 하지만(각각 별도 매니페스트 권한
  * 선언 + 네이티브 모듈 필요, 배터리는 추가로 스토어 심사 리스크까지) 그 정도 편의 향상 대비
@@ -60,4 +63,17 @@ export function openBatteryOptimizationSettings(): void {
   Linking.sendIntent('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS').catch(() => {
     // 일부 기기/OS 버전에는 해당 화면이 없을 수 있음 — 무시
   });
+}
+
+// 배터리 최적화 제외 상태 확인 — 로컬 네이티브 모듈(modules/battery-optimization)이
+// PowerManager.isIgnoringBatteryOptimizations()를 감싸서 제공. iOS는 해당 개념이
+// 없어 항상 true(제약 없음으로 간주).
+export function getBatteryOptimizationIgnored(): boolean {
+  if (Platform.OS !== 'android') return true;
+  try {
+    return BatteryOptimizationModule.isIgnoringBatteryOptimizations();
+  } catch {
+    // 재빌드 전(네이티브 모듈 미연결) 등 예외 상황 — 미확인 상태를 false로 취급
+    return false;
+  }
 }

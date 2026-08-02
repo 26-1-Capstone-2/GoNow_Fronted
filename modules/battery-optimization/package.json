@@ -1,0 +1,7 @@
+{
+  "name": "battery-optimization",
+  "version": "1.0.0",
+  "description": "Local Expo module — checks Android battery optimization exemption status (PowerManager.isIgnoringBatteryOptimizations)",
+  "main": "index.ts",
+  "types": "index.ts"
+}
