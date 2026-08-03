@@ -4,6 +4,7 @@ import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createJourneysApi, ensureFutureDateTime, HomeJourneyPayload, JourneyDetail, maskToRepeatDays, repeatDaysToMask, targetTimeToAmpmHourMinute, toTargetTime } from '@/src/api/journeys';
 import { alarmService } from '@/src/services/alarmService';
 import { extractApiErrorMessage } from '@/src/utils/notifications';
+import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ACTIVE_JOURNEYS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { usePlaces } from '@/src/hooks/usePlaces';
@@ -211,6 +212,7 @@ export default function HomeAlarmSheet({ onClose, initialMode, editJourneyId, in
       Alert.alert('귀가지를 선택해주세요.');
       return;
     }
+    if (!(await checkCoreAlarmPermissions())) return;
     setSaving(true);
     try {
       const rawTime = editAlarm.mode === 'lastTrain'

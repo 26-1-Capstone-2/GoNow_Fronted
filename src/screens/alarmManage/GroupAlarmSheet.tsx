@@ -3,6 +3,7 @@ import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
 import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createAppointmentsApi } from '@/src/api/appointments';
 import { alarmService } from '@/src/services/alarmService';
+import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ACTIVE_APPOINTMENTS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { targetTimeToAmpmHourMinute } from '@/src/api/journeys';
@@ -162,6 +163,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
   const openNewGroup = () => { setEditAlarm(DEFAULT_ALARM); setView('edit'); };
   const handleJoin = async () => {
     if (inviteCode.trim().length === 0) { setInviteError('초대코드를 입력해주세요.'); return; }
+    if (!(await checkCoreAlarmPermissions())) return;
     try {
       const res = await appointmentsApi.joinAppointment(
         inviteCode.trim(),
@@ -285,6 +287,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
             Alert.alert('수정 실패', res.message ?? '다시 시도해주세요.');
           }
         } else {
+          if (!(await checkCoreAlarmPermissions())) return;
           const res = await appointmentsApi.updateAppointment(editAlarm.appointmentId, {
             plan_date: selectedDate,
             target_time: toTargetTime(selectedDate, editAlarm.ampm, editAlarm.hour, editAlarm.minute),
@@ -314,6 +317,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
     }
     if (!editAlarm.dest_name) { Alert.alert('목적지를 선택해주세요.'); return; }
     if (!editAlarm.dest_lat || !editAlarm.dest_lng) { Alert.alert('목적지를 다시 선택해주세요.'); return; }
+    if (!(await checkCoreAlarmPermissions())) return;
     try {
       const res = await appointmentsApi.createAppointment({
         plan_date: selectedDate,
