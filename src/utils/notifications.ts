@@ -12,40 +12,62 @@ import { Alert, Linking, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type AlarmStage = 1 | 2 | 3 | 4;
+// 도착 관련 알림 3종 — 출발 단계별 채널과 완전히 분리(성격이 다른 알림이라 서로 영향 안 주도록).
+// 'arrival-expected'/'arrival-complete'의 채널 문자열은 스프링 ParticipantService.java의
+// ArrivalChannel enum과 반드시 일치해야 함 — 이 둘은 스프링이 FCM에 실어 보내는 값이라
+// resetAlarmChannel()로 버전을 올리면 안 됨(버전 0 고정, UI에서 초기화 버튼 자체를 안 줌).
+export type ChannelKey = AlarmStage | 'arrival-check' | 'arrival-expected' | 'arrival-complete';
 export type AlarmType = 'personal' | 'group' | 'home';
 
-const CHANNEL_BASE: Record<AlarmStage, string> = {
+const CHANNEL_BASE: Record<ChannelKey, string> = {
   1: 'gonow-alarm-1',
   2: 'gonow-alarm-2',
   3: 'gonow-alarm-3',
   4: 'gonow-alarm-4',
+  'arrival-check': 'gonow-arrival-check',
+  'arrival-expected': 'gonow-arrival-expected',
+  'arrival-complete': 'gonow-arrival-complete',
 };
 export const CHANNEL_SILENT = 'gonow-silent';
 
-// 단계별 채널의 "리셋 횟수" — 안드로이드는 같은 채널ID로 삭제 후 재생성해도 이전
-// 사용자 설정을 그대로 되살리므로(un-delete), 진짜 초기화하려면 한 번도 안 쓰인
-// 새 채널ID가 필요함. 이 값을 늘려서 ID 뒤에 붙이는 방식으로 매번 새 채널을 만듦.
-const CHANNEL_VERSIONS_KEY = 'gonow_channel_versions'; // Record<'1'|'2'|'3'|'4', number>
+// 채널의 "리셋 횟수" — 안드로이드는 같은 채널ID로 삭제 후 재생성해도 이전 사용자 설정을
+// 그대로 되살리므로(un-delete), 진짜 초기화하려면 한 번도 안 쓰인 새 채널ID가 필요함.
+// 이 값을 늘려서 ID 뒤에 붙이는 방식으로 매번 새 채널을 만듦.
+const CHANNEL_VERSIONS_KEY = 'gonow_channel_versions'; // Record<ChannelKey를 문자열로, number>
 
-let channelIds: Record<AlarmStage, string> = { ...CHANNEL_BASE };
+let channelIds: Record<ChannelKey, string> = { ...CHANNEL_BASE };
 
 // 리셋 횟수는 "초기화" 버튼을 누를 때만 바뀌는데, ensureChannels()는 알람을 보낼
 // 때마다(하루 여러 번) 호출되므로 매번 AsyncStorage를 다시 읽지 않고 세션 중엔 캐싱함.
 // resetAlarmChannel()이 값을 바꾸면 캐시도 그 자리에서 같이 갱신됨.
-let channelVersionsCache: Record<AlarmStage, number> | null = null;
+let channelVersionsCache: Record<ChannelKey, number> | null = null;
 
-function buildChannelId(stage: AlarmStage, version: number): string {
-  return version <= 0 ? CHANNEL_BASE[stage] : `${CHANNEL_BASE[stage]}-r${version}`;
+// 채널 9개를 세션 중 한 번만 실제로 생성하기 위한 플래그. ensureChannels()는 알람을
+// 보낼 때마다(하루 여러 번) 호출되는데, notifee.createChannel()이 이미 존재하는
+// 채널엔 no-op이라도 매번 네이티브 브리지를 9번 왕복하는 건 낭비라 이 플래그로 건너뜀.
+// resetAlarmChannel()이 새 버전을 발급할 때만 false로 내려서 재생성을 강제함.
+let channelsEnsured = false;
+
+function buildChannelId(key: ChannelKey, version: number): string {
+  return version <= 0 ? CHANNEL_BASE[key] : `${CHANNEL_BASE[key]}-r${version}`;
 }
 
-async function loadChannelVersions(): Promise<Record<AlarmStage, number>> {
+async function loadChannelVersions(): Promise<Record<ChannelKey, number>> {
   if (channelVersionsCache) return channelVersionsCache;
   try {
     const raw = await AsyncStorage.getItem(CHANNEL_VERSIONS_KEY);
     const map: Partial<Record<string, number>> = raw ? JSON.parse(raw) : {};
-    channelVersionsCache = { 1: map['1'] ?? 0, 2: map['2'] ?? 0, 3: map['3'] ?? 0, 4: map['4'] ?? 0 };
+    channelVersionsCache = {
+      1: map['1'] ?? 0, 2: map['2'] ?? 0, 3: map['3'] ?? 0, 4: map['4'] ?? 0,
+      'arrival-check': map['arrival-check'] ?? 0,
+      'arrival-expected': map['arrival-expected'] ?? 0,
+      'arrival-complete': map['arrival-complete'] ?? 0,
+    };
   } catch {
-    channelVersionsCache = { 1: 0, 2: 0, 3: 0, 4: 0 };
+    channelVersionsCache = {
+      1: 0, 2: 0, 3: 0, 4: 0,
+      'arrival-check': 0, 'arrival-expected': 0, 'arrival-complete': 0,
+    };
   }
   return channelVersionsCache;
 }
@@ -152,66 +174,99 @@ async function ensureChannels(): Promise<void> {
     2: buildChannelId(2, versions[2]),
     3: buildChannelId(3, versions[3]),
     4: buildChannelId(4, versions[4]),
+    'arrival-check': buildChannelId('arrival-check', versions['arrival-check']),
+    'arrival-expected': buildChannelId('arrival-expected', versions['arrival-expected']),
+    'arrival-complete': buildChannelId('arrival-complete', versions['arrival-complete']),
   };
 
-  await notifee.createChannel({
-    id: channelIds[1],
-    name: 'GoNow 알람 (1단계)',
-    importance: AndroidImportance.HIGH,
-    sound: 'stage1',
-    vibration: false,
-    bypassDnd: true,
-  });
+  if (channelsEnsured) return;
 
-  await notifee.createChannel({
-    id: channelIds[2],
-    name: 'GoNow 알람 (2단계)',
-    importance: AndroidImportance.HIGH,
-    sound: 'stage2',
-    vibration: true,
-    vibrationPattern: [100, 250, 250, 250],
-    lights: true,
-    lightColor: '#4CAF50',
-    bypassDnd: true,
-  });
+  await Promise.all([
+    notifee.createChannel({
+      id: channelIds[1],
+      name: 'GoNow 알람 (1단계)',
+      importance: AndroidImportance.HIGH,
+      sound: 'stage1',
+      vibration: false,
+      bypassDnd: true,
+    }),
 
-  await notifee.createChannel({
-    id: channelIds[3],
-    name: 'GoNow 알람 (3단계)',
-    importance: AndroidImportance.HIGH,
-    sound: 'stage3',
-    vibration: true,
-    vibrationPattern: [100, 500, 200, 500, 200, 500],
-    lights: true,
-    lightColor: '#E74C3C',
-    bypassDnd: true,
-  });
+    notifee.createChannel({
+      id: channelIds[2],
+      name: 'GoNow 알람 (2단계)',
+      importance: AndroidImportance.HIGH,
+      sound: 'stage2',
+      vibration: true,
+      vibrationPattern: [100, 250, 250, 250],
+      lights: true,
+      lightColor: '#4CAF50',
+      bypassDnd: true,
+    }),
 
-  await notifee.createChannel({
-    id: channelIds[4],
-    name: 'GoNow 알람 (4단계)',
-    importance: AndroidImportance.HIGH,
-    sound: 'stage4',
-    vibration: true,
-    vibrationPattern: [100, 500, 200, 500, 200, 500],
-    lights: true,
-    lightColor: '#E74C3C',
-    bypassDnd: true,
-  });
+    notifee.createChannel({
+      id: channelIds[3],
+      name: 'GoNow 알람 (3단계)',
+      importance: AndroidImportance.HIGH,
+      sound: 'stage3',
+      vibration: true,
+      vibrationPattern: [100, 500, 200, 500, 200, 500],
+      lights: true,
+      lightColor: '#E74C3C',
+      bypassDnd: true,
+    }),
 
-  await notifee.createChannel({
-    id: CHANNEL_SILENT,
-    name: 'GoNow 알람 실행 중 (위치 추적)',
-    importance: AndroidImportance.LOW,
-    vibration: false,
-  });
+    notifee.createChannel({
+      id: channelIds[4],
+      name: 'GoNow 알람 (4단계)',
+      importance: AndroidImportance.HIGH,
+      sound: 'stage4',
+      vibration: true,
+      vibrationPattern: [100, 500, 200, 500, 200, 500],
+      lights: true,
+      lightColor: '#E74C3C',
+      bypassDnd: true,
+    }),
 
-  await notifee.createChannel({
-    id: 'gonow',
-    name: 'GoNow 알람 실행 중 (알림)',
-    importance: AndroidImportance.LOW,
-    vibration: false,
-  });
+    notifee.createChannel({
+      id: channelIds['arrival-check'],
+      name: 'GoNow 도착 여부 확인',
+      importance: AndroidImportance.HIGH,
+      sound: 'default',
+      vibration: true,
+    }),
+
+    notifee.createChannel({
+      id: channelIds['arrival-expected'],
+      name: 'GoNow 도착 예정 알림',
+      importance: AndroidImportance.HIGH,
+      sound: 'default',
+      vibration: true,
+    }),
+
+    notifee.createChannel({
+      id: channelIds['arrival-complete'],
+      name: 'GoNow 도착 완료 알림',
+      importance: AndroidImportance.HIGH,
+      sound: 'default',
+      vibration: true,
+    }),
+
+    notifee.createChannel({
+      id: CHANNEL_SILENT,
+      name: 'GoNow 알람 실행 중 (위치 추적)',
+      importance: AndroidImportance.LOW,
+      vibration: false,
+    }),
+
+    notifee.createChannel({
+      id: 'gonow',
+      name: 'GoNow 알람 실행 중 (알림)',
+      importance: AndroidImportance.LOW,
+      vibration: false,
+    }),
+  ]);
+
+  channelsEnsured = true;
 }
 
 // 팝업 없이 현재 알림 권한 상태만 확인 (PermissionSetupScreen 상태 표시용)
@@ -254,11 +309,11 @@ export function setupNotificationCategories(): void {
   ensureChannels().catch(() => {});
 }
 
-// 특정 단계의 현재 활성 채널ID 조회(설정 화면 등 외부에서 호출). ensureChannels()를
+// 특정 채널의 현재 활성 채널ID 조회(설정 화면 등 외부에서 호출). ensureChannels()를
 // 먼저 실행해 최신 상태(리셋 여부 포함)를 보장한 뒤 반환함.
-export async function getChannelId(stage: AlarmStage): Promise<string> {
+export async function getChannelId(key: ChannelKey): Promise<string> {
   await ensureChannels();
-  return channelIds[stage];
+  return channelIds[key];
 }
 
 // 사용자가 시스템 설정에서 소리/진동을 직접 바꾼 채널을 앱 기본값으로 되돌림.
@@ -266,13 +321,17 @@ export async function getChannelId(stage: AlarmStage): Promise<string> {
 // 되살리므로(un-delete), 한 번도 안 쓰인 새 채널ID를 발급하는 방식으로 리셋함.
 // 방금까지 쓰던 예전 채널은 새 채널 생성 후 바로 삭제해서 설정 목록이 안 지저분해지게 함
 // (지금 막 새로 만든 채널과는 다른 ID라 un-delete 문제 없이 안전하게 지워짐).
-export async function resetAlarmChannel(stage: AlarmStage): Promise<void> {
+// 주의: 'arrival-expected'/'arrival-complete'는 스프링이 채널ID를 고정값으로 알고 있어서
+// 호출 금지(UI에서 이 두 개는 초기화 버튼 자체를 안 보여줘야 함) — 호출하면 프론트-백엔드
+// 채널ID가 어긋나 그 순간부터 해당 FCM 알림이 깨짐.
+export async function resetAlarmChannel(key: ChannelKey): Promise<void> {
   if (Platform.OS !== 'android') return;
   const versions = await loadChannelVersions();
-  const oldChannelId = buildChannelId(stage, versions[stage] ?? 0);
+  const oldChannelId = buildChannelId(key, versions[key] ?? 0);
   // versions는 channelVersionsCache와 같은 객체 참조라, 여기서 바로 캐시도 함께 갱신됨
-  versions[stage] = (versions[stage] ?? 0) + 1;
+  versions[key] = (versions[key] ?? 0) + 1;
   await AsyncStorage.setItem(CHANNEL_VERSIONS_KEY, JSON.stringify(versions));
+  channelsEnsured = false; // 새 채널ID가 생겼으니 ensureChannels()가 다시 생성하도록 강제
   await ensureChannels();
   await notifee.deleteChannel(oldChannelId).catch(() => {});
 }
@@ -374,7 +433,7 @@ export async function sendArrivalCheckAlarm(
       ...(appointmentId != null && { appointmentId: String(appointmentId) }),
     },
     android: {
-      channelId: channelIds[3],
+      channelId: channelIds['arrival-check'],
       importance: AndroidImportance.HIGH,
       pressAction: { id: 'default', launchActivity: 'default' },
       actions: [
@@ -401,7 +460,7 @@ export async function sendArrivalConfirmAlarm(
     title: '✅ 도착 완료',
     body: `${nickname}님이 ${arrivalTime}에 ${destination}에 도착하였습니다.`,
     android: {
-      channelId: channelIds[2],
+      channelId: channelIds['arrival-complete'],
       importance: AndroidImportance.HIGH,
       pressAction: { id: 'default', launchActivity: 'default' },
     },
@@ -418,7 +477,7 @@ export async function sendArrivalAlarm(
     title: '🏃 도착예정 알림',
     body: `${memberName}님이 ${arrivalTime}에 ${destination}에 도착 예정이에요!`,
     android: {
-      channelId: channelIds[2],
+      channelId: channelIds['arrival-expected'],
       importance: AndroidImportance.HIGH,
       pressAction: { id: 'default', launchActivity: 'default' },
     },

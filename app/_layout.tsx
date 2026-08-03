@@ -1,4 +1,4 @@
-import { setupNotificationCategories, AlarmType } from '@/src/utils/notifications';
+import { setupNotificationCategories, AlarmType, getChannelId } from '@/src/utils/notifications';
 import { createJourneysApi } from '@/src/api/journeys';
 import { createAppointmentsApi } from '@/src/api/appointments';
 import { createAlarmsApi } from '@/src/api/alarms';
@@ -274,13 +274,16 @@ export default function RootLayout() {
       }
 
       // FCM Notification 메시지 (그룹 도착 알람 등) → 포그라운드에서 notifee로 직접 표시
+      // channel_id는 스프링이 data에 함께 실어 보냄(백그라운드용 AndroidConfig의 channelId와 동일 값) —
+      // 포그라운드에서 어느 채널로 재표시할지 이 값으로 판단. 없으면 도착예정 채널로 폴백.
       if (title && body) {
-        console.log(`[FCM] Notification 포그라운드 표시 — title:${title}`);
+        const channelId = typeof data?.channel_id === 'string' ? data.channel_id : await getChannelId('arrival-expected');
+        console.log(`[FCM] Notification 포그라운드 표시 — title:${title} channelId:${channelId}`);
         await notifee.displayNotification({
           title,
           body,
           android: {
-            channelId: 'gonow-alarm-2',
+            channelId,
             pressAction: { id: 'default' },
           },
         });

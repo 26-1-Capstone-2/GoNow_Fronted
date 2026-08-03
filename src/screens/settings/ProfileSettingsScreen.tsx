@@ -107,7 +107,7 @@ export default function ProfileSettingsScreen() {
           onPress={() => router.push('/alarm-sound-setup')}
           activeOpacity={0.7}
         >
-          <Text style={styles.menuButtonText}>출발 알람 소리 설정</Text>
+          <Text style={styles.menuButtonText}>알람 소리 설정</Text>
         </TouchableOpacity>
       </View>
 
