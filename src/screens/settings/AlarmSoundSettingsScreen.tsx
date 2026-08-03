@@ -67,8 +67,8 @@ export default function AlarmSoundSettingsScreen() {
   const router = useRouter();
 
   const handlePreview = async (card: CardDef) => {
-    const granted = await requestNotificationPermission();
-    if (!granted) return; // 권한 미허용 시 requestNotificationPermission 자체가 안내 팝업을 띄움
+    const { granted } = await requestNotificationPermission();
+    if (!granted) return; // 미리듣기라 별도 안내 없이 조용히 무시(허용 안 함이면 그냥 재생만 안 됨)
     await card.onPreview();
   };
 

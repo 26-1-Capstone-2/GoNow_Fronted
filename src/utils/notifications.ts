@@ -8,8 +8,9 @@ import notifee, {
   TimestampTrigger,
   TriggerType,
 } from '@notifee/react-native';
-import { Alert, Linking, Platform } from 'react-native';
+import { Linking, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 
 export type AlarmStage = 1 | 2 | 3 | 4;
 // 도착 관련 알림 3종 — 출발 단계별 채널과 완전히 분리(성격이 다른 알림이라 서로 영향 안 주도록).
@@ -229,7 +230,6 @@ async function ensureChannels(): Promise<void> {
       importance: AndroidImportance.HIGH,
       sound: 'stage1',
       vibration: false,
-      bypassDnd: true,
     }),
 
     notifee.createChannel({
@@ -241,7 +241,6 @@ async function ensureChannels(): Promise<void> {
       vibrationPattern: [100, 250, 250, 250],
       lights: true,
       lightColor: '#4CAF50',
-      bypassDnd: true,
     }),
 
     notifee.createChannel({
@@ -253,7 +252,6 @@ async function ensureChannels(): Promise<void> {
       vibrationPattern: [100, 500, 200, 500, 200, 500],
       lights: true,
       lightColor: '#E74C3C',
-      bypassDnd: true,
     }),
 
     notifee.createChannel({
@@ -265,7 +263,6 @@ async function ensureChannels(): Promise<void> {
       vibrationPattern: [100, 500, 200, 500, 200, 500],
       lights: true,
       lightColor: '#E74C3C',
-      bypassDnd: true,
     }),
 
     notifee.createChannel({
@@ -324,24 +321,62 @@ export async function getExactAlarmGranted(): Promise<boolean> {
   return settings.android.alarm !== AndroidNotificationSetting.DISABLED;
 }
 
-export async function requestNotificationPermission(): Promise<boolean> {
-  const settings = await notifee.requestPermission();
+// "앱 정보"보다 한 단계 더 들어간 "앱 알림" 설정 화면(마스터 토글 + 채널 목록)으로 바로
+// 이동 — openChannelSettings()와 같은 인텐트 계열이지만 특정 채널이 아니라 앱 전체
+// 알림 화면으로 감. OS 팝업이 막힌 경우, 사용자가 앱 정보에서 한 번 더 "알림" 항목을
+// 찾아 들어가야 하는 수고를 덜어줌. PermissionSetupScreen.tsx의 "설정으로 이동" 버튼
+// 액션으로 쓰이므로 export.
+export function openAppNotificationSettings(): void {
+  if (Platform.OS !== 'android') {
+    Linking.openSettings().catch(() => {});
+    return;
+  }
+  const packageName = Constants.expoConfig?.android?.package ?? 'com.hyeongwon.gonow';
+  Linking.sendIntent('android.settings.APP_NOTIFICATION_SETTINGS', [
+    { key: 'android.provider.extra.APP_PACKAGE', value: packageName },
+  ]).catch(() => {
+    // 일부 기기/OS 버전에는 해당 화면이 없을 수 있음 — 앱 정보로라도 보냄
+    Linking.openSettings().catch(() => {});
+  });
+}
 
-  if (settings.authorizationStatus < AuthorizationStatus.AUTHORIZED) {
-    Alert.alert(
-      '알림 권한 필요',
-      'GoNow 알람을 받으려면 알림 권한이 필요해요. 설정에서 허용해주세요.',
-      [
-        { text: '취소', style: 'cancel' },
-        { text: '설정으로 이동', onPress: () => Linking.openSettings() },
-      ]
-    );
-    return false;
+const NOTIFICATION_DENIAL_COUNT_KEY = 'gonow_notification_denial_count'; // number(문자열로 저장)
+
+export interface RequestNotificationResult {
+  granted: boolean;
+  // false면 안드로이드가 반복 거부로 OS 팝업 자체를 더 이상 안 띄우는 상태 — 이때는 우리가
+  // 직접 안내해야 함(requestLocationAlways()의 canAskAgain과 동일한 의미로 이름을 맞춤).
+  canAskAgain: boolean;
+}
+
+// OS 네이티브 권한 팝업을 요청한다. expo-location의 requestForegroundPermissionsAsync()와
+// 달리 notifee.requestPermission()은 canAskAgain을 안 줘서, 팝업이 실제로 떴다가 거부된
+// 것인지(자연스러운 흐름 — 뒤로가기와 다를 바 없음, 우리가 또 안내할 필요 없음) 아니면
+// 반복 거부로 팝업 자체가 막혀서 조용히 거부로 돌아온 것인지(이땐 우리가 안내하지 않으면
+// 사용자는 "허용하기"를 눌러도 아무 일도 안 일어나는 것처럼 보임) 결과만으로는 구분이
+// 안 된다. 안드로이드는 2번 거부 후부터 팝업을 막으므로(실기기로 확인), 거부 횟수를
+// AsyncStorage에 직접 세어서 같은 방식으로 판단한다 — 승인되면 리셋.
+export async function requestNotificationPermission(): Promise<RequestNotificationResult> {
+  const raw = await AsyncStorage.getItem(NOTIFICATION_DENIAL_COUNT_KEY);
+  const priorDenials = raw ? Number(raw) : 0;
+  const isAlreadyBlocked = priorDenials >= 2;
+
+  const settings = await notifee.requestPermission();
+  const granted = settings.authorizationStatus >= AuthorizationStatus.AUTHORIZED;
+
+  if (granted) {
+    await AsyncStorage.setItem(NOTIFICATION_DENIAL_COUNT_KEY, '0');
+    return { granted: true, canAskAgain: true };
+  }
+
+  // 이미 막혀있던 상태였다면(반복 거부) 카운트를 더 올릴 필요 없음 — 계속 막힌 채로 유지
+  if (!isAlreadyBlocked) {
+    await AsyncStorage.setItem(NOTIFICATION_DENIAL_COUNT_KEY, String(priorDenials + 1));
   }
 
   // 채널 생성은 앱 시작 시(setupNotificationCategories) + 각 발송 함수 자체에서
   // 이미 보장되므로, 권한 확인/요청만 하는 이 함수에서 또 호출할 필요 없음
-  return true;
+  return { granted: false, canAskAgain: !isAlreadyBlocked };
 }
 
 // 앱 시작 시 채널을 미리 만들어둬야, 사용자가 실제 알람을 한 번도 받기 전에도

@@ -18,14 +18,17 @@ import { useAppNavigation } from '@/src/navigation';
 import {
   getBatteryOptimizationIgnored,
   getLocationAlwaysStatus,
+  getLocationServicesEnabled,
   LocationAlwaysStatus,
   openBatteryOptimizationSettings,
   openExactAlarmSettings,
+  openLocationServiceSettings,
   requestLocationAlways,
 } from '@/src/utils/permissions';
 import {
   getExactAlarmGranted,
   getNotificationPermissionGranted,
+  openAppNotificationSettings,
   requestNotificationPermission,
 } from '@/src/utils/notifications';
 
@@ -44,9 +47,14 @@ export default function PermissionSetupScreen() {
   const [requestingNotification, setRequestingNotification] = useState(false);
   const [alarmGranted, setAlarmGranted] = useState<boolean | 'checking'>('checking');
   const [batteryIgnored, setBatteryIgnored] = useState<boolean | 'checking'>('checking');
+  const [locationServicesEnabled, setLocationServicesEnabled] = useState<boolean | 'checking'>('checking');
 
   const refreshLocationStatus = useCallback(() => {
     getLocationAlwaysStatus().then(setLocationStatus);
+  }, []);
+
+  const refreshLocationServicesStatus = useCallback(() => {
+    getLocationServicesEnabled().then(setLocationServicesEnabled);
   }, []);
 
   const refreshNotificationStatus = useCallback(() => {
@@ -63,6 +71,7 @@ export default function PermissionSetupScreen() {
 
   useEffect(() => {
     refreshLocationStatus();
+    refreshLocationServicesStatus();
     refreshNotificationStatus();
     refreshAlarmStatus();
     refreshBatteryStatus();
@@ -70,13 +79,14 @@ export default function PermissionSetupScreen() {
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         refreshLocationStatus();
+        refreshLocationServicesStatus();
         refreshNotificationStatus();
         refreshAlarmStatus();
         refreshBatteryStatus();
       }
     });
     return () => sub.remove();
-  }, [refreshLocationStatus, refreshNotificationStatus, refreshAlarmStatus, refreshBatteryStatus]);
+  }, [refreshLocationStatus, refreshLocationServicesStatus, refreshNotificationStatus, refreshAlarmStatus, refreshBatteryStatus]);
 
   const handleRequestLocation = async () => {
     setRequesting(true);
@@ -87,7 +97,7 @@ export default function PermissionSetupScreen() {
         // 반복 거부로 안드로이드가 팝업 자체를 더 이상 안 띄우는 상태 — 설정으로 안내
         Alert.alert(
           '위치 권한 필요',
-          '위치 권한이 반복 거부되어 팝업 대신 설정 화면에서 직접 켜주셔야 해요.',
+          '위치 권한이 반복 거부되어 팝업 대신 설정 화면에서 직접 켜주셔야 해요.\n설정 화면에서 "권한 > 위치"로 들어가 "항상 허용"으로 바꿔주세요.',
           [
             { text: '취소', style: 'cancel' },
             { text: '설정으로 이동', onPress: () => Linking.openSettings() },
@@ -102,8 +112,19 @@ export default function PermissionSetupScreen() {
   const handleRequestNotification = async () => {
     setRequestingNotification(true);
     try {
-      const granted = await requestNotificationPermission();
+      const { granted, canAskAgain } = await requestNotificationPermission();
       setNotificationGranted(granted);
+      if (!granted && !canAskAgain) {
+        // 반복 거부로 안드로이드가 팝업 자체를 더 이상 안 띄우는 상태 — 설정으로 안내
+        Alert.alert(
+          '알림 권한 필요',
+          '알림 권한이 반복 거부되어 팝업 대신 설정 화면에서 직접 켜주셔야 해요.',
+          [
+            { text: '취소', style: 'cancel' },
+            { text: '설정으로 이동', onPress: openAppNotificationSettings },
+          ],
+        );
+      }
     } finally {
       setRequestingNotification(false);
     }
@@ -130,6 +151,11 @@ export default function PermissionSetupScreen() {
     : batteryIgnored ? '✅ 완료'
     : '❌ 꺼져있음';
 
+  const locationServicesBadge =
+    locationServicesEnabled === 'checking' ? '확인 중…'
+    : locationServicesEnabled ? '✅ 완료'
+    : '❌ 꺼져있음';
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -140,6 +166,7 @@ export default function PermissionSetupScreen() {
       </View>
 
       <ScrollView style={styles.cardScroll} contentContainerStyle={styles.cardList} showsVerticalScrollIndicator={false}>
+        <Text style={styles.sectionTitle}>앱 권한</Text>
         <View style={styles.card}>
           <Text style={styles.cardTitle}>🔔 알림</Text>
           <Text style={styles.cardDesc}>
@@ -199,6 +226,20 @@ export default function PermissionSetupScreen() {
                 </TouchableOpacity>
               )}
             </View>
+
+            <Text style={styles.sectionTitle}>기기 설정</Text>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>📡 위치 서비스(GPS)</Text>
+              <Text style={styles.cardDesc}>
+                기기 자체의 위치(GPS)가 꺼져 있으면 GoNow 권한이 있어도 위치를 가져올 수 없어요.
+              </Text>
+              <Text style={styles.statusText}>{locationServicesBadge}</Text>
+              {locationServicesEnabled !== true && (
+                <TouchableOpacity style={styles.actionButton} onPress={openLocationServiceSettings}>
+                  <Text style={styles.actionButtonText}>설정으로 이동</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </>
         )}
       </ScrollView>
@@ -220,6 +261,13 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 14, color: '#888888', lineHeight: 20 },
   cardScroll: { flex: 1 },
   cardList: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 16, gap: 12 },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#AAAAAA',
+    marginTop: 8,
+    marginBottom: 2,
+  },
   card: {
     backgroundColor: '#F5F5F5',
     borderRadius: 16,

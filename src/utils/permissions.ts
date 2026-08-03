@@ -1,8 +1,11 @@
 import Constants from 'expo-constants';
 import * as Location from 'expo-location';
-import { Linking, Platform } from 'react-native';
+import { router } from 'expo-router';
+import { Alert, Linking, Platform } from 'react-native';
 
 import BatteryOptimizationModule from '@/modules/battery-optimization';
+import { ROUTES } from '@/src/navigation/routes';
+import { getNotificationPermissionGranted } from '@/src/utils/notifications';
 
 /**
  * 안드로이드가 런타임 팝업으로 자동 승인해주지 않는 3가지 필수 설정(위치 항상 허용,
@@ -29,6 +32,22 @@ export async function getLocationAlwaysStatus(): Promise<LocationAlwaysStatus> {
   return 'granted';
 }
 
+// 기기 전체의 위치(GPS) 서비스 자체가 켜져 있는지 확인 — 앱별 권한("항상 허용")과는
+// 별개 개념. 권한이 있어도 기기 위치 서비스(상단바 GPS 토글)가 꺼져 있으면 좌표를 못
+// 가져옴(비행기 모드를 켜면 대부분 같이 꺼짐).
+export async function getLocationServicesEnabled(): Promise<boolean> {
+  return Location.hasServicesEnabledAsync();
+}
+
+// 기기 전체의 위치(GPS) 서비스 켜기/끄기 화면으로 바로 이동.
+export function openLocationServiceSettings(): void {
+  if (Platform.OS !== 'android') return;
+  Linking.sendIntent('android.settings.LOCATION_SOURCE_SETTINGS').catch(() => {
+    // 일부 기기/OS 버전에는 해당 화면이 없을 수 있음 — 앱 설정 화면으로라도 보냄
+    Linking.openSettings().catch(() => {});
+  });
+}
+
 export interface RequestLocationResult {
   status: LocationAlwaysStatus;
   // 둘 다 false면 안드로이드가 반복 거부로 인해 팝업 자체를 더 이상 안 띄우는 상태 —
@@ -46,6 +65,37 @@ export async function requestLocationAlways(): Promise<RequestLocationResult> {
     status: bg.status === 'granted' ? 'granted' : 'foregroundOnly',
     canAskAgain: bg.canAskAgain,
   };
+}
+
+// 알람 생성/수정 시점에 확인하는 핵심 권한 2가지 — 위치(항상 허용)와 알림. 이 둘이 없으면
+// 알람이 절대 작동할 수 없음(완전 무음)이라, 저장 직전에 막고 유도한다. 위치 서비스(GPS
+// 토글)는 일부러 여기 포함 안 함 — 배터리 아끼려고 자주 껐다 켜는 값이라 "지금 꺼져있음"이
+// "알람 실행 시점에도 꺼져있을 것"을 의미하지 않기 때문(실행 시점에 alarmService.ts가
+// 별도로 재확인함). 위치 권한/알림 권한은 한 번 꺼지면 웬만해선 계속 꺼져있는 안정적인
+// 상태라 생성 시점 체크가 의미 있음.
+//
+// 여기서 직접 OS 권한 팝업을 띄우지 않고 조회만 한다(getNotificationPermissionGranted/
+// getLocationAlwaysStatus 둘 다 팝업 없이 현재 상태만 확인). "저장" 버튼을 누르자마자
+// 맥락 없이 시스템 다이얼로그가(위치는 심하면 다이얼로그 → 시스템 설정 화면 자동 이동까지)
+// 튀어나오는 게 사용자 입장에서 뜬금없고, 알림/위치가 둘 다 꺼져있으면 하나 고칠 때마다
+// 저장을 다시 눌러야 하는 문제도 있었다. 대신 뭐가 꺼져있든 항상 같은 안내 Alert 하나만
+// 띄우고 "필수 권한 설정" 화면(PermissionSetupScreen)으로 보내서, 이미 있는 상태 배지 +
+// 개별 허용 버튼으로 몇 개가 꺼져있든 한 번에 다 고치게 한다.
+export async function checkCoreAlarmPermissions(): Promise<boolean> {
+  const notificationGranted = await getNotificationPermissionGranted();
+  const locationStatus = await getLocationAlwaysStatus();
+
+  if (notificationGranted && locationStatus === 'granted') return true;
+
+  Alert.alert(
+    '필수 권한 필요',
+    '알람이 정확히 울리려면 알림·위치 권한이 모두 켜져 있어야 해요. 필수 권한 설정 화면에서 확인해주세요.',
+    [
+      { text: '취소', style: 'cancel' },
+      { text: '권한 설정으로 이동', onPress: () => router.push(ROUTES.permissionSetup) },
+    ],
+  );
+  return false;
 }
 
 // "정확한 알람" 설정 화면(전체 앱 목록)으로 이동 — 상태 확인 API는 없어서 이동만 제공.
