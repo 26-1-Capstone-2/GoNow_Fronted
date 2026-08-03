@@ -92,14 +92,55 @@ export async function cancelStagedAlarms(key: string): Promise<void> {
 async function cancelAndRemoveTriggerIds(key: string): Promise<void> {
   try {
     const raw = await AsyncStorage.getItem(TRIGGER_IDS_KEY);
-    if (!raw) { console.log(`[trigger] 취소 시도 — key:${key} AsyncStorage 없음`); return; }
-    const map: Record<string, string[]> = JSON.parse(raw);
-    const ids = map[key] ?? [];
-    console.log(`[trigger] 취소 시도 — key:${key} ids:${ids}`);
-    await Promise.all(ids.map(id => notifee.cancelTriggerNotification(id).catch(() => {})));
+    if (raw) {
+      const map: Record<string, string[]> = JSON.parse(raw);
+      const ids = map[key] ?? [];
+      console.log(`[trigger] 취소 시도 — key:${key} ids:${ids}`);
+      await Promise.all(ids.map(id => notifee.cancelTriggerNotification(id).catch(() => {})));
+      delete map[key];
+      await AsyncStorage.setItem(TRIGGER_IDS_KEY, JSON.stringify(map));
+      console.log(`[trigger] 취소 완료 — key:${key}`);
+    } else {
+      console.log(`[trigger] 취소 시도 — key:${key} AsyncStorage 없음`);
+    }
+  } catch {}
+  // 트리거를 취소하는 시점엔 그 지문(fingerprint)도 항상 무효화 — syncStagedAlarms()가
+  // 재등록 직전에 호출하는 경우엔 바로 뒤에서 새 지문을 다시 씀, 완전히 정리하는
+  // 경우(MOVING/ARRIVED/stop())엔 다음 등록 때 "기록 없음"으로 자연스럽게 처리됨
+  await clearStagingFingerprint(key);
+}
+
+// 단계별 알람 "스테이징 지문" — departureAlarmTime+whichStation 조합을 기억해뒀다가 동일하면
+// 재등록을 건너뜀. 포그라운드(alarmService.ts)와 백그라운드(backgroundLocationTask.ts)가 각자
+// 독립적으로 취소·재등록을 반복하며 중복 발송/메시지 고착을 일으키던 문제의 근본 수정 — 두 경로가
+// 이 AsyncStorage 기반 지문 하나를 공유해서 "이미 이 데이터로 등록했는지"를 판단함(syncStagedAlarms 참고).
+const STAGING_FINGERPRINT_KEY = 'gonow_staging_fingerprint'; // Record<key, { departureAlarmTime, whichStation }>
+
+type StagingFingerprint = { departureAlarmTime: string; whichStation: string | null };
+
+// DEPARTING/NEARDEST 구간에서는 매 폴링(짧으면 10~30초 간격)마다 syncStagedAlarms()가 이
+// 지문을 읽는데, 대부분 "변경 없음, 스킵"으로 끝나면서도 매번 AsyncStorage를 다시 읽는 건
+// 낭비라 channelVersionsCache와 동일한 패턴으로 메모리 캐싱. 반환된 객체를 직접 수정하고
+// 그대로 AsyncStorage에 저장하면(참조 공유) 캐시도 같이 최신 상태로 유지됨.
+let stagingFingerprintCache: Record<string, StagingFingerprint> | null = null;
+
+async function loadStagingFingerprints(): Promise<Record<string, StagingFingerprint>> {
+  if (stagingFingerprintCache) return stagingFingerprintCache;
+  try {
+    const raw = await AsyncStorage.getItem(STAGING_FINGERPRINT_KEY);
+    stagingFingerprintCache = raw ? JSON.parse(raw) : {};
+  } catch {
+    stagingFingerprintCache = {};
+  }
+  return stagingFingerprintCache!;
+}
+
+async function clearStagingFingerprint(key: string): Promise<void> {
+  try {
+    const map = await loadStagingFingerprints();
+    if (!(key in map)) return;
     delete map[key];
-    await AsyncStorage.setItem(TRIGGER_IDS_KEY, JSON.stringify(map));
-    console.log(`[trigger] 취소 완료 — key:${key}`);
+    await AsyncStorage.setItem(STAGING_FINGERPRINT_KEY, JSON.stringify(map));
   } catch {}
 }
 
@@ -559,6 +600,87 @@ export async function scheduleFutureAlarm(
   const storageKey = journeyId != null ? `j_${journeyId}` : appointmentId != null ? `a_${appointmentId}` : null;
   if (storageKey && !isPast) await saveTriggerIds(storageKey, ids);
   return ids;
+}
+
+// 단계별 출발 알람(1~4단계)을 서버 응답 기준으로 등록/재등록. 포그라운드(alarmService.ts)와
+// 백그라운드(backgroundLocationTask.ts) 양쪽에서 상태를 폴링할 때마다 호출해도 안전 —
+// departureAlarmTime+whichStation이 지난번 등록과 동일하면 즉시 return하므로, 매 폴링마다
+// 취소·재등록을 반복하지 않음(이게 예전 중복 발송/메시지 고착 버그의 근본 원인이었음).
+const stagingLocks = new Map<string, Promise<void>>();
+
+// 같은 key로 거의 동시에 여러 번 호출돼도(포그라운드 alarmService.ts와 백그라운드
+// backgroundLocationTask.ts가 겹쳐 돌 때 실제로 발생함) 순서대로 하나씩만 처리되도록 직렬화.
+// 이게 없으면 두 호출 다 "아직 안 바뀐" 예전 지문을 읽고 둘 다 재등록을 진행해 중복이 생김.
+async function withStagingLock(key: string, fn: () => Promise<void>): Promise<void> {
+  const prev = stagingLocks.get(key) ?? Promise.resolve();
+  const run = prev.then(fn, fn); // 이전 호출이 실패했어도 다음 호출은 정상 진행
+  stagingLocks.set(key, run.catch(() => {}));
+  return run;
+}
+
+export async function syncStagedAlarms(
+  key: string, // 'j_<journeyId>' | 'a_<appointmentId>'
+  type: AlarmType,
+  destination: string | undefined,
+  journeyId: number | undefined,
+  appointmentId: number | undefined,
+  preparationTime: number,
+  whichStation: string | null | undefined,
+  departureAlarmTime: string | null | undefined,
+): Promise<void> {
+  if (!departureAlarmTime) return;
+
+  return withStagingLock(key, async () => {
+    const map = await loadStagingFingerprints();
+    const prev = map[key];
+    // 서버는 이번 폴링에서 플라스크를 실제로 재호출했을 때만 whichStation을 채워서
+    // 내려주고, DEPARTING 유지처럼 재계산이 필요 없는 폴링에서는 무조건 null을 돌려줌
+    // (JourneyService.updateLocation()의 DEPARTING-유지 분기, ParticipantService도 동일) —
+    // 즉 null은 "역 정보가 사라졌다"가 아니라 "이번엔 새로 알려줄 게 없다"는 뜻. 이전에
+    // 알던 값을 그대로 유지해야 이 null↔값 흔들림을 진짜 변경으로 오판해서 재등록(및
+    // 재발송)을 반복하지 않음 — 이게 "한참 지난 후 4단계가 다시 울리는" 버그의 진짜 원인이었음.
+    const normalizedStation = whichStation ?? prev?.whichStation ?? null;
+    if (prev && prev.departureAlarmTime === departureAlarmTime && prev.whichStation === normalizedStation) {
+      console.log(`[알람] syncStagedAlarms — key:${key} 지문 동일, 재등록 스킵`);
+      return;
+    }
+
+    // 기존 등록분 취소를 끝까지 기다린 뒤(같은 TRIGGER_IDS_KEY에 대한 경합 방지) 새 지문을 씀
+    await cancelStagedAlarms(key);
+    map[key] = { departureAlarmTime, whichStation: normalizedStation };
+    await AsyncStorage.setItem(STAGING_FINGERPRINT_KEY, JSON.stringify(map));
+
+    const stepMs = preparationTime * 60 * 1000 * 0.25;
+    const alarmBase = new Date(departureAlarmTime).getTime();
+    const stepTimes = [alarmBase, alarmBase + stepMs, alarmBase + stepMs * 2, alarmBase + stepMs * 3];
+    const now = Date.now();
+
+    // 각 단계에서 표시할 분: 1단계=100%, 2단계=75%, 3단계=50%, 4단계=25%
+    const ratios = [1.0, 0.75, 0.5, 0.25];
+    const mins = (idx: number) =>
+      normalizedStation ? Math.max(0, Math.round(preparationTime * ratios[idx])) : undefined;
+
+    // 현재 시각 기준으로 시작 단계 결정 — 아직 안 지난 첫 번째 단계부터 시작
+    // 모든 단계가 지났으면 4단계(idx=3) 즉시 발송
+    const foundIdx = stepTimes.findIndex((t) => now < t);
+    const startIdx = foundIdx === -1 ? 3 : foundIdx;
+
+    console.log(`[알람] key:${key} ${startIdx + 1}단계부터 예약 — 1단계:${new Date(stepTimes[0]).toLocaleTimeString('ko-KR', { hour12: false })} 2단계:${new Date(stepTimes[1]).toLocaleTimeString('ko-KR', { hour12: false })} 3단계:${new Date(stepTimes[2]).toLocaleTimeString('ko-KR', { hour12: false })} 4단계:${new Date(stepTimes[3]).toLocaleTimeString('ko-KR', { hour12: false })} whichStation:${normalizedStation}`);
+
+    try {
+      const allIds: string[] = [];
+      for (let i = startIdx; i < 4; i++) {
+        const stage = (i + 1) as 1 | 2 | 3 | 4;
+        // 4단계(i=3)이고 시각이 이미 지났으면 minutesRemaining=0 → 긴급 문구 표시
+        const minutesRemaining = (i === 3 && now >= stepTimes[3]) ? 0 : mins(i);
+        const ids = await scheduleFutureAlarm(type, stage, destination, stepTimes[i], journeyId, appointmentId, normalizedStation, minutesRemaining);
+        allIds.push(...ids);
+      }
+      console.log(`[알람] syncStagedAlarms 등록 완료 — key:${key} ids:${allIds}`);
+    } catch (e) {
+      console.log('[알람] syncStagedAlarms 등록 실패', e);
+    }
+  });
 }
 
 // 서버 에러 응답 바디(JSON)에서 사용자에게 보여줄 메시지 추출, 실패 시 fallback

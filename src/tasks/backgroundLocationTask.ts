@@ -3,7 +3,7 @@ import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState } from 'react-native';
 import { TOKEN_KEY } from '@/src/store/authStore';
-import { sendAlarm, scheduleFutureAlarm, cancelStagedAlarms, AlarmType, CHANNEL_SILENT } from '@/src/utils/notifications';
+import { sendAlarm, syncStagedAlarms, cancelStagedAlarms, AlarmType, CHANNEL_SILENT } from '@/src/utils/notifications';
 
 export const BACKGROUND_LOCATION_TASK = 'BACKGROUND-LOCATION-TASK';
 export const ACTIVE_JOURNEYS_KEY = 'gonow_active_journeys';
@@ -138,8 +138,6 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
 
   const remainingJourneys: number[] = [];
   const remainingAppointments: number[] = [];
-  // 이번 태스크 실행에서 이미 알람 발송한 key 추적 (중복 방지)
-  const alarmSentThisRun = new Set<string>();
 
   const [lastCallTimesRaw, desiredIntervalsRaw] = await Promise.all([
     AsyncStorage.getItem(LAST_CALL_TIMES_KEY),
@@ -174,24 +172,9 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
           desiredIntervals[key] = interval;
         }
 
-        if (journey_status === 'DEPARTING' && !alarmSentThisRun.has(key) && which_station != null) {
-          alarmSentThisRun.add(key);
-          console.log(`[백그라운드] DEPARTING 진입 — journeyId:${id} 단계별 알람 발송`);
-          await cancelStagedAlarms(key); // 포그라운드 등록분 취소 후 재등록
-          const pt = preparation_time ?? 0;
-          const stepMs = pt * 60 * 1000 * 0.25;
-          const ratios = [1.0, 0.75, 0.5, 0.25];
-          const mins = (idx: number) => which_station ? Math.max(0, Math.round(pt * ratios[idx])) : undefined;
-          const alarmBase = departure_alarm_time ? new Date(departure_alarm_time).getTime() : Date.now();
-          const stepTimes = [alarmBase, alarmBase + stepMs, alarmBase + stepMs * 2, alarmBase + stepMs * 3];
-          const now = Date.now();
-          const foundIdx = stepTimes.findIndex((t) => now < t);
-          const startIdx = foundIdx === -1 ? 3 : foundIdx;
-          for (let i = startIdx; i < 4; i++) {
-            const stage = (i + 1) as 1 | 2 | 3 | 4;
-            const minutesRemaining = (i === 3 && now >= stepTimes[3]) ? 0 : mins(i);
-            await scheduleFutureAlarm(type, stage, dest_name, stepTimes[i], id, undefined, which_station, minutesRemaining);
-          }
+        if ((journey_status === 'DEPARTING' || journey_status === 'NEARDEST') && departure_alarm_time) {
+          console.log(`[백그라운드] ${journey_status} — journeyId:${id} 단계별 알람 동기화`);
+          await syncStagedAlarms(key, type, dest_name, id, undefined, preparation_time ?? 0, which_station, departure_alarm_time);
         }
 
         if (journey_status === 'ARRIVED') {
@@ -235,24 +218,9 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
           desiredIntervals[key] = interval;
         }
 
-        if (participant_status === 'DEPARTING' && !alarmSentThisRun.has(key) && which_station != null) {
-          alarmSentThisRun.add(key);
-          console.log(`[백그라운드] DEPARTING 진입 — appointmentId:${id} 단계별 알람 발송`);
-          await cancelStagedAlarms(key); // 포그라운드 등록분 취소 후 재등록
-          const pt = preparation_time ?? 0;
-          const stepMs = pt * 60 * 1000 * 0.25;
-          const ratios = [1.0, 0.75, 0.5, 0.25];
-          const mins = (idx: number) => which_station ? Math.max(0, Math.round(pt * ratios[idx])) : undefined;
-          const alarmBase = departure_alarm_time ? new Date(departure_alarm_time).getTime() : Date.now();
-          const stepTimes = [alarmBase, alarmBase + stepMs, alarmBase + stepMs * 2, alarmBase + stepMs * 3];
-          const now = Date.now();
-          const foundIdx = stepTimes.findIndex((t) => now < t);
-          const startIdx = foundIdx === -1 ? 3 : foundIdx;
-          for (let i = startIdx; i < 4; i++) {
-            const stage = (i + 1) as 1 | 2 | 3 | 4;
-            const minutesRemaining = (i === 3 && now >= stepTimes[3]) ? 0 : mins(i);
-            await scheduleFutureAlarm('group', stage, dest_name, stepTimes[i], undefined, id, which_station, minutesRemaining);
-          }
+        if ((participant_status === 'DEPARTING' || participant_status === 'NEARDEST') && departure_alarm_time) {
+          console.log(`[백그라운드] ${participant_status} — appointmentId:${id} 단계별 알람 동기화`);
+          await syncStagedAlarms(key, 'group', dest_name, undefined, id, preparation_time ?? 0, which_station, departure_alarm_time);
         }
 
         if (participant_status === 'ARRIVED') {
@@ -265,7 +233,7 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
       } catch (e: any) {
         if (e?.message?.startsWith('HTTP 4')) {
           console.log(`[백그라운드] appointmentId:${id} 서버 ${e.message} → ID 제거 (삭제된 알람)`);
-          await removeStagingKey(key);
+          await cancelStagedAlarms(key);
           delete lastCallTimes[key];
           delete desiredIntervals[key];
         } else {
