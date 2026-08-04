@@ -1,4 +1,4 @@
-import { requestNotificationPermission, setupNotificationCategories, AlarmType } from '@/src/utils/notifications';
+import { setupNotificationCategories, AlarmType, getChannelId } from '@/src/utils/notifications';
 import { createJourneysApi } from '@/src/api/journeys';
 import { createAppointmentsApi } from '@/src/api/appointments';
 import { createAlarmsApi } from '@/src/api/alarms';
@@ -7,6 +7,8 @@ import * as Notifications from 'expo-notifications';
 import { BACKGROUND_ALARM_TASK } from '@/src/tasks/backgroundAlarmTask';
 import { ACTIVE_JOURNEYS_KEY, ACTIVE_APPOINTMENTS_KEY, DESIRED_INTERVALS_KEY, SESSION_READY_KEY, startBackgroundLocationUpdates, stopBackgroundLocationUpdates } from '@/src/tasks/backgroundLocationTask';
 import { getToken, useAuthStore, TOKEN_KEY } from '@/src/store/authStore';
+import { useAppointmentStatusStore } from '@/src/store/appointmentStatusStore';
+import { useCalendarStore } from '@/src/store/calendarStore';
 import { createMembersApi } from '@/src/api/members';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
@@ -40,7 +42,8 @@ export default function RootLayout() {
       await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify([]));
       await AsyncStorage.setItem(DESIRED_INTERVALS_KEY, JSON.stringify({}));
 
-      requestNotificationPermission();
+      // 알림 권한 요청은 더 이상 여기서 자동으로 안 함 — PermissionSetupScreen(회원가입 직후/설정 화면)에서
+      // 맥락 설명과 함께 요청하도록 이동함
       setupNotificationCategories();
 
       // registerTaskAsync는 앱 초기화 완료 후 호출해야 함 (너무 이르면 NullPointerException)
@@ -173,6 +176,8 @@ export default function RootLayout() {
         const appointmentId = Number(data.appointment_id);
         const participantStatus = String(data.participant_status);
         console.log(`[FCM] 방장 수정 동기화 — appointmentId:${appointmentId} participantStatus:${participantStatus}`);
+        useAppointmentStatusStore.getState().bumpParticipants(appointmentId);
+        useCalendarStore.getState().bumpAlarmVersion();
         try {
           if (participantStatus === 'READY') {
             if (alarmService.isRunning(undefined, appointmentId)) {
@@ -190,6 +195,33 @@ export default function RootLayout() {
         } catch (e) {
           console.log(`[FCM] 방장 수정 동기화 실패 — appointmentId:${appointmentId}`, e);
         }
+        return;
+      }
+
+      // 참가자 참여/탈퇴/추방/이동수단 변경 FCM → 열려있는 상세화면 refetch + 목록/캘린더 새로고침
+      if (data?.appointment_id && data?.sync_event === 'participants_changed') {
+        const appointmentId = Number(data.appointment_id);
+        console.log(`[FCM] 참가자 목록 변경 — appointmentId:${appointmentId}`);
+        useAppointmentStatusStore.getState().bumpParticipants(appointmentId);
+        useCalendarStore.getState().bumpAlarmVersion();
+        return;
+      }
+
+      // 약속 삭제 FCM → 열려있는 상세화면 강제 종료 + 목록/캘린더 새로고침
+      if (data?.appointment_id && data?.sync_event === 'appointment_deleted') {
+        const appointmentId = Number(data.appointment_id);
+        console.log(`[FCM] 약속 삭제 — appointmentId:${appointmentId}`);
+        useAppointmentStatusStore.getState().setDeletedAppointmentId(appointmentId);
+        useCalendarStore.getState().bumpAlarmVersion();
+        return;
+      }
+
+      // 참가자 추방 FCM (쫓겨난 당사자 전용) → 열려있는 상세화면 강제 종료 + 목록/캘린더 새로고침
+      if (data?.appointment_id && data?.sync_event === 'removed_from_appointment') {
+        const appointmentId = Number(data.appointment_id);
+        console.log(`[FCM] 추방됨 — appointmentId:${appointmentId}`);
+        useAppointmentStatusStore.getState().setRemovedAppointmentId(appointmentId);
+        useCalendarStore.getState().bumpAlarmVersion();
         return;
       }
 
@@ -242,13 +274,16 @@ export default function RootLayout() {
       }
 
       // FCM Notification 메시지 (그룹 도착 알람 등) → 포그라운드에서 notifee로 직접 표시
+      // channel_id는 스프링이 data에 함께 실어 보냄(백그라운드용 AndroidConfig의 channelId와 동일 값) —
+      // 포그라운드에서 어느 채널로 재표시할지 이 값으로 판단. 없으면 도착예정 채널로 폴백.
       if (title && body) {
-        console.log(`[FCM] Notification 포그라운드 표시 — title:${title}`);
+        const channelId = typeof data?.channel_id === 'string' ? data.channel_id : await getChannelId('arrival-expected');
+        console.log(`[FCM] Notification 포그라운드 표시 — title:${title} channelId:${channelId}`);
         await notifee.displayNotification({
           title,
           body,
           android: {
-            channelId: 'gonow-alarm-2',
+            channelId,
             pressAction: { id: 'default' },
           },
         });
@@ -310,6 +345,7 @@ export default function RootLayout() {
           <Stack.Screen name="change-nickname" />
           <Stack.Screen name="change-password" />
           <Stack.Screen name="daily-alarm" />
+          <Stack.Screen name="permission-setup" />
           <Stack.Screen name="alarm-test" options={{ animation: 'slide_from_bottom' }} />
         </Stack>
         <StatusBar style="auto" />

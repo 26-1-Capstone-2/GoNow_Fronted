@@ -16,7 +16,7 @@
         "backgroundColor": "#000000"
       }
     },
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
@@ -82,7 +82,12 @@
         {
           "icon": "./assets/images/android-icon-monochrome.png",
           "color": "#4CAF50",
-          "sounds": [],
+          "sounds": [
+            "./assets/sounds/stage1.wav",
+            "./assets/sounds/stage2.wav",
+            "./assets/sounds/stage3.mp3",
+            "./assets/sounds/stage4.mp3"
+          ],
           "mode": "production"
         }
       ]

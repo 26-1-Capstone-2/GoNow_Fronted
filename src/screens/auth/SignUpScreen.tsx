@@ -17,6 +17,12 @@ import { useSignUpStore } from '@/src/store/signUpStore';
 
 const authApi = createAuthApi();
 
+// 서버(SignupRequest.password)와 동일한 규칙: 공백 없는 영문/숫자/특수문자 8~64자
+const PASSWORD_REGEX = /^[\x21-\x7E]{8,64}$/;
+
+// 형식이 틀린 채로 중복확인 API를 호출하지 않도록 하는 사전 체크(정밀한 검증은 서버 @Email이 최종 담당)
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 type FieldStatus = 'idle' | 'checking' | 'ok' | 'error';
 
 export default function SignUpScreen() {
@@ -37,9 +43,14 @@ export default function SignUpScreen() {
   const emailDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!email) { setEmailStatus('idle'); setEmailMsg(''); return; }
-    setEmailStatus('idle'); setEmailMsg('');
     if (emailDebounceRef.current) clearTimeout(emailDebounceRef.current);
+    if (!email) { setEmailStatus('idle'); setEmailMsg(''); return; }
+    if (!EMAIL_REGEX.test(email)) {
+      setEmailStatus('error');
+      setEmailMsg('올바른 이메일 형식이 아닙니다.');
+      return;
+    }
+    setEmailStatus('idle'); setEmailMsg('');
     emailDebounceRef.current = setTimeout(async () => {
       setEmailStatus('checking');
       try {
@@ -73,10 +84,12 @@ export default function SignUpScreen() {
     return () => { if (nicknameDebounceRef.current) clearTimeout(nicknameDebounceRef.current); };
   }, [nickname]);
 
+  const isPasswordInvalid = password.length > 0 && !PASSWORD_REGEX.test(password);
+
   const canProceed =
     emailStatus === 'ok' &&
     nicknameStatus === 'ok' &&
-    password.length > 0 &&
+    PASSWORD_REGEX.test(password) &&
     password === passwordConfirm;
 
   const handleNext = () => {
@@ -131,13 +144,16 @@ export default function SignUpScreen() {
 
             <Text style={styles.label}>비밀번호</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, isPasswordInvalid && styles.inputError]}
               placeholder="비밀번호"
               placeholderTextColor="#BBBBBB"
               value={password}
               onChangeText={setPassword}
               secureTextEntry
             />
+            {isPasswordInvalid && (
+              <Text style={styles.errorText}>공백 없는 영문/숫자/특수문자로 8~64자여야 합니다.</Text>
+            )}
 
             <Text style={styles.label}>비밀번호 확인</Text>
             <TextInput

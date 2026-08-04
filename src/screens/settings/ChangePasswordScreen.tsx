@@ -16,6 +16,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 const membersApi = createMembersApi();
 
+// 서버(PasswordUpdateRequest.newPassword)와 동일한 규칙: 공백 없는 영문/숫자/특수문자 8~64자
+const PASSWORD_REGEX = /^[\x21-\x7E]{8,64}$/;
+
 export default function ChangePasswordScreen() {
   const router = useRouter();
   const [currentPassword, setCurrentPassword] = useState('');
@@ -23,7 +26,8 @@ export default function ChangePasswordScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const isValid = currentPassword.trim() && newPassword.trim() && confirmPassword.trim();
+  const isNewPasswordInvalid = newPassword.length > 0 && !PASSWORD_REGEX.test(newPassword);
+  const isValid = currentPassword.trim() && PASSWORD_REGEX.test(newPassword) && confirmPassword.trim();
   const isMismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
 
   const handleSave = async () => {
@@ -66,13 +70,16 @@ export default function ChangePasswordScreen() {
 
         <Text style={styles.inputLabel}>새 비밀번호</Text>
         <TextInput
-          style={styles.input}
+          style={[styles.input, isNewPasswordInvalid && styles.inputError]}
           placeholder=""
           placeholderTextColor="#BBBBBB"
           value={newPassword}
           onChangeText={setNewPassword}
           secureTextEntry
         />
+        {isNewPasswordInvalid && (
+          <Text style={styles.errorText}>공백 없는 영문/숫자/특수문자로 8~64자여야 합니다.</Text>
+        )}
 
         <Text style={styles.inputLabel}>새 비밀번호 확인</Text>
         <TextInput

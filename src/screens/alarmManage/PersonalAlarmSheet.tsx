@@ -3,6 +3,7 @@ import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
 import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createJourneysApi, ensureFutureDateTime, JourneyDetail, maskToRepeatDays, PersonalJourneyPayload, repeatDaysToMask, targetTimeToAmpmHourMinute, toTargetTime } from '@/src/api/journeys';
 import { alarmService } from '@/src/services/alarmService';
+import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ACTIVE_JOURNEYS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { usePlaces } from '@/src/hooks/usePlaces';
@@ -200,6 +201,7 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
       Alert.alert('목적지를 선택해주세요.');
       return;
     }
+    if (!(await checkCoreAlarmPermissions())) return;
     setSaving(true);
     try {
       const rawTime = toTargetTime(selectedDate, editAlarm.ampm, editAlarm.hour, editAlarm.minute);
@@ -418,8 +420,8 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
               style={styles.picker}
               itemStyle={styles.pickerItem}
             >
-              <Picker.Item label="오전" value="오전" />
-              <Picker.Item label="오후" value="오후" />
+              <Picker.Item label="오전" value="오전" color="#1A1A1A" />
+              <Picker.Item label="오후" value="오후" color="#1A1A1A" />
             </Picker>
             <Picker
               selectedValue={editAlarm.hour}
@@ -427,7 +429,7 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
               style={styles.picker}
               itemStyle={styles.pickerItem}
             >
-              {HOURS.map((h) => <Picker.Item key={h} label={h} value={h} />)}
+              {HOURS.map((h) => <Picker.Item key={h} label={h} value={h} color="#1A1A1A" />)}
             </Picker>
             <Picker
               selectedValue={editAlarm.minute}
@@ -435,7 +437,7 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
               style={styles.picker}
               itemStyle={styles.pickerItem}
             >
-              {MINUTES.map((m) => <Picker.Item key={m} label={m} value={m} />)}
+              {MINUTES.map((m) => <Picker.Item key={m} label={m} value={m} color="#1A1A1A" />)}
             </Picker>
           </View>
 

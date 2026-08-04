@@ -39,12 +39,12 @@ export default function AlarmTestScreen() {
   const [sentIds, setSentIds] = useState<Partial<Record<AlarmStage, string[]>>>({});
 
   useEffect(() => {
-    requestNotificationPermission().then(setHasPermission);
+    requestNotificationPermission().then(({ granted }) => setHasPermission(granted));
   }, []);
 
   const handleSend = async (stage: AlarmStage) => {
     if (!hasPermission) {
-      const granted = await requestNotificationPermission();
+      const { granted } = await requestNotificationPermission();
       if (!granted) {
         Alert.alert('알림 권한 필요', '설정에서 알림 권한을 허용해주세요.');
         return;

@@ -32,6 +32,17 @@ export function useAppNavigation() {
     router.push(ROUTES.leaveTimeSetup);
   }, [router]);
 
+  /**
+   * 회원가입 완료 후: 필수 권한 안내 (뒤로가기로 못 돌아가게 replace).
+   * fromOnboarding 파라미터로 표시해둬야 PermissionSetupScreen의 "완료" 버튼이
+   * (설정 화면에서 들어왔을 때처럼) 뒤로가기 대신 메인 탭으로 가야 함을 판단할 수 있음 —
+   * replace를 써도 그 아래(home-address-setup 등) 스택이 남아있어 canGoBack()만으로는
+   * "회원가입 중"인지 구별이 안 됨.
+   */
+  const goToPermissionSetup = useCallback(() => {
+    router.replace({ pathname: ROUTES.permissionSetup, params: { fromOnboarding: '1' } } as Href);
+  }, [router]);
+
   const goToYearCalendar = useCallback(
     (y: number) => {
       router.push({
@@ -69,12 +80,13 @@ export function useAppNavigation() {
       goToSignUp,
       goToHomeAddressSetup,
       goToLeaveTimeSetup,
+      goToPermissionSetup,
       goToYearCalendar,
       goToMainTabs,
       goBack,
       replace,
       push,
     }),
-    [goToLogin, goToSignUp, goToHomeAddressSetup, goToLeaveTimeSetup, goToYearCalendar, goToMainTabs, goBack, replace, push],
+    [goToLogin, goToSignUp, goToHomeAddressSetup, goToLeaveTimeSetup, goToPermissionSetup, goToYearCalendar, goToMainTabs, goBack, replace, push],
   );
 }

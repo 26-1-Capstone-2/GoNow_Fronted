@@ -4,6 +4,8 @@ import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
 import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createJourneysApi, ensureFutureDateTime, HomeJourneyPayload, JourneyDetail, maskToRepeatDays, repeatDaysToMask, targetTimeToAmpmHourMinute, toTargetTime } from '@/src/api/journeys';
 import { alarmService } from '@/src/services/alarmService';
+import { extractApiErrorMessage } from '@/src/utils/notifications';
+import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ACTIVE_JOURNEYS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { usePlaces } from '@/src/hooks/usePlaces';
@@ -175,6 +177,7 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
     if (!editAlarm.home_name) { Alert.alert('귀가지를 선택해주세요.'); return; }
     if (!isEditMode && (!editAlarm.home_lat || !editAlarm.home_lng)) { Alert.alert('귀가지를 선택해주세요.'); return; }
     if (!editAlarm.date) { Alert.alert('날짜를 선택해주세요.'); return; }
+    if (!(await checkCoreAlarmPermissions())) return;
     setSaving(true);
     try {
       const rawTime = editAlarm.mode === 'lastTrain'
@@ -227,8 +230,8 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
       await loadAlarms();
       bumpAlarmVersion();
       setView('list');
-    } catch {
-      Alert.alert('저장 실패', '다시 시도해주세요.');
+    } catch (e: any) {
+      Alert.alert('저장 실패', extractApiErrorMessage(e?.message ?? '', '다시 시도해주세요.'));
     } finally {
       setSaving(false);
     }
@@ -384,13 +387,13 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
             ) : (
               <View style={styles.pickerContainer}>
                 <Picker selectedValue={editAlarm.ampm} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, ampm: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
-                  <Picker.Item label="오전" value="오전" /><Picker.Item label="오후" value="오후" />
+                  <Picker.Item label="오전" value="오전" color="#1A1A1A" /><Picker.Item label="오후" value="오후" color="#1A1A1A" />
                 </Picker>
                 <Picker selectedValue={editAlarm.hour} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, hour: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
-                  {HOURS.map((h) => <Picker.Item key={h} label={h} value={h} />)}
+                  {HOURS.map((h) => <Picker.Item key={h} label={h} value={h} color="#1A1A1A" />)}
                 </Picker>
                 <Picker selectedValue={editAlarm.minute} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, minute: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
-                  {MINUTES.map((m) => <Picker.Item key={m} label={m} value={m} />)}
+                  {MINUTES.map((m) => <Picker.Item key={m} label={m} value={m} color="#1A1A1A" />)}
                 </Picker>
               </View>
             )}
