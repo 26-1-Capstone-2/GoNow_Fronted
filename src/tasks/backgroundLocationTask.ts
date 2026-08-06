@@ -12,6 +12,53 @@ export const DESIRED_INTERVALS_KEY = 'gonow_desired_intervals'; // Record<key, s
 export const SESSION_READY_KEY = 'gonow_session_ready';         // init() 완료 후 '1' 세팅
 const LAST_CALL_TIMES_KEY = 'gonow_last_call_times';           // Record<key, ms timestamp>
 
+// /location 응답 자체엔 목적지 좌표가 없어서(목적지는 안 바뀌는 값이라 매 폴링에 안 실어줌),
+// 헤드리스(백그라운드) 경로가 카카오맵 딥링크 버튼을 알림에 붙이려면 이 캐시가 필요함.
+// alarmService.ts의 AlarmRunner.start()/stop()이 기록/삭제하고, 이 파일의 폴링 루프가 읽어서
+// syncStagedAlarms()에 그대로 넘김 — 포그라운드(alarmService.ts)와 동일한 값을 쓰게 만드는 게 목적.
+export const ALARM_NAV_INFO_KEY = 'gonow_alarm_nav_info'; // Record<key, AlarmNavInfo>
+
+export type AlarmNavInfo = {
+  destLat?: number;
+  destLng?: number;
+  isDriving?: boolean;
+  isLastMode?: boolean;
+};
+
+// 읽고→고치고→쓰는 구조라, alarmService.start()가 여러 개 동시에 불리면(예: 새벽 4시
+// FCM으로 여러 여정이 한꺼번에 READY 전환될 때 Promise.all로 병렬 호출됨) 나중에 쓴 쪽이
+// 먼저 쓴 쪽을 덮어써서 좌표가 사라질 수 있음 — 같은 프로세스 안에서는 순서대로만 처리되게
+// 직렬화(notifications.ts의 withStagingLock과 동일한 패턴)
+let navInfoQueue: Promise<void> = Promise.resolve();
+function withNavInfoLock(fn: () => Promise<void>): Promise<void> {
+  const run = navInfoQueue.then(fn, fn); // 이전 호출이 실패했어도 다음 호출은 정상 진행
+  navInfoQueue = run.catch(() => {});
+  return run;
+}
+
+export function saveAlarmNavInfo(key: string, info: AlarmNavInfo): Promise<void> {
+  return withNavInfoLock(async () => {
+    try {
+      const raw = await AsyncStorage.getItem(ALARM_NAV_INFO_KEY);
+      const map: Record<string, AlarmNavInfo> = raw ? JSON.parse(raw) : {};
+      map[key] = info;
+      await AsyncStorage.setItem(ALARM_NAV_INFO_KEY, JSON.stringify(map));
+    } catch {}
+  });
+}
+
+export function removeAlarmNavInfo(key: string): Promise<void> {
+  return withNavInfoLock(async () => {
+    try {
+      const raw = await AsyncStorage.getItem(ALARM_NAV_INFO_KEY);
+      if (!raw) return;
+      const map: Record<string, AlarmNavInfo> = JSON.parse(raw);
+      delete map[key];
+      await AsyncStorage.setItem(ALARM_NAV_INFO_KEY, JSON.stringify(map));
+    } catch {}
+  });
+}
+
 const BASE_URL = 'https://gonow-api.uk';
 
 async function patchLocation(path: string, token: string, lat: number, lng: number) {
@@ -139,12 +186,14 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   const remainingJourneys: number[] = [];
   const remainingAppointments: number[] = [];
 
-  const [lastCallTimesRaw, desiredIntervalsRaw] = await Promise.all([
+  const [lastCallTimesRaw, desiredIntervalsRaw, navInfoRaw] = await Promise.all([
     AsyncStorage.getItem(LAST_CALL_TIMES_KEY),
     AsyncStorage.getItem(DESIRED_INTERVALS_KEY),
+    AsyncStorage.getItem(ALARM_NAV_INFO_KEY),
   ]);
   const lastCallTimes: Record<string, number> = lastCallTimesRaw ? JSON.parse(lastCallTimesRaw) : {};
   const desiredIntervals: Record<string, number> = desiredIntervalsRaw ? JSON.parse(desiredIntervalsRaw) : {};
+  const navInfo: Record<string, AlarmNavInfo> = navInfoRaw ? JSON.parse(navInfoRaw) : {};
   const now = Date.now();
 
   await Promise.all([
@@ -174,13 +223,15 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
 
         if ((journey_status === 'DEPARTING' || journey_status === 'NEARDEST') && departure_alarm_time) {
           console.log(`[백그라운드] ${journey_status} — journeyId:${id} 단계별 알람 동기화`);
-          await syncStagedAlarms(key, type, dest_name, id, undefined, preparation_time ?? 0, which_station, departure_alarm_time);
+          const nav = navInfo[key];
+          await syncStagedAlarms(key, type, dest_name, id, undefined, preparation_time ?? 0, which_station, departure_alarm_time, nav?.destLat, nav?.destLng, nav?.isDriving, nav?.isLastMode);
         }
 
         if (journey_status === 'ARRIVED') {
           console.log(`[백그라운드] ARRIVED — journeyId:${id} ID 제거`);
           delete lastCallTimes[key];
           delete desiredIntervals[key];
+          removeAlarmNavInfo(key).catch(() => {});
         } else {
           remainingJourneys.push(id);
         }
@@ -189,6 +240,7 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
           console.log(`[백그라운드] journeyId:${id} 서버 ${e.message} → ID 제거 (삭제된 알람)`);
           delete lastCallTimes[key];
           delete desiredIntervals[key];
+          removeAlarmNavInfo(key).catch(() => {});
         } else {
           console.log(`[백그라운드] journeyId:${id} 네트워크 오류 → 다음 주기 재시도`, e?.message);
           remainingJourneys.push(id);
@@ -220,13 +272,15 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
 
         if ((participant_status === 'DEPARTING' || participant_status === 'NEARDEST') && departure_alarm_time) {
           console.log(`[백그라운드] ${participant_status} — appointmentId:${id} 단계별 알람 동기화`);
-          await syncStagedAlarms(key, 'group', dest_name, undefined, id, preparation_time ?? 0, which_station, departure_alarm_time);
+          const nav = navInfo[key];
+          await syncStagedAlarms(key, 'group', dest_name, undefined, id, preparation_time ?? 0, which_station, departure_alarm_time, nav?.destLat, nav?.destLng, nav?.isDriving, nav?.isLastMode);
         }
 
         if (participant_status === 'ARRIVED') {
           console.log(`[백그라운드] ARRIVED — appointmentId:${id} ID 제거`);
           delete lastCallTimes[key];
           delete desiredIntervals[key];
+          removeAlarmNavInfo(key).catch(() => {});
         } else {
           remainingAppointments.push(id);
         }
@@ -236,6 +290,7 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
           await cancelStagedAlarms(key);
           delete lastCallTimes[key];
           delete desiredIntervals[key];
+          removeAlarmNavInfo(key).catch(() => {});
         } else {
           console.log(`[백그라운드] appointmentId:${id} 네트워크 오류 → 다음 주기 재시도`, e?.message);
           remainingAppointments.push(id);

@@ -1,4 +1,5 @@
 import { setupNotificationCategories, AlarmType, getChannelId } from '@/src/utils/notifications';
+import { openKakaoMapRoute, NAVIGATE_CACHE_MAX_AGE_MS } from '@/src/utils/kakaoMapDeeplink';
 import { createJourneysApi } from '@/src/api/journeys';
 import { createAppointmentsApi } from '@/src/api/appointments';
 import { createAlarmsApi } from '@/src/api/alarms';
@@ -15,7 +16,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import * as Location from 'expo-location';
-import { AppState } from 'react-native';
+import { AppState, Platform, ToastAndroid } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
@@ -76,13 +77,13 @@ export default function RootLayout() {
           readyItems.forEach((a) => {
             if (a.alarm_type === 'GROUP' && a.appointment_id != null) {
               if (alarmService.isRunning(undefined, a.appointment_id)) return;
-              alarmService.start({ alarmType: 'group', destination: a.dest_name, appointmentId: a.appointment_id, isActive: a.is_active });
+              alarmService.start({ alarmType: 'group', destination: a.dest_name, appointmentId: a.appointment_id, isActive: a.is_active, destLat: a.dest_lat, destLng: a.dest_lng, isDriving: a.transport_type === 'DRIVING' });
             } else if (a.alarm_type === 'HOME' && a.journey_id != null) {
               if (alarmService.isRunning(a.journey_id)) return;
-              alarmService.start({ alarmType: 'home', destination: a.dest_name, journeyId: a.journey_id });
+              alarmService.start({ alarmType: 'home', destination: a.dest_name, journeyId: a.journey_id, destLat: a.dest_lat, destLng: a.dest_lng, isDriving: a.transport_type === 'DRIVING', isLastMode: a.is_last_mode });
             } else if (a.alarm_type === 'PERSONAL' && a.journey_id != null) {
               if (alarmService.isRunning(a.journey_id)) return;
-              alarmService.start({ alarmType: 'personal', destination: a.dest_name, journeyId: a.journey_id });
+              alarmService.start({ alarmType: 'personal', destination: a.dest_name, journeyId: a.journey_id, destLat: a.dest_lat, destLng: a.dest_lng, isDriving: a.transport_type === 'DRIVING' });
             }
           });
         }).catch((e) => { console.log('[startReadyAlarms] getAlarms 실패:', e?.message ?? e); });
@@ -186,7 +187,10 @@ export default function RootLayout() {
             }
             const res = await appointmentsApi.getAppointment(appointmentId);
             if (res.data) {
-              await alarmService.start({ alarmType: 'group', destination: res.data.dest_name, appointmentId });
+              // 그룹 약속은 이동수단을 참가자별로 각자 고르므로, 응답 최상위가 아니라 내 참가자 레코드에서 찾아야 함
+              const profileRes = await createMembersApi().getMyProfile();
+              const myTransport = res.data.participants.find((p) => p.member_id === profileRes.data?.member_id)?.transport_type;
+              await alarmService.start({ alarmType: 'group', destination: res.data.dest_name, appointmentId, destLat: res.data.dest_lat, destLng: res.data.dest_lng, isDriving: myTransport === 'DRIVING' });
             }
           } else if (participantStatus === 'SCHEDULED') {
             console.log(`[FCM] 방장 수정 SCHEDULED — appointmentId:${appointmentId} 폴링 중단`);
@@ -248,7 +252,7 @@ export default function RootLayout() {
                 return;
               }
               const type: AlarmType = res.data.journey_type === 'HOME' ? 'home' : 'personal';
-              await alarmService.start({ alarmType: type, destination: res.data.dest_name, journeyId: id });
+              await alarmService.start({ alarmType: type, destination: res.data.dest_name, journeyId: id, destLat: res.data.dest_lat, destLng: res.data.dest_lng, isDriving: res.data.transport_type === 'DRIVING', isLastMode: res.data.is_last_mode });
             } catch (e) {
               console.log(`[FCM] journeyId:${id} start 실패`, e);
             }
@@ -264,7 +268,10 @@ export default function RootLayout() {
                 console.log(`[FCM] appointmentId:${id} 조회 실패`);
                 return;
               }
-              await alarmService.start({ alarmType: 'group', destination: res.data.dest_name, appointmentId: id });
+              // 그룹 약속은 이동수단을 참가자별로 각자 고르므로, 응답 최상위가 아니라 내 참가자 레코드에서 찾아야 함
+              const profileRes = await createMembersApi().getMyProfile();
+              const myTransport = res.data.participants.find((p) => p.member_id === profileRes.data?.member_id)?.transport_type;
+              await alarmService.start({ alarmType: 'group', destination: res.data.dest_name, appointmentId: id, destLat: res.data.dest_lat, destLng: res.data.dest_lng, isDriving: myTransport === 'DRIVING' });
             } catch (e) {
               console.log(`[FCM] appointmentId:${id} start 실패`, e);
             }
@@ -304,6 +311,9 @@ export default function RootLayout() {
           console.log(`[알람] 출발알람 X버튼 눌림 — journeyId:${journeyId} appointmentId:${appointmentId} → 남은 단계 취소`);
           notifee.cancelNotification(notifId);
           alarmService.cancelRemainingStages(journeyId, appointmentId);
+          if (Platform.OS === 'android') {
+            ToastAndroid.show('남은 출발 알림을 껐어요.', ToastAndroid.SHORT);
+          }
         }
 
         if (actionId === 'arrival-yes' && notifId) {
@@ -316,6 +326,15 @@ export default function RootLayout() {
 
         if (actionId === 'arrival-no' && notifId) {
           notifee.cancelNotification(notifId);
+        }
+
+        if (actionId === 'navigate' && data?.destLat && data?.destLng) {
+          // 단계별 출발 알람(1~4단계)은 전부 DEPARTING 구간에서만 발생 — 캐시 유효기간도 그에 맞춤
+          openKakaoMapRoute(
+            { lat: Number(data.destLat), lng: Number(data.destLng) },
+            'car',
+            NAVIGATE_CACHE_MAX_AGE_MS.DEPARTING,
+          );
         }
       }
     });

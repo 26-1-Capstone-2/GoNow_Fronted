@@ -35,6 +35,8 @@ function fromAlarmItem(item: AlarmItem): Alarm {
     ampm, hour, minute,
     dest_name: item.dest_name,
     dest_address: '',
+    dest_lat: item.dest_lat,
+    dest_lng: item.dest_lng,
     repeat: maskToRepeatDays(item.repeat_days ?? 0),
     enabled: item.is_active,
     transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
@@ -230,14 +232,14 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
       if (isEditMode && editAlarm.journeyId) {
         const res = await journeysApi.updatePersonal(editAlarm.journeyId, payload);
         if (res.data.journey_status === 'READY') {
-          alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: editAlarm.journeyId });
+          alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: editAlarm.journeyId, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, isDriving: editAlarm.transport === 'car' });
         } else if (res.data.journey_status === 'SCHEDULED') {
           alarmService.stop(editAlarm.journeyId);
         }
       } else {
         const res = await journeysApi.createPersonal(payload);
         if (res.data.journey_status === 'READY') {
-          alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: res.data.journey_id });
+          alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: res.data.journey_id, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, isDriving: editAlarm.transport === 'car' });
         }
       }
       await loadAlarms();
@@ -292,7 +294,7 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
       if (!newEnabled) {
         alarmService.stop(alarm.journeyId);
       } else if (['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
-        alarmService.start({ alarmType: 'personal', destination: alarm.dest_name, journeyId: alarm.journeyId });
+        alarmService.start({ alarmType: 'personal', destination: alarm.dest_name, journeyId: alarm.journeyId, destLat: alarm.dest_lat, destLng: alarm.dest_lng, isDriving: alarm.transport === 'car' });
       }
     }
   };

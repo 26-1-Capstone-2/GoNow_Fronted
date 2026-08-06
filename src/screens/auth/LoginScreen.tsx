@@ -62,13 +62,13 @@ export default function LoginScreen() {
         (alarmsRes.data ?? []).filter((a) => ['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(a.my_status) && a.is_active).forEach((a) => {
           if (a.alarm_type === 'GROUP' && a.appointment_id != null) {
             if (alarmService.isRunning(undefined, a.appointment_id)) return;
-            alarmService.start({ alarmType: 'group', destination: a.dest_name, appointmentId: a.appointment_id, isActive: a.is_active });
+            alarmService.start({ alarmType: 'group', destination: a.dest_name, appointmentId: a.appointment_id, isActive: a.is_active, destLat: a.dest_lat, destLng: a.dest_lng, isDriving: a.transport_type === 'DRIVING' });
           } else if (a.alarm_type === 'HOME' && a.journey_id != null) {
             if (alarmService.isRunning(a.journey_id)) return;
-            alarmService.start({ alarmType: 'home', destination: a.dest_name, journeyId: a.journey_id });
+            alarmService.start({ alarmType: 'home', destination: a.dest_name, journeyId: a.journey_id, destLat: a.dest_lat, destLng: a.dest_lng, isDriving: a.transport_type === 'DRIVING', isLastMode: a.is_last_mode });
           } else if (a.alarm_type === 'PERSONAL' && a.journey_id != null) {
             if (alarmService.isRunning(a.journey_id)) return;
-            alarmService.start({ alarmType: 'personal', destination: a.dest_name, journeyId: a.journey_id });
+            alarmService.start({ alarmType: 'personal', destination: a.dest_name, journeyId: a.journey_id, destLat: a.dest_lat, destLng: a.dest_lng, isDriving: a.transport_type === 'DRIVING' });
           }
         });
       } catch (e) {

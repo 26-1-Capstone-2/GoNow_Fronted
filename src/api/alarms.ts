@@ -9,6 +9,8 @@ export type AlarmItem = {
   journey_id: number | null;
   appointment_id: number | null;
   dest_name: string;
+  dest_lat: number;
+  dest_lng: number;
   plan_date: string;
   target_time: string;
   departure_alarm_time: string | null;

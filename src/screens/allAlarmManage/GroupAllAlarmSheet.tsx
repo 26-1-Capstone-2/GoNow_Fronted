@@ -5,6 +5,7 @@ import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createAppointmentsApi } from '@/src/api/appointments';
 import { alarmService } from '@/src/services/alarmService';
 import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
+import { openKakaoMapRoute, NAVIGATE_CACHE_MAX_AGE_MS } from '@/src/utils/kakaoMapDeeplink';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ACTIVE_APPOINTMENTS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { targetTimeToAmpmHourMinute } from '@/src/api/journeys';
@@ -37,6 +38,9 @@ const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));
 const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
 
 const DAY_LABEL = ['일', '월', '화', '수', '목', '금', '토'];
+// 길찾기 딥링크 버튼을 노출할 여정 상태 (docs/reference/kakao-map-deeplink-spec.md 2.1절 기준)
+// NEARDEST(목적지 100m 이내)는 제외 — 이미 코앞이라 자가용 길찾기 딥링크가 실용성이 낮음
+const NAVIGABLE_STATUSES = ['DEPARTING', 'MOVING'];
 function formatDateLabel(dateStr: string): string {
   const d = new Date(dateStr + 'T00:00:00');
   return `${d.getFullYear()}년 ${String(d.getMonth() + 1).padStart(2, '0')}월 ${String(d.getDate()).padStart(2, '0')}일 ${DAY_LABEL[d.getDay()]}요일`;
@@ -74,6 +78,7 @@ interface GroupAlarm {
   transport: Transport;
   date: string;
   isCurrentUserHost?: boolean;
+  myStatus?: string;
 }
 
 function toTargetTime(date: string, ampm: string, hour: string, minute: string): string {
@@ -90,6 +95,8 @@ function fromAlarmItem(item: AlarmItem): GroupAlarm {
     appointmentId: item.appointment_id ?? undefined,
     ampm, hour, minute,
     place: item.dest_name,
+    place_lat: item.dest_lat,
+    place_lng: item.dest_lng,
     enabled: item.is_active,
     members: Array.from({ length: item.participant_count ?? 1 }, (_, i) => ({
       id: String(i),
@@ -100,6 +107,7 @@ function fromAlarmItem(item: AlarmItem): GroupAlarm {
     isArrivalActive: item.appointment_status !== 'WAITING',
     transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
     date: item.plan_date,
+    myStatus: item.my_status,
   };
 }
 
@@ -186,7 +194,7 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
         if (res.data.participant_status === 'READY') {
           const detail = await appointmentsApi.getAppointment(res.data.appointment_id);
           if (detail.data) {
-            alarmService.start({ alarmType: 'group', destination: detail.data.dest_name, appointmentId: res.data.appointment_id });
+            alarmService.start({ alarmType: 'group', destination: detail.data.dest_name, appointmentId: res.data.appointment_id, destLat: detail.data.dest_lat, destLng: detail.data.dest_lng, isDriving: joinTransport === 'car' });
           }
         }
         setInviteCode('');
@@ -333,7 +341,7 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
           });
           if (res.success) {
             if (res.data?.participant_status === 'READY') {
-              alarmService.start({ alarmType: 'group', destination: editAlarm.place, appointmentId: editAlarm.appointmentId });
+              alarmService.start({ alarmType: 'group', destination: editAlarm.place, appointmentId: editAlarm.appointmentId, destLat: editAlarm.place_lat, destLng: editAlarm.place_lng, isDriving: editAlarm.transport === 'car' });
             } else if (res.data?.participant_status === 'SCHEDULED' && editAlarm.appointmentId != null) {
               alarmService.stop(undefined, editAlarm.appointmentId);
             }
@@ -365,7 +373,7 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
       });
       if (res.success && res.data) {
         if (res.data.participant_status === 'READY') {
-          alarmService.start({ alarmType: 'group', destination: editAlarm.place, appointmentId: res.data.appointment_id });
+          alarmService.start({ alarmType: 'group', destination: editAlarm.place, appointmentId: res.data.appointment_id, destLat: editAlarm.place_lat, destLng: editAlarm.place_lng, isDriving: editAlarm.transport === 'car' });
         }
         await loadAlarms();
         bumpAlarmVersion();
@@ -458,6 +466,16 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
     } catch {
       setAlarms((prev) => prev.map((a) => a.id === id ? { ...a, enabled: alarm.enabled } : a));
     }
+  };
+
+  // 자가용 전용 카카오맵 딥링크 — 대중교통은 다음 단계로 미룸 (docs/reference/kakao-map-deeplink-spec.md 2.2절 참고)
+  const canNavigate = (alarm: GroupAlarm) =>
+    alarm.transport === 'car' && !!alarm.myStatus && NAVIGABLE_STATUSES.includes(alarm.myStatus);
+
+  const handleNavigate = (alarm: GroupAlarm) => {
+    if (alarm.place_lat == null || alarm.place_lng == null) return;
+    const maxAge = alarm.myStatus === 'MOVING' ? NAVIGATE_CACHE_MAX_AGE_MS.MOVING : NAVIGATE_CACHE_MAX_AGE_MS.DEPARTING;
+    openKakaoMapRoute({ lat: alarm.place_lat, lng: alarm.place_lng }, 'car', maxAge);
   };
 
   const copyInviteCode = async () => {
@@ -571,6 +589,11 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
                         color={alarm.isArrivalActive ? '#FFFFFF' : '#CCCCCC'}
                       />
                     </TouchableOpacity>
+                    {canNavigate(alarm) && (
+                      <TouchableOpacity style={styles.navigateBtn} onPress={() => handleNavigate(alarm)}>
+                        <Feather name="navigation" size={14} color="#4A90D9" />
+                      </TouchableOpacity>
+                    )}
                     <Switch
                       value={alarm.enabled}
                       onValueChange={() => toggleAlarm(alarm.id)}
@@ -945,6 +968,7 @@ const styles = StyleSheet.create({
   memberCount: { fontSize: 11, color: '#555555', fontWeight: '500' },
   dashboardBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center' },
   dashboardBtnActive: { backgroundColor: '#92DEFE' },
+  navigateBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#EAF2FB', alignItems: 'center', justifyContent: 'center' },
   pickerContainer: {
     flexDirection: 'row',
     backgroundColor: '#F5F5F5', borderRadius: 14,

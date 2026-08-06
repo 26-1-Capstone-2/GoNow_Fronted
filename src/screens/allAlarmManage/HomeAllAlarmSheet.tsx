@@ -6,6 +6,7 @@ import { createJourneysApi, ensureFutureDateTime, HomeJourneyPayload, JourneyDet
 import { alarmService } from '@/src/services/alarmService';
 import { extractApiErrorMessage } from '@/src/utils/notifications';
 import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
+import { openKakaoMapRoute, NAVIGATE_CACHE_MAX_AGE_MS } from '@/src/utils/kakaoMapDeeplink';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ACTIVE_JOURNEYS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { usePlaces } from '@/src/hooks/usePlaces';
@@ -20,6 +21,9 @@ const journeysApi = createJourneysApi();
 const alarmsApi = createAlarmsApi();
 
 const DAY_LABEL = ['일', '월', '화', '수', '목', '금', '토'];
+// 길찾기 딥링크 버튼을 노출할 여정 상태 (docs/reference/kakao-map-deeplink-spec.md 2.1절 기준)
+// NEARDEST(목적지 100m 이내)는 제외 — 이미 코앞이라 자가용 길찾기 딥링크가 실용성이 낮음
+const NAVIGABLE_STATUSES = ['DEPARTING', 'MOVING'];
 const DAYS = ['일요일마다', '월요일마다', '화요일마다', '수요일마다', '목요일마다', '금요일마다', '토요일마다', '안함'];
 const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));
 const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
@@ -58,6 +62,8 @@ function fromAlarmItem(item: AlarmItem): HomeAlarm {
     ampm, hour, minute,
     home_name: item.dest_name,
     home_address: '',
+    home_lat: item.dest_lat,
+    home_lng: item.dest_lng,
     repeat: maskToRepeatDays(item.repeat_days ?? 0),
     enabled: item.is_active,
     transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
@@ -217,14 +223,14 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
       if (isEditMode && editAlarm.journeyId) {
         const res = await journeysApi.updateHome(editAlarm.journeyId, payload);
         if (res.data.journey_status === 'READY') {
-          alarmService.start({ alarmType: 'home', destination: editAlarm.home_name, journeyId: editAlarm.journeyId });
+          alarmService.start({ alarmType: 'home', destination: editAlarm.home_name, journeyId: editAlarm.journeyId, destLat: editAlarm.home_lat, destLng: editAlarm.home_lng, isDriving: editAlarm.transport === 'car', isLastMode: editAlarm.mode === 'lastTrain' });
         } else if (res.data.journey_status === 'SCHEDULED') {
           alarmService.stop(editAlarm.journeyId);
         }
       } else {
         const res = await journeysApi.createHome(payload);
         if (res.data.journey_status === 'READY') {
-          alarmService.start({ alarmType: 'home', destination: editAlarm.home_name, journeyId: res.data.journey_id });
+          alarmService.start({ alarmType: 'home', destination: editAlarm.home_name, journeyId: res.data.journey_id, destLat: editAlarm.home_lat, destLng: editAlarm.home_lng, isDriving: editAlarm.transport === 'car', isLastMode: editAlarm.mode === 'lastTrain' });
         }
       }
       await loadAlarms();
@@ -262,9 +268,19 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
       if (!newEnabled) {
         alarmService.stop(alarm.journeyId);
       } else if (['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
-        alarmService.start({ alarmType: 'home', destination: alarm.home_name, journeyId: alarm.journeyId });
+        alarmService.start({ alarmType: 'home', destination: alarm.home_name, journeyId: alarm.journeyId, destLat: alarm.home_lat, destLng: alarm.home_lng, isDriving: alarm.transport === 'car', isLastMode: alarm.mode === 'lastTrain' });
       }
     }
+  };
+
+  // 자가용 전용 카카오맵 딥링크 — 대중교통은 다음 단계로 미룸 (docs/reference/kakao-map-deeplink-spec.md 2.2절 참고)
+  const canNavigate = (alarm: HomeAlarm) =>
+    alarm.transport === 'car' && !!alarm.myStatus && NAVIGABLE_STATUSES.includes(alarm.myStatus);
+
+  const handleNavigate = (alarm: HomeAlarm) => {
+    if (alarm.home_lat == null || alarm.home_lng == null) return;
+    const maxAge = alarm.myStatus === 'MOVING' ? NAVIGATE_CACHE_MAX_AGE_MS.MOVING : NAVIGATE_CACHE_MAX_AGE_MS.DEPARTING;
+    openKakaoMapRoute({ lat: alarm.home_lat, lng: alarm.home_lng }, 'car', maxAge);
   };
 
   const toggleRepeat = (day: string) => {
@@ -338,6 +354,11 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
                     </View>
                   </View>
                   <View style={styles.cardRight}>
+                    {canNavigate(alarm) && (
+                      <TouchableOpacity style={styles.navigateBtn} onPress={() => handleNavigate(alarm)}>
+                        <Feather name="navigation" size={14} color="#4A90D9" />
+                      </TouchableOpacity>
+                    )}
                     <Switch value={alarm.enabled} onValueChange={() => toggleAlarm(alarm)}
                       trackColor={{ false: '#E0E0E0', true: '#4CAF50' }} thumbColor="#FFFFFF" />
                   </View>
@@ -545,7 +566,8 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 16, paddingBottom: Platform.OS === 'ios' ? 40 : 24 },
   alarmCard: { flexDirection: 'row', alignItems: 'stretch', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: 16, backgroundColor: '#F5F5F5', borderRadius: 12, marginBottom: 8 },
   alarmInfo: { flex: 1, marginRight: 8, justifyContent: 'center' },
-  cardRight: { justifyContent: 'center' },
+  cardRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  navigateBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#EAF2FB', alignItems: 'center', justifyContent: 'center' },
   alarmDate: { fontSize: 11, fontWeight: '500', color: '#FF3B30', marginBottom: 3 },
   alarmPlace: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 5 },
   alarmMeta: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },

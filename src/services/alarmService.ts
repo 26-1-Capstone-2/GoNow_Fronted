@@ -15,6 +15,8 @@ import {
 import {
   DESIRED_INTERVALS_KEY,
   stopBackgroundLocationUpdates,
+  saveAlarmNavInfo,
+  removeAlarmNavInfo,
 } from '@/src/tasks/backgroundLocationTask';
 import { getNickname } from '@/src/store/authStore';
 
@@ -28,6 +30,13 @@ interface AlarmTarget {
   journeyId?: number;
   appointmentId?: number;
   isActive?: boolean;
+  destLat?: number;
+  destLng?: number;
+  // 자가용(DRIVING) 전용 딥링크 노출 여부 판단용 — 대중교통은 다음 단계로 미룸
+  // (docs/reference/kakao-map-deeplink-spec.md 2.2절 참고)
+  isDriving?: boolean;
+  // home 타입 전용 — 막차 모드 여부(3·4단계 알람 문구 분기용, 버그30)
+  isLastMode?: boolean;
 }
 
 class AlarmRunner {
@@ -53,6 +62,18 @@ class AlarmRunner {
     const id = target.journeyId ?? `apt${target.appointmentId}`;
     console.log(`[alarmService.start] 시작 — type:${target.alarmType} id:${id} dest:${target.destination}`);
     this.target = target;
+    // 헤드리스(백그라운드) 경로는 /location 응답만으론 목적지 좌표를 알 수 없어서(응답에 안 실림),
+    // 카카오맵 딥링크 버튼을 계속 붙이려면 여기서 미리 캐싱해둬야 함 (backgroundLocationTask.ts가 읽어감)
+    const navKey = this.currentKey();
+    if (navKey) {
+      // await로 확실히 기록 완료 후 폴링 시작 — 백그라운드 태스크가 이 값을 못 읽는 race 방지
+      await saveAlarmNavInfo(navKey, {
+        destLat: target.destLat,
+        destLng: target.destLng,
+        isDriving: target.isDriving,
+        isLastMode: target.isLastMode,
+      });
+    }
     this.status = 'SCHEDULED';
     this.movingSent = false;
     this.arrivedSent = false;
@@ -83,6 +104,8 @@ class AlarmRunner {
       this.pollTimer = null;
     }
     this.cancelRemainingStages();
+    const navKey = this.currentKey();
+    if (navKey) removeAlarmNavInfo(navKey).catch(() => {});
     this.target = null;
     const cb = this.onFinish;
     this.onFinish = undefined;
@@ -106,7 +129,7 @@ class AlarmRunner {
   async syncStages(preparationTime: number, whichStation: string | null | undefined, departureAlarmTime: string | null | undefined): Promise<void> {
     const key = this.currentKey();
     if (!key || !this.target) return;
-    await syncStagedAlarms(key, this.target.alarmType, this.target.destination, this.target.journeyId, this.target.appointmentId, preparationTime, whichStation, departureAlarmTime);
+    await syncStagedAlarms(key, this.target.alarmType, this.target.destination, this.target.journeyId, this.target.appointmentId, preparationTime, whichStation, departureAlarmTime, this.target.destLat, this.target.destLng, this.target.isDriving, this.target.isLastMode);
   }
 
   private scheduleNextPoll(): void {
