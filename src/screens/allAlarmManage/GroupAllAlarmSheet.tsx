@@ -5,7 +5,7 @@ import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createAppointmentsApi } from '@/src/api/appointments';
 import { alarmService } from '@/src/services/alarmService';
 import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
-import { openKakaoMapRoute, NAVIGATE_CACHE_MAX_AGE_MS } from '@/src/utils/kakaoMapDeeplink';
+import { openKakaoMapRoute, NAVIGATE_CACHE_MAX_AGE_MS, toTransportMode } from '@/src/utils/kakaoMapDeeplink';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ACTIVE_APPOINTMENTS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { targetTimeToAmpmHourMinute } from '@/src/api/journeys';
@@ -194,7 +194,7 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
         if (res.data.participant_status === 'READY') {
           const detail = await appointmentsApi.getAppointment(res.data.appointment_id);
           if (detail.data) {
-            alarmService.start({ alarmType: 'group', destination: detail.data.dest_name, appointmentId: res.data.appointment_id, destLat: detail.data.dest_lat, destLng: detail.data.dest_lng, isDriving: joinTransport === 'car' });
+            alarmService.start({ alarmType: 'group', destination: detail.data.dest_name, appointmentId: res.data.appointment_id, destLat: detail.data.dest_lat, destLng: detail.data.dest_lng, transportMode: toTransportMode(joinTransport === 'car') });
           }
         }
         setInviteCode('');
@@ -341,7 +341,7 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
           });
           if (res.success) {
             if (res.data?.participant_status === 'READY') {
-              alarmService.start({ alarmType: 'group', destination: editAlarm.place, appointmentId: editAlarm.appointmentId, destLat: editAlarm.place_lat, destLng: editAlarm.place_lng, isDriving: editAlarm.transport === 'car' });
+              alarmService.start({ alarmType: 'group', destination: editAlarm.place, appointmentId: editAlarm.appointmentId, destLat: editAlarm.place_lat, destLng: editAlarm.place_lng, transportMode: toTransportMode(editAlarm.transport === 'car') });
             } else if (res.data?.participant_status === 'SCHEDULED' && editAlarm.appointmentId != null) {
               alarmService.stop(undefined, editAlarm.appointmentId);
             }
@@ -373,7 +373,7 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
       });
       if (res.success && res.data) {
         if (res.data.participant_status === 'READY') {
-          alarmService.start({ alarmType: 'group', destination: editAlarm.place, appointmentId: res.data.appointment_id, destLat: editAlarm.place_lat, destLng: editAlarm.place_lng, isDriving: editAlarm.transport === 'car' });
+          alarmService.start({ alarmType: 'group', destination: editAlarm.place, appointmentId: res.data.appointment_id, destLat: editAlarm.place_lat, destLng: editAlarm.place_lng, transportMode: toTransportMode(editAlarm.transport === 'car') });
         }
         await loadAlarms();
         bumpAlarmVersion();
@@ -468,14 +468,14 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
     }
   };
 
-  // 자가용 전용 카카오맵 딥링크 — 대중교통은 다음 단계로 미룸 (docs/reference/kakao-map-deeplink-spec.md 2.2절 참고)
+  // DRIVING/TRANSIT 공통 카카오맵 딥링크 — 단일 딥링크 설계 (docs/reference/kakao-map-deeplink-spec.md §2.2~2.4 참고)
   const canNavigate = (alarm: GroupAlarm) =>
-    alarm.transport === 'car' && !!alarm.myStatus && NAVIGABLE_STATUSES.includes(alarm.myStatus);
+    !!alarm.myStatus && NAVIGABLE_STATUSES.includes(alarm.myStatus);
 
   const handleNavigate = (alarm: GroupAlarm) => {
     if (alarm.place_lat == null || alarm.place_lng == null) return;
     const maxAge = alarm.myStatus === 'MOVING' ? NAVIGATE_CACHE_MAX_AGE_MS.MOVING : NAVIGATE_CACHE_MAX_AGE_MS.DEPARTING;
-    openKakaoMapRoute({ lat: alarm.place_lat, lng: alarm.place_lng }, 'car', maxAge);
+    openKakaoMapRoute({ lat: alarm.place_lat, lng: alarm.place_lng }, toTransportMode(alarm.transport === 'car'), maxAge);
   };
 
   const copyInviteCode = async () => {

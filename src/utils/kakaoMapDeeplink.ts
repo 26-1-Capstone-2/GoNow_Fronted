@@ -4,6 +4,11 @@ import { Alert, Linking } from 'react-native';
 // 카카오맵 공식 딥링크 스펙 기준 소문자 값 (docs/reference/kakao-map-deeplink-spec.md 참고)
 export type KakaoMapTransportMode = 'car' | 'publictransit';
 
+/** DRIVING 여부(boolean)를 카카오맵 딥링크 모드로 변환 — 호출부마다 반복되던 삼항연산자를 통일. */
+export function toTransportMode(isDriving: boolean): KakaoMapTransportMode {
+  return isDriving ? 'car' : 'publictransit';
+}
+
 interface Coordinate {
   lat: number;
   lng: number;

@@ -11,6 +11,7 @@ import notifee, {
 import { Linking, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
+import type { KakaoMapTransportMode } from '@/src/utils/kakaoMapDeeplink';
 
 export type AlarmStage = 1 | 2 | 3 | 4;
 // 도착 관련 알림 3종 — 출발 단계별 채널과 완전히 분리(성격이 다른 알림이라 서로 영향 안 주도록).
@@ -175,12 +176,12 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
       }
     }
 
-    if (actionId === 'navigate' && data?.destLat && data?.destLng) {
+    if (actionId === 'navigate' && data?.destLat && data?.destLng && data?.transportMode) {
       // 단계별 출발 알람(1~4단계)은 전부 DEPARTING 구간에서만 발생 — 캐시 유효기간도 그에 맞춤
       const { openKakaoMapRoute, NAVIGATE_CACHE_MAX_AGE_MS } = await import('@/src/utils/kakaoMapDeeplink');
       await openKakaoMapRoute(
         { lat: Number(data.destLat), lng: Number(data.destLng) },
-        'car',
+        data.transportMode as KakaoMapTransportMode,
         NAVIGATE_CACHE_MAX_AGE_MS.DEPARTING,
       );
     }
@@ -634,7 +635,7 @@ export async function scheduleFutureAlarm(
   minutesRemaining?: number,
   destLat?: number,
   destLng?: number,
-  isDriving?: boolean,
+  transportMode?: KakaoMapTransportMode,
   isLastMode?: boolean,
 ): Promise<string[]> {
   await ensureChannels();
@@ -645,9 +646,9 @@ export async function scheduleFutureAlarm(
   const titleStage = stage === 4 && isPast ? LATE_STAGE4_TITLE : config.title;
   const title = `${titleStage} - ${TYPE_NAMES[type]} 알람`;
   const body = buildAlarmBody(stage, type, destination, whichStation, minutesRemaining, isLastMode, isPast);
-  // 자가용 전용 길찾기 딥링크 — 대중교통은 다음 단계로 미룸
-  // (docs/reference/kakao-map-deeplink-spec.md 2.2절 참고)
-  const canNavigate = !!isDriving && destLat != null && destLng != null;
+  // DRIVING/TRANSIT 공통 길찾기 딥링크 — 단일 딥링크 설계
+  // (docs/reference/kakao-map-deeplink-spec.md §2.2~2.4 참고)
+  const canNavigate = !!transportMode && destLat != null && destLng != null;
   const navigateAction = { title: '🗺️ 길찾기', pressAction: { id: 'navigate' } };
 
   for (let i = 0; i < repeatCount; i++) {
@@ -655,7 +656,7 @@ export async function scheduleFutureAlarm(
     const notifData = {
       ...(journeyId != null && { journeyId: String(journeyId) }),
       ...(appointmentId != null && { appointmentId: String(appointmentId) }),
-      ...(canNavigate && { destLat: String(destLat), destLng: String(destLng) }),
+      ...(canNavigate && { destLat: String(destLat), destLng: String(destLng), transportMode: transportMode as string }),
     };
     const androidConfig = {
       channelId: channelIds[stage],
@@ -721,7 +722,7 @@ export async function syncStagedAlarms(
   departureAlarmTime: string | null | undefined,
   destLat?: number,
   destLng?: number,
-  isDriving?: boolean,
+  transportMode?: KakaoMapTransportMode,
   isLastMode?: boolean,
 ): Promise<void> {
   if (!departureAlarmTime) return;
@@ -769,7 +770,7 @@ export async function syncStagedAlarms(
         const stage = (i + 1) as 1 | 2 | 3 | 4;
         // 4단계(i=3)이고 시각이 이미 지났으면 minutesRemaining=0 → 긴급 문구 표시
         const minutesRemaining = (i === 3 && now >= stepTimes[3]) ? 0 : mins(i);
-        const ids = await scheduleFutureAlarm(type, stage, destination, stepTimes[i], journeyId, appointmentId, normalizedStation, minutesRemaining, destLat, destLng, isDriving, isLastMode);
+        const ids = await scheduleFutureAlarm(type, stage, destination, stepTimes[i], journeyId, appointmentId, normalizedStation, minutesRemaining, destLat, destLng, transportMode, isLastMode);
         allIds.push(...ids);
       }
       console.log(`[알람] syncStagedAlarms 등록 완료 — key:${key} ids:${allIds}`);

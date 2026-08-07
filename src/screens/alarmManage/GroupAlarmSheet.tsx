@@ -4,6 +4,7 @@ import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createAppointmentsApi } from '@/src/api/appointments';
 import { alarmService } from '@/src/services/alarmService';
 import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
+import { toTransportMode } from '@/src/utils/kakaoMapDeeplink';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ACTIVE_APPOINTMENTS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { targetTimeToAmpmHourMinute } from '@/src/api/journeys';
@@ -175,7 +176,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
         if (res.data.participant_status === 'READY') {
           const detail = await appointmentsApi.getAppointment(res.data.appointment_id);
           if (detail.data) {
-            alarmService.start({ alarmType: 'group', destination: detail.data.dest_name, appointmentId: res.data.appointment_id, destLat: detail.data.dest_lat, destLng: detail.data.dest_lng, isDriving: joinTransport === 'car' });
+            alarmService.start({ alarmType: 'group', destination: detail.data.dest_name, appointmentId: res.data.appointment_id, destLat: detail.data.dest_lat, destLng: detail.data.dest_lng, transportMode: toTransportMode(joinTransport === 'car') });
           }
         }
         setInviteCode('');
@@ -301,7 +302,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
           });
           if (res.success) {
             if (res.data?.participant_status === 'READY') {
-              alarmService.start({ alarmType: 'group', destination: editAlarm.dest_name, appointmentId: editAlarm.appointmentId, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, isDriving: editAlarm.transport === 'car' });
+              alarmService.start({ alarmType: 'group', destination: editAlarm.dest_name, appointmentId: editAlarm.appointmentId, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, transportMode: toTransportMode(editAlarm.transport === 'car') });
             } else if (res.data?.participant_status === 'SCHEDULED' && editAlarm.appointmentId != null) {
               alarmService.stop(undefined, editAlarm.appointmentId);
             }
@@ -332,7 +333,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
       });
       if (res.success && res.data) {
         if (res.data.participant_status === 'READY') {
-          alarmService.start({ alarmType: 'group', destination: editAlarm.dest_name, appointmentId: res.data.appointment_id, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, isDriving: editAlarm.transport === 'car' });
+          alarmService.start({ alarmType: 'group', destination: editAlarm.dest_name, appointmentId: res.data.appointment_id, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, transportMode: toTransportMode(editAlarm.transport === 'car') });
         }
         await loadAlarms();
         bumpAlarmVersion();

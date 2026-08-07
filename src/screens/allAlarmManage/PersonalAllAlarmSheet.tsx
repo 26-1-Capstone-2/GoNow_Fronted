@@ -5,7 +5,7 @@ import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createJourneysApi, ensureFutureDateTime, JourneyDetail, maskToRepeatDays, PersonalJourneyPayload, repeatDaysToMask, targetTimeToAmpmHourMinute, toTargetTime } from '@/src/api/journeys';
 import { alarmService } from '@/src/services/alarmService';
 import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
-import { openKakaoMapRoute, NAVIGATE_CACHE_MAX_AGE_MS } from '@/src/utils/kakaoMapDeeplink';
+import { openKakaoMapRoute, NAVIGATE_CACHE_MAX_AGE_MS, toTransportMode } from '@/src/utils/kakaoMapDeeplink';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ACTIVE_JOURNEYS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { usePlaces } from '@/src/hooks/usePlaces';
@@ -207,14 +207,14 @@ export default function PersonalAllAlarmSheet({ onClose }: Props) {
       if (isEditMode && editAlarm.journeyId) {
         const res = await journeysApi.updatePersonal(editAlarm.journeyId, payload);
         if (res.data.journey_status === 'READY') {
-          alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: editAlarm.journeyId, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, isDriving: editAlarm.transport === 'car' });
+          alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: editAlarm.journeyId, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, transportMode: toTransportMode(editAlarm.transport === 'car') });
         } else if (res.data.journey_status === 'SCHEDULED') {
           alarmService.stop(editAlarm.journeyId);
         }
       } else {
         const res = await journeysApi.createPersonal(payload);
         if (res.data.journey_status === 'READY') {
-          alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: res.data.journey_id, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, isDriving: editAlarm.transport === 'car' });
+          alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: res.data.journey_id, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, transportMode: toTransportMode(editAlarm.transport === 'car') });
         }
       }
       await loadAlarms();
@@ -252,19 +252,19 @@ export default function PersonalAllAlarmSheet({ onClose }: Props) {
       if (!newEnabled) {
         alarmService.stop(alarm.journeyId);
       } else if (['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
-        alarmService.start({ alarmType: 'personal', destination: alarm.dest_name, journeyId: alarm.journeyId, destLat: alarm.dest_lat, destLng: alarm.dest_lng, isDriving: alarm.transport === 'car' });
+        alarmService.start({ alarmType: 'personal', destination: alarm.dest_name, journeyId: alarm.journeyId, destLat: alarm.dest_lat, destLng: alarm.dest_lng, transportMode: toTransportMode(alarm.transport === 'car') });
       }
     }
   };
 
-  // 자가용 전용 카카오맵 딥링크 — 대중교통은 다음 단계로 미룸 (docs/reference/kakao-map-deeplink-spec.md 2.2절 참고)
+  // DRIVING/TRANSIT 공통 카카오맵 딥링크 — 단일 딥링크 설계 (docs/reference/kakao-map-deeplink-spec.md §2.2~2.4 참고)
   const canNavigate = (alarm: Alarm) =>
-    alarm.transport === 'car' && !!alarm.myStatus && NAVIGABLE_STATUSES.includes(alarm.myStatus);
+    !!alarm.myStatus && NAVIGABLE_STATUSES.includes(alarm.myStatus);
 
   const handleNavigate = (alarm: Alarm) => {
     if (alarm.dest_lat == null || alarm.dest_lng == null) return;
     const maxAge = alarm.myStatus === 'MOVING' ? NAVIGATE_CACHE_MAX_AGE_MS.MOVING : NAVIGATE_CACHE_MAX_AGE_MS.DEPARTING;
-    openKakaoMapRoute({ lat: alarm.dest_lat, lng: alarm.dest_lng }, 'car', maxAge);
+    openKakaoMapRoute({ lat: alarm.dest_lat, lng: alarm.dest_lng }, toTransportMode(alarm.transport === 'car'), maxAge);
   };
 
   const toggleRepeat = (day: string) => {

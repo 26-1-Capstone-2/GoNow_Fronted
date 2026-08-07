@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState } from 'react-native';
 import { TOKEN_KEY } from '@/src/store/authStore';
 import { sendAlarm, syncStagedAlarms, cancelStagedAlarms, AlarmType, CHANNEL_SILENT } from '@/src/utils/notifications';
+import type { KakaoMapTransportMode } from '@/src/utils/kakaoMapDeeplink';
 
 export const BACKGROUND_LOCATION_TASK = 'BACKGROUND-LOCATION-TASK';
 export const ACTIVE_JOURNEYS_KEY = 'gonow_active_journeys';
@@ -21,7 +22,7 @@ export const ALARM_NAV_INFO_KEY = 'gonow_alarm_nav_info'; // Record<key, AlarmNa
 export type AlarmNavInfo = {
   destLat?: number;
   destLng?: number;
-  isDriving?: boolean;
+  transportMode?: KakaoMapTransportMode;
   isLastMode?: boolean;
 };
 
@@ -224,7 +225,7 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
         if ((journey_status === 'DEPARTING' || journey_status === 'NEARDEST') && departure_alarm_time) {
           console.log(`[백그라운드] ${journey_status} — journeyId:${id} 단계별 알람 동기화`);
           const nav = navInfo[key];
-          await syncStagedAlarms(key, type, dest_name, id, undefined, preparation_time ?? 0, which_station, departure_alarm_time, nav?.destLat, nav?.destLng, nav?.isDriving, nav?.isLastMode);
+          await syncStagedAlarms(key, type, dest_name, id, undefined, preparation_time ?? 0, which_station, departure_alarm_time, nav?.destLat, nav?.destLng, nav?.transportMode, nav?.isLastMode);
         }
 
         if (journey_status === 'ARRIVED') {
@@ -273,7 +274,7 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
         if ((participant_status === 'DEPARTING' || participant_status === 'NEARDEST') && departure_alarm_time) {
           console.log(`[백그라운드] ${participant_status} — appointmentId:${id} 단계별 알람 동기화`);
           const nav = navInfo[key];
-          await syncStagedAlarms(key, 'group', dest_name, undefined, id, preparation_time ?? 0, which_station, departure_alarm_time, nav?.destLat, nav?.destLng, nav?.isDriving, nav?.isLastMode);
+          await syncStagedAlarms(key, 'group', dest_name, undefined, id, preparation_time ?? 0, which_station, departure_alarm_time, nav?.destLat, nav?.destLng, nav?.transportMode, nav?.isLastMode);
         }
 
         if (participant_status === 'ARRIVED') {

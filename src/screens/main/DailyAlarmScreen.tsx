@@ -3,7 +3,7 @@ import { createAppointmentsApi } from '@/src/api/appointments';
 import { createJourneysApi, targetTimeToAmpmHourMinute } from '@/src/api/journeys';
 import { createMembersApi } from '@/src/api/members';
 import { alarmService } from '@/src/services/alarmService';
-import { openKakaoMapRoute, NAVIGATE_CACHE_MAX_AGE_MS } from '@/src/utils/kakaoMapDeeplink';
+import { openKakaoMapRoute, NAVIGATE_CACHE_MAX_AGE_MS, toTransportMode } from '@/src/utils/kakaoMapDeeplink';
 import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ACTIVE_JOURNEYS_KEY, ACTIVE_APPOINTMENTS_KEY } from '@/src/tasks/backgroundLocationTask';
@@ -120,7 +120,7 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
       if (!newEnabled) {
         alarmService.stop(alarm.journeyId);
       } else if (['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
-        alarmService.start({ alarmType, destination: alarm.place, journeyId: alarm.journeyId, destLat: alarm.destLat, destLng: alarm.destLng, isDriving: alarm.transport === 'car', isLastMode: alarm.isLastMode });
+        alarmService.start({ alarmType, destination: alarm.place, journeyId: alarm.journeyId, destLat: alarm.destLat, destLng: alarm.destLng, transportMode: toTransportMode(alarm.transport === 'car'), isLastMode: alarm.isLastMode });
       }
     } else if (alarm.appointmentId) {
       appointmentsApi.toggleParticipantAlarm(alarm.appointmentId, newEnabled).catch(() => {
@@ -130,14 +130,14 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
     }
   };
 
-  // 자가용 전용 카카오맵 딥링크 — 대중교통(publictransit)은 whichStation/boardingTime 캐싱이
-  // 아직 없어서 다음 단계로 미룸 (docs/reference/kakao-map-deeplink-spec.md 2.2절 참고)
+  // DRIVING/TRANSIT 공통 카카오맵 딥링크 — 단일 딥링크 설계
+  // (docs/reference/kakao-map-deeplink-spec.md §2.2~2.4 참고)
   const canNavigate = (alarm: AlarmCard) =>
-    alarm.transport === 'car' && !!alarm.myStatus && NAVIGABLE_STATUSES.includes(alarm.myStatus);
+    !!alarm.myStatus && NAVIGABLE_STATUSES.includes(alarm.myStatus);
 
   const handleNavigate = (alarm: AlarmCard) => {
     const maxAge = alarm.myStatus === 'MOVING' ? NAVIGATE_CACHE_MAX_AGE_MS.MOVING : NAVIGATE_CACHE_MAX_AGE_MS.DEPARTING;
-    openKakaoMapRoute({ lat: alarm.destLat, lng: alarm.destLng }, 'car', maxAge);
+    openKakaoMapRoute({ lat: alarm.destLat, lng: alarm.destLng }, toTransportMode(alarm.transport === 'car'), maxAge);
   };
 
   return (

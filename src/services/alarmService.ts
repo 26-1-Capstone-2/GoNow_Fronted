@@ -19,6 +19,7 @@ import {
   removeAlarmNavInfo,
 } from '@/src/tasks/backgroundLocationTask';
 import { getNickname } from '@/src/store/authStore';
+import type { KakaoMapTransportMode } from '@/src/utils/kakaoMapDeeplink';
 
 const journeysApi = createJourneysApi();
 const appointmentsApi = createAppointmentsApi();
@@ -32,9 +33,9 @@ interface AlarmTarget {
   isActive?: boolean;
   destLat?: number;
   destLng?: number;
-  // 자가용(DRIVING) 전용 딥링크 노출 여부 판단용 — 대중교통은 다음 단계로 미룸
-  // (docs/reference/kakao-map-deeplink-spec.md 2.2절 참고)
-  isDriving?: boolean;
+  // 카카오맵 딥링크 by= 값 — DRIVING/TRANSIT 공통 지원(단일 딥링크 설계,
+  // docs/reference/kakao-map-deeplink-spec.md §2.2~2.4 참고)
+  transportMode?: KakaoMapTransportMode;
   // home 타입 전용 — 막차 모드 여부(3·4단계 알람 문구 분기용, 버그30)
   isLastMode?: boolean;
 }
@@ -70,7 +71,7 @@ class AlarmRunner {
       await saveAlarmNavInfo(navKey, {
         destLat: target.destLat,
         destLng: target.destLng,
-        isDriving: target.isDriving,
+        transportMode: target.transportMode,
         isLastMode: target.isLastMode,
       });
     }
@@ -129,7 +130,7 @@ class AlarmRunner {
   async syncStages(preparationTime: number, whichStation: string | null | undefined, departureAlarmTime: string | null | undefined): Promise<void> {
     const key = this.currentKey();
     if (!key || !this.target) return;
-    await syncStagedAlarms(key, this.target.alarmType, this.target.destination, this.target.journeyId, this.target.appointmentId, preparationTime, whichStation, departureAlarmTime, this.target.destLat, this.target.destLng, this.target.isDriving, this.target.isLastMode);
+    await syncStagedAlarms(key, this.target.alarmType, this.target.destination, this.target.journeyId, this.target.appointmentId, preparationTime, whichStation, departureAlarmTime, this.target.destLat, this.target.destLng, this.target.transportMode, this.target.isLastMode);
   }
 
   private scheduleNextPoll(): void {
