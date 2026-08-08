@@ -381,9 +381,15 @@ class AlarmManager {
     }
     this.starting.add(k);
     try {
+      let effectiveTarget = target;
       if (this.runners.has(k)) {
         console.log(`[AlarmManager.start] 기존 runner 교체 — key:${k}`);
         const old = this.runners.get(k)!;
+        // isActive를 명시하지 않은 호출(방장 수정 FCM 등)이 이미 돌고 있는 runner를 갈아치울 땐
+        // 기존 isActive(참가자 개인 알람 스위치)를 그대로 이어받음 — 안 그러면 꺼둔 알람이 재시작 때마다 강제로 켜짐
+        if (target.isActive === undefined) {
+          effectiveTarget = { ...target, isActive: old.isActive };
+        }
         old.setOnFinish(() => {});
         old.stop();
         this.runners.delete(k);
@@ -399,7 +405,7 @@ class AlarmManager {
       });
       this.runners.set(k, runner);
       console.log(`[AlarmManager.start] runners 등록 — key:${k} 총:${this.runners.size}개`);
-      await runner.start(target);
+      await runner.start(effectiveTarget);
     } finally {
       this.starting.delete(k);
     }

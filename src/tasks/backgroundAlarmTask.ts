@@ -7,6 +7,7 @@ import {
   ACTIVE_JOURNEYS_KEY,
   ACTIVE_APPOINTMENTS_KEY,
 } from '@/src/tasks/backgroundLocationTask';
+import { cancelStagedAlarms } from '@/src/utils/notifications';
 
 export const BACKGROUND_ALARM_TASK = 'BACKGROUND-ALARM-TASK';
 
@@ -28,6 +29,24 @@ TaskManager.defineTask(BACKGROUND_ALARM_TASK, async ({ data, error }) => {
   console.log('[BACKGROUND_ALARM_TASK] data:', JSON.stringify(data));
   const fcmData = (data as any)?.data as Record<string, unknown>;
   if (!fcmData) return;
+
+  // 방장이 약속 삭제/참가자 추방 시 → OS에 이미 예약된 단계별 알람을 즉시 취소
+  // (포그라운드였다면 _layout.tsx의 fcmSub가 같은 이벤트를 처리하므로, 위 active 체크로 여기까진 안 옴)
+  if (
+    fcmData.appointment_id != null &&
+    (fcmData.sync_event === 'appointment_deleted' || fcmData.sync_event === 'removed_from_appointment')
+  ) {
+    const appointmentId = Number(fcmData.appointment_id);
+    console.log(`[BACKGROUND_ALARM_TASK] ${fcmData.sync_event} — appointmentId:${appointmentId} 단계별 알람 취소`);
+    await cancelStagedAlarms(`a_${appointmentId}`).catch(() => {});
+    const existingAppointments: number[] = await AsyncStorage.getItem(ACTIVE_APPOINTMENTS_KEY)
+      .then(r => r ? JSON.parse(r) : [] as number[]);
+    const filtered = existingAppointments.filter((id) => id !== appointmentId);
+    if (filtered.length !== existingAppointments.length) {
+      await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify(filtered));
+    }
+    return;
+  }
 
   const journeyIds: number[] = fcmData?.journey_ids
     ? String(fcmData.journey_ids).split(',').map(Number).filter(n => !isNaN(n))

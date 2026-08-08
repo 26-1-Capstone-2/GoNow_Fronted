@@ -129,17 +129,14 @@ export default function RootLayout() {
       const appStateSub = AppState.addEventListener('change', async (nextState) => {
         console.log('[AppState] 상태 변경:', nextState);
         if (nextState === 'active') {
-          console.log('[AppState] active → stopBackgroundLocationUpdates 호출');
-          await stopBackgroundLocationUpdates().catch(() => {});
           const now = Date.now();
           if (now - lastForegroundAt < 3000) {
             console.log('[AppState] active 3초 내 중복 — skip');
-            if (alarmService.hasRunning()) {
-              await startBackgroundLocationUpdates().catch(() => {});
-            }
             return;
           }
           lastForegroundAt = now;
+          console.log('[AppState] active → stopBackgroundLocationUpdates 호출');
+          await stopBackgroundLocationUpdates().catch(() => {});
           console.log('[AppState] active → startReadyAlarms 호출');
           startReadyAlarms();
           if (alarmService.hasRunning()) {
@@ -181,10 +178,6 @@ export default function RootLayout() {
         useCalendarStore.getState().bumpAlarmVersion();
         try {
           if (participantStatus === 'READY') {
-            if (alarmService.isRunning(undefined, appointmentId)) {
-              console.log(`[FCM] 방장 수정 READY — appointmentId:${appointmentId} 이미 실행 중 skip`);
-              return;
-            }
             const res = await appointmentsApi.getAppointment(appointmentId);
             if (res.data) {
               // 그룹 약속은 이동수단을 참가자별로 각자 고르므로, 응답 최상위가 아니라 내 참가자 레코드에서 찾아야 함
@@ -211,19 +204,21 @@ export default function RootLayout() {
         return;
       }
 
-      // 약속 삭제 FCM → 열려있는 상세화면 강제 종료 + 목록/캘린더 새로고침
+      // 약속 삭제 FCM → 열려있는 상세화면 강제 종료 + 목록/캘린더 새로고침 + 폴링/단계별 알람 정리
       if (data?.appointment_id && data?.sync_event === 'appointment_deleted') {
         const appointmentId = Number(data.appointment_id);
         console.log(`[FCM] 약속 삭제 — appointmentId:${appointmentId}`);
+        alarmService.stop(undefined, appointmentId);
         useAppointmentStatusStore.getState().setDeletedAppointmentId(appointmentId);
         useCalendarStore.getState().bumpAlarmVersion();
         return;
       }
 
-      // 참가자 추방 FCM (쫓겨난 당사자 전용) → 열려있는 상세화면 강제 종료 + 목록/캘린더 새로고침
+      // 참가자 추방 FCM (쫓겨난 당사자 전용) → 열려있는 상세화면 강제 종료 + 목록/캘린더 새로고침 + 폴링/단계별 알람 정리
       if (data?.appointment_id && data?.sync_event === 'removed_from_appointment') {
         const appointmentId = Number(data.appointment_id);
         console.log(`[FCM] 추방됨 — appointmentId:${appointmentId}`);
+        alarmService.stop(undefined, appointmentId);
         useAppointmentStatusStore.getState().setRemovedAppointmentId(appointmentId);
         useCalendarStore.getState().bumpAlarmVersion();
         return;

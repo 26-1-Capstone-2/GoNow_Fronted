@@ -321,6 +321,7 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
         if (editAlarm.isCurrentUserHost === false) {
           const res = await appointmentsApi.updateParticipantTransport(editAlarm.appointmentId, transportType);
           if (res.success) {
+            alarmService.start({ alarmType: 'group', destination: editAlarm.place, appointmentId: editAlarm.appointmentId, destLat: editAlarm.place_lat, destLng: editAlarm.place_lng, transportMode: toTransportMode(editAlarm.transport === 'car') });
             await loadAlarms();
             bumpAlarmVersion();
             setView('list');
