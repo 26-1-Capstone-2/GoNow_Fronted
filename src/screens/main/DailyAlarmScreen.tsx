@@ -119,7 +119,7 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
       });
       if (!newEnabled) {
         alarmService.stop(alarm.journeyId);
-      } else if (['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
+      } else if (!!alarm.myStatus && ['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
         alarmService.start({ alarmType, destination: alarm.place, journeyId: alarm.journeyId, destLat: alarm.destLat, destLng: alarm.destLng, transportMode: toTransportMode(alarm.transport === 'car'), isLastMode: alarm.isLastMode });
       }
     } else if (alarm.appointmentId) {

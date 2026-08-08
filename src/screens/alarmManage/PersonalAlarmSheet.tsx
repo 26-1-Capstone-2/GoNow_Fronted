@@ -200,7 +200,7 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
       Alert.alert('목적지를 선택해주세요.');
       return;
     }
-    if (!isEditMode && (!editAlarm.dest_lat || !editAlarm.dest_lng)) {
+    if (!editAlarm.dest_lat || !editAlarm.dest_lng) {
       Alert.alert('목적지를 선택해주세요.');
       return;
     }
@@ -294,7 +294,7 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
       });
       if (!newEnabled) {
         alarmService.stop(alarm.journeyId);
-      } else if (['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
+      } else if (!!alarm.myStatus && ['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
         alarmService.start({ alarmType: 'personal', destination: alarm.dest_name, journeyId: alarm.journeyId, destLat: alarm.dest_lat, destLng: alarm.dest_lng, transportMode: toTransportMode(alarm.transport === 'car') });
       }
     }

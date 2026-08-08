@@ -267,7 +267,7 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
       });
       if (!newEnabled) {
         alarmService.stop(alarm.journeyId);
-      } else if (['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
+      } else if (!!alarm.myStatus && ['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
         alarmService.start({ alarmType: 'home', destination: alarm.home_name, journeyId: alarm.journeyId, destLat: alarm.home_lat, destLng: alarm.home_lng, transportMode: toTransportMode(alarm.transport === 'car'), isLastMode: alarm.mode === 'lastTrain' });
       }
     }
