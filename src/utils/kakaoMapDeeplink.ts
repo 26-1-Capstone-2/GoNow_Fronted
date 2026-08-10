@@ -38,6 +38,27 @@ export const NAVIGATE_CACHE_MAX_AGE_MS = { DEPARTING: 60000, MOVING: 20000 } as 
  * @param maxAgeMs OS가 캐싱해둔 최근 위치를 얼마나 오래된 것까지 재사용할지(ms).
  *   짧을수록 정확하지만 새로 GPS를 잡아야 할 확률이 높아져 느려진다. 기본값 60초.
  */
+// 길찾기 딥링크 버튼을 노출할 여정 상태 (docs/reference/kakao-map-deeplink-spec.md 2.1절 기준)
+// NEARDEST(목적지 100m 이내)는 제외 — 이미 코앞이라 자가용 길찾기 딥링크가 실용성이 낮음
+export const NAVIGABLE_STATUSES = ['DEPARTING', 'MOVING'];
+
+/** 알람 카드 화면 6곳에 흩어져 있던 canNavigate 판정을 한 곳으로 통일 — 화면마다 조건이 어긋나는 걸 막기 위함. */
+export function canNavigateAlarm(myStatus: string | null | undefined): boolean {
+  return !!myStatus && NAVIGABLE_STATUSES.includes(myStatus);
+}
+
+/** 알람 카드 화면 6곳에 흩어져 있던 handleNavigate(캐시 만료시간 분기 + 딥링크 오픈)를 한 곳으로 통일. */
+export function handleNavigateAlarm(
+  destLat: number | null | undefined,
+  destLng: number | null | undefined,
+  myStatus: string | null | undefined,
+  isDriving: boolean,
+): void {
+  if (destLat == null || destLng == null) return;
+  const maxAge = myStatus === 'MOVING' ? NAVIGATE_CACHE_MAX_AGE_MS.MOVING : NAVIGATE_CACHE_MAX_AGE_MS.DEPARTING;
+  openKakaoMapRoute({ lat: destLat, lng: destLng }, toTransportMode(isDriving), maxAge);
+}
+
 export async function openKakaoMapRoute(
   dest: Coordinate,
   mode: KakaoMapTransportMode,

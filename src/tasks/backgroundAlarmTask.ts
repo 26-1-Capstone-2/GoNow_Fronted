@@ -6,6 +6,7 @@ import {
   BACKGROUND_LOCATION_TASK,
   ACTIVE_JOURNEYS_KEY,
   ACTIVE_APPOINTMENTS_KEY,
+  removeAlarmNavInfo,
 } from '@/src/tasks/backgroundLocationTask';
 import { cancelStagedAlarms } from '@/src/utils/notifications';
 
@@ -39,6 +40,7 @@ TaskManager.defineTask(BACKGROUND_ALARM_TASK, async ({ data, error }) => {
     const appointmentId = Number(fcmData.appointment_id);
     console.log(`[BACKGROUND_ALARM_TASK] ${fcmData.sync_event} — appointmentId:${appointmentId} 단계별 알람 취소`);
     await cancelStagedAlarms(`a_${appointmentId}`).catch(() => {});
+    await removeAlarmNavInfo(`a_${appointmentId}`).catch(() => {});
     const existingAppointments: number[] = await AsyncStorage.getItem(ACTIVE_APPOINTMENTS_KEY)
       .then(r => r ? JSON.parse(r) : [] as number[]);
     const filtered = existingAppointments.filter((id) => id !== appointmentId);

@@ -5,7 +5,7 @@ import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createJourneysApi, ensureFutureDateTime, JourneyDetail, maskToRepeatDays, PersonalJourneyPayload, repeatDaysToMask, targetTimeToAmpmHourMinute, toTargetTime } from '@/src/api/journeys';
 import { alarmService } from '@/src/services/alarmService';
 import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
-import { openKakaoMapRoute, NAVIGATE_CACHE_MAX_AGE_MS, toTransportMode } from '@/src/utils/kakaoMapDeeplink';
+import { toTransportMode, canNavigateAlarm, handleNavigateAlarm } from '@/src/utils/kakaoMapDeeplink';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ACTIVE_JOURNEYS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { usePlaces } from '@/src/hooks/usePlaces';
@@ -20,9 +20,6 @@ const journeysApi = createJourneysApi();
 const alarmsApi = createAlarmsApi();
 
 const DAY_LABEL = ['일', '월', '화', '수', '목', '금', '토'];
-// 길찾기 딥링크 버튼을 노출할 여정 상태 (docs/reference/kakao-map-deeplink-spec.md 2.1절 기준)
-// NEARDEST(목적지 100m 이내)는 제외 — 이미 코앞이라 자가용 길찾기 딥링크가 실용성이 낮음
-const NAVIGABLE_STATUSES = ['DEPARTING', 'MOVING'];
 const DAYS = ['일요일마다', '월요일마다', '화요일마다', '수요일마다', '목요일마다', '금요일마다', '토요일마다', '안함'];
 const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));
 const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
@@ -258,14 +255,10 @@ export default function PersonalAllAlarmSheet({ onClose }: Props) {
   };
 
   // DRIVING/TRANSIT 공통 카카오맵 딥링크 — 단일 딥링크 설계 (docs/reference/kakao-map-deeplink-spec.md §2.2~2.4 참고)
-  const canNavigate = (alarm: Alarm) =>
-    !!alarm.myStatus && NAVIGABLE_STATUSES.includes(alarm.myStatus);
+  const canNavigate = (alarm: Alarm) => canNavigateAlarm(alarm.myStatus);
 
-  const handleNavigate = (alarm: Alarm) => {
-    if (alarm.dest_lat == null || alarm.dest_lng == null) return;
-    const maxAge = alarm.myStatus === 'MOVING' ? NAVIGATE_CACHE_MAX_AGE_MS.MOVING : NAVIGATE_CACHE_MAX_AGE_MS.DEPARTING;
-    openKakaoMapRoute({ lat: alarm.dest_lat, lng: alarm.dest_lng }, toTransportMode(alarm.transport === 'car'), maxAge);
-  };
+  const handleNavigate = (alarm: Alarm) =>
+    handleNavigateAlarm(alarm.dest_lat, alarm.dest_lng, alarm.myStatus, alarm.transport === 'car');
 
   const toggleRepeat = (day: string) => {
     setEditAlarm((prev) => {

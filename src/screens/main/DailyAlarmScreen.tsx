@@ -3,7 +3,7 @@ import { createAppointmentsApi } from '@/src/api/appointments';
 import { createJourneysApi, targetTimeToAmpmHourMinute } from '@/src/api/journeys';
 import { createMembersApi } from '@/src/api/members';
 import { alarmService } from '@/src/services/alarmService';
-import { openKakaoMapRoute, NAVIGATE_CACHE_MAX_AGE_MS, toTransportMode } from '@/src/utils/kakaoMapDeeplink';
+import { toTransportMode, canNavigateAlarm, handleNavigateAlarm } from '@/src/utils/kakaoMapDeeplink';
 import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ACTIVE_JOURNEYS_KEY, ACTIVE_APPOINTMENTS_KEY } from '@/src/tasks/backgroundLocationTask';
@@ -25,9 +25,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
-// 길찾기 딥링크 버튼을 노출할 여정 상태 (docs/reference/kakao-map-deeplink-spec.md 2.1절 기준)
-// NEARDEST(목적지 100m 이내)는 제외 — 이미 코앞이라 자가용 길찾기 딥링크가 실용성이 낮음
-const NAVIGABLE_STATUSES = ['DEPARTING', 'MOVING'];
 const alarmsApi = createAlarmsApi();
 const journeysApi = createJourneysApi();
 const appointmentsApi = createAppointmentsApi();
@@ -132,13 +129,10 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
 
   // DRIVING/TRANSIT 공통 카카오맵 딥링크 — 단일 딥링크 설계
   // (docs/reference/kakao-map-deeplink-spec.md §2.2~2.4 참고)
-  const canNavigate = (alarm: AlarmCard) =>
-    !!alarm.myStatus && NAVIGABLE_STATUSES.includes(alarm.myStatus);
+  const canNavigate = (alarm: AlarmCard) => canNavigateAlarm(alarm.myStatus);
 
-  const handleNavigate = (alarm: AlarmCard) => {
-    const maxAge = alarm.myStatus === 'MOVING' ? NAVIGATE_CACHE_MAX_AGE_MS.MOVING : NAVIGATE_CACHE_MAX_AGE_MS.DEPARTING;
-    openKakaoMapRoute({ lat: alarm.destLat, lng: alarm.destLng }, toTransportMode(alarm.transport === 'car'), maxAge);
-  };
+  const handleNavigate = (alarm: AlarmCard) =>
+    handleNavigateAlarm(alarm.destLat, alarm.destLng, alarm.myStatus, alarm.transport === 'car');
 
   return (
     <SafeAreaView style={styles.container}>
