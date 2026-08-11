@@ -5,6 +5,7 @@ import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createAppointmentsApi } from '@/src/api/appointments';
 import { alarmService } from '@/src/services/alarmService';
 import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
+import { toTransportMode, canNavigateAlarm, handleNavigateAlarm } from '@/src/utils/kakaoMapDeeplink';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ACTIVE_APPOINTMENTS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { targetTimeToAmpmHourMinute } from '@/src/api/journeys';
@@ -74,6 +75,7 @@ interface GroupAlarm {
   transport: Transport;
   date: string;
   isCurrentUserHost?: boolean;
+  myStatus?: string;
 }
 
 function toTargetTime(date: string, ampm: string, hour: string, minute: string): string {
@@ -90,6 +92,8 @@ function fromAlarmItem(item: AlarmItem): GroupAlarm {
     appointmentId: item.appointment_id ?? undefined,
     ampm, hour, minute,
     place: item.dest_name,
+    place_lat: item.dest_lat,
+    place_lng: item.dest_lng,
     enabled: item.is_active,
     members: Array.from({ length: item.participant_count ?? 1 }, (_, i) => ({
       id: String(i),
@@ -100,6 +104,7 @@ function fromAlarmItem(item: AlarmItem): GroupAlarm {
     isArrivalActive: item.appointment_status !== 'WAITING',
     transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
     date: item.plan_date,
+    myStatus: item.my_status,
   };
 }
 
@@ -186,7 +191,7 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
         if (res.data.participant_status === 'READY') {
           const detail = await appointmentsApi.getAppointment(res.data.appointment_id);
           if (detail.data) {
-            alarmService.start({ alarmType: 'group', destination: detail.data.dest_name, appointmentId: res.data.appointment_id });
+            alarmService.start({ alarmType: 'group', destination: detail.data.dest_name, appointmentId: res.data.appointment_id, destLat: detail.data.dest_lat, destLng: detail.data.dest_lng, transportMode: toTransportMode(joinTransport === 'car') });
           }
         }
         setInviteCode('');
@@ -313,6 +318,7 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
         if (editAlarm.isCurrentUserHost === false) {
           const res = await appointmentsApi.updateParticipantTransport(editAlarm.appointmentId, transportType);
           if (res.success) {
+            alarmService.start({ alarmType: 'group', destination: editAlarm.place, appointmentId: editAlarm.appointmentId, destLat: editAlarm.place_lat, destLng: editAlarm.place_lng, transportMode: toTransportMode(editAlarm.transport === 'car') });
             await loadAlarms();
             bumpAlarmVersion();
             setView('list');
@@ -333,7 +339,7 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
           });
           if (res.success) {
             if (res.data?.participant_status === 'READY') {
-              alarmService.start({ alarmType: 'group', destination: editAlarm.place, appointmentId: editAlarm.appointmentId });
+              alarmService.start({ alarmType: 'group', destination: editAlarm.place, appointmentId: editAlarm.appointmentId, destLat: editAlarm.place_lat, destLng: editAlarm.place_lng, transportMode: toTransportMode(editAlarm.transport === 'car') });
             } else if (res.data?.participant_status === 'SCHEDULED' && editAlarm.appointmentId != null) {
               alarmService.stop(undefined, editAlarm.appointmentId);
             }
@@ -365,7 +371,7 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
       });
       if (res.success && res.data) {
         if (res.data.participant_status === 'READY') {
-          alarmService.start({ alarmType: 'group', destination: editAlarm.place, appointmentId: res.data.appointment_id });
+          alarmService.start({ alarmType: 'group', destination: editAlarm.place, appointmentId: res.data.appointment_id, destLat: editAlarm.place_lat, destLng: editAlarm.place_lng, transportMode: toTransportMode(editAlarm.transport === 'car') });
         }
         await loadAlarms();
         bumpAlarmVersion();
@@ -459,6 +465,12 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
       setAlarms((prev) => prev.map((a) => a.id === id ? { ...a, enabled: alarm.enabled } : a));
     }
   };
+
+  // DRIVING/TRANSIT 공통 카카오맵 딥링크 — 단일 딥링크 설계 (docs/reference/kakao-map-deeplink-spec.md §2.2~2.4 참고)
+  const canNavigate = (alarm: GroupAlarm) => canNavigateAlarm(alarm.myStatus);
+
+  const handleNavigate = (alarm: GroupAlarm) =>
+    handleNavigateAlarm(alarm.place_lat, alarm.place_lng, alarm.myStatus, alarm.transport === 'car');
 
   const copyInviteCode = async () => {
     try {
@@ -571,6 +583,11 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
                         color={alarm.isArrivalActive ? '#FFFFFF' : '#CCCCCC'}
                       />
                     </TouchableOpacity>
+                    {canNavigate(alarm) && (
+                      <TouchableOpacity style={styles.navigateBtn} onPress={() => handleNavigate(alarm)}>
+                        <Feather name="navigation" size={14} color="#4A90D9" />
+                      </TouchableOpacity>
+                    )}
                     <Switch
                       value={alarm.enabled}
                       onValueChange={() => toggleAlarm(alarm.id)}
@@ -945,6 +962,7 @@ const styles = StyleSheet.create({
   memberCount: { fontSize: 11, color: '#555555', fontWeight: '500' },
   dashboardBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center' },
   dashboardBtnActive: { backgroundColor: '#92DEFE' },
+  navigateBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#EAF2FB', alignItems: 'center', justifyContent: 'center' },
   pickerContainer: {
     flexDirection: 'row',
     backgroundColor: '#F5F5F5', borderRadius: 14,

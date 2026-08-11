@@ -15,8 +15,11 @@ import {
 import {
   DESIRED_INTERVALS_KEY,
   stopBackgroundLocationUpdates,
+  saveAlarmNavInfo,
+  removeAlarmNavInfo,
 } from '@/src/tasks/backgroundLocationTask';
 import { getNickname } from '@/src/store/authStore';
+import type { KakaoMapTransportMode } from '@/src/utils/kakaoMapDeeplink';
 
 const journeysApi = createJourneysApi();
 const appointmentsApi = createAppointmentsApi();
@@ -28,6 +31,13 @@ interface AlarmTarget {
   journeyId?: number;
   appointmentId?: number;
   isActive?: boolean;
+  destLat?: number;
+  destLng?: number;
+  // 카카오맵 딥링크 by= 값 — DRIVING/TRANSIT 공통 지원(단일 딥링크 설계,
+  // docs/reference/kakao-map-deeplink-spec.md §2.2~2.4 참고)
+  transportMode?: KakaoMapTransportMode;
+  // home 타입 전용 — 막차 모드 여부(3·4단계 알람 문구 분기용, 버그30)
+  isLastMode?: boolean;
 }
 
 class AlarmRunner {
@@ -53,6 +63,18 @@ class AlarmRunner {
     const id = target.journeyId ?? `apt${target.appointmentId}`;
     console.log(`[alarmService.start] 시작 — type:${target.alarmType} id:${id} dest:${target.destination}`);
     this.target = target;
+    // 헤드리스(백그라운드) 경로는 /location 응답만으론 목적지 좌표를 알 수 없어서(응답에 안 실림),
+    // 카카오맵 딥링크 버튼을 계속 붙이려면 여기서 미리 캐싱해둬야 함 (backgroundLocationTask.ts가 읽어감)
+    const navKey = this.currentKey();
+    if (navKey) {
+      // await로 확실히 기록 완료 후 폴링 시작 — 백그라운드 태스크가 이 값을 못 읽는 race 방지
+      await saveAlarmNavInfo(navKey, {
+        destLat: target.destLat,
+        destLng: target.destLng,
+        transportMode: target.transportMode,
+        isLastMode: target.isLastMode,
+      });
+    }
     this.status = 'SCHEDULED';
     this.movingSent = false;
     this.arrivedSent = false;
@@ -83,6 +105,8 @@ class AlarmRunner {
       this.pollTimer = null;
     }
     this.cancelRemainingStages();
+    const navKey = this.currentKey();
+    if (navKey) removeAlarmNavInfo(navKey).catch(() => {});
     this.target = null;
     const cb = this.onFinish;
     this.onFinish = undefined;
@@ -106,7 +130,7 @@ class AlarmRunner {
   async syncStages(preparationTime: number, whichStation: string | null | undefined, departureAlarmTime: string | null | undefined): Promise<void> {
     const key = this.currentKey();
     if (!key || !this.target) return;
-    await syncStagedAlarms(key, this.target.alarmType, this.target.destination, this.target.journeyId, this.target.appointmentId, preparationTime, whichStation, departureAlarmTime);
+    await syncStagedAlarms(key, this.target.alarmType, this.target.destination, this.target.journeyId, this.target.appointmentId, preparationTime, whichStation, departureAlarmTime, this.target.destLat, this.target.destLng, this.target.transportMode, this.target.isLastMode);
   }
 
   private scheduleNextPoll(): void {
@@ -357,9 +381,15 @@ class AlarmManager {
     }
     this.starting.add(k);
     try {
+      let effectiveTarget = target;
       if (this.runners.has(k)) {
         console.log(`[AlarmManager.start] 기존 runner 교체 — key:${k}`);
         const old = this.runners.get(k)!;
+        // isActive를 명시하지 않은 호출(방장 수정 FCM 등)이 이미 돌고 있는 runner를 갈아치울 땐
+        // 기존 isActive(참가자 개인 알람 스위치)를 그대로 이어받음 — 안 그러면 꺼둔 알람이 재시작 때마다 강제로 켜짐
+        if (target.isActive === undefined) {
+          effectiveTarget = { ...target, isActive: old.isActive };
+        }
         old.setOnFinish(() => {});
         old.stop();
         this.runners.delete(k);
@@ -375,7 +405,7 @@ class AlarmManager {
       });
       this.runners.set(k, runner);
       console.log(`[AlarmManager.start] runners 등록 — key:${k} 총:${this.runners.size}개`);
-      await runner.start(target);
+      await runner.start(effectiveTarget);
     } finally {
       this.starting.delete(k);
     }

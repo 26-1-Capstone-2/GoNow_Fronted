@@ -4,6 +4,7 @@ import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createJourneysApi, ensureFutureDateTime, JourneyDetail, maskToRepeatDays, PersonalJourneyPayload, repeatDaysToMask, targetTimeToAmpmHourMinute, toTargetTime } from '@/src/api/journeys';
 import { alarmService } from '@/src/services/alarmService';
 import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
+import { toTransportMode } from '@/src/utils/kakaoMapDeeplink';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ACTIVE_JOURNEYS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { usePlaces } from '@/src/hooks/usePlaces';
@@ -35,6 +36,8 @@ function fromAlarmItem(item: AlarmItem): Alarm {
     ampm, hour, minute,
     dest_name: item.dest_name,
     dest_address: '',
+    dest_lat: item.dest_lat,
+    dest_lng: item.dest_lng,
     repeat: maskToRepeatDays(item.repeat_days ?? 0),
     enabled: item.is_active,
     transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
@@ -197,7 +200,7 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
       Alert.alert('목적지를 선택해주세요.');
       return;
     }
-    if (!isEditMode && (!editAlarm.dest_lat || !editAlarm.dest_lng)) {
+    if (!editAlarm.dest_lat || !editAlarm.dest_lng) {
       Alert.alert('목적지를 선택해주세요.');
       return;
     }
@@ -230,14 +233,14 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
       if (isEditMode && editAlarm.journeyId) {
         const res = await journeysApi.updatePersonal(editAlarm.journeyId, payload);
         if (res.data.journey_status === 'READY') {
-          alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: editAlarm.journeyId });
+          alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: editAlarm.journeyId, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, transportMode: toTransportMode(editAlarm.transport === 'car') });
         } else if (res.data.journey_status === 'SCHEDULED') {
           alarmService.stop(editAlarm.journeyId);
         }
       } else {
         const res = await journeysApi.createPersonal(payload);
         if (res.data.journey_status === 'READY') {
-          alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: res.data.journey_id });
+          alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: res.data.journey_id, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, transportMode: toTransportMode(editAlarm.transport === 'car') });
         }
       }
       await loadAlarms();
@@ -291,8 +294,8 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
       });
       if (!newEnabled) {
         alarmService.stop(alarm.journeyId);
-      } else if (['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
-        alarmService.start({ alarmType: 'personal', destination: alarm.dest_name, journeyId: alarm.journeyId });
+      } else if (!!alarm.myStatus && ['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
+        alarmService.start({ alarmType: 'personal', destination: alarm.dest_name, journeyId: alarm.journeyId, destLat: alarm.dest_lat, destLng: alarm.dest_lng, transportMode: toTransportMode(alarm.transport === 'car') });
       }
     }
   };

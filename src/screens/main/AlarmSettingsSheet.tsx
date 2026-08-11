@@ -126,11 +126,11 @@ export default function AlarmSettingsSheet({ onClose, onSave }: Props) {
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>경로 옵션</Text>
               <View style={styles.sectionBox}>
-                {(['MIN_TIME', 'MIN_TRANSFER', 'MIN_WALK'] as PriorityType[]).map((type, i, arr) => (
+                {(['MIN_TIME', 'MIN_TRANSFER', 'MIN_WALK', 'MIN_WAIT'] as PriorityType[]).map((type, i, arr) => (
                   <View key={type}>
                     <View style={styles.row}>
                       <Text style={styles.rowLabel}>
-                        {type === 'MIN_TIME' ? '최단시간' : type === 'MIN_TRANSFER' ? '최소환승' : '최소도보'}
+                        {type === 'MIN_TIME' ? '최소 시간' : type === 'MIN_TRANSFER' ? '최소 환승' : type === 'MIN_WALK' ? '최소 도보' : '최소 대기'}
                       </Text>
                       <Switch
                         value={priorityType === type}

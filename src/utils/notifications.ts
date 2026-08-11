@@ -11,6 +11,7 @@ import notifee, {
 import { Linking, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
+import type { KakaoMapTransportMode } from '@/src/utils/kakaoMapDeeplink';
 
 export type AlarmStage = 1 | 2 | 3 | 4;
 // 도착 관련 알림 3종 — 출발 단계별 채널과 완전히 분리(성격이 다른 알림이라 서로 영향 안 주도록).
@@ -174,6 +175,16 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
         await createAppointmentsApi().arriveParticipant(Number(data.appointmentId));
       }
     }
+
+    if (actionId === 'navigate' && data?.destLat && data?.destLng && data?.transportMode) {
+      // 단계별 출발 알람(1~4단계)은 전부 DEPARTING 구간에서만 발생 — 캐시 유효기간도 그에 맞춤
+      const { openKakaoMapRoute, NAVIGATE_CACHE_MAX_AGE_MS } = await import('@/src/utils/kakaoMapDeeplink');
+      await openKakaoMapRoute(
+        { lat: Number(data.destLat), lng: Number(data.destLng) },
+        data.transportMode as KakaoMapTransportMode,
+        NAVIGATE_CACHE_MAX_AGE_MS.DEPARTING,
+      );
+    }
   }
 });
 
@@ -183,6 +194,11 @@ const STAGE_CONFIG = {
   3: { title: '🟠 위험 구간', vibrate: true  },
   4: { title: '🔴 임계 구간', vibrate: true  },
 };
+
+// 1~3단계를 건너뛰고 4단계가 바로 발송되는("이미 늦음") 경우 전용 제목.
+// "임계 구간"은 1→2→3을 거쳐 마지막 단계에 도달했다는 뉘앙스라 스킵된 경우엔 안 맞음 —
+// 색(🔴)은 여전히 가장 급한 상황이라 유지, 문구만 "이미 늦었다"는 사실 위주로 교체.
+const LATE_STAGE4_TITLE = '🔴 지각 구간';
 
 const TYPE_NAMES = { personal: '개인', group: '그룹', home: '귀가' };
 
@@ -200,12 +216,30 @@ const STAGE_MESSAGES: Record<AlarmType, Record<AlarmStage, string>> = {
     4: '즉시 출발! 그룹원들이 기다리고 있습니다!',
   },
   home: {
+    // 3·4단계는 데드라인 모드(자가용 포함) 기준 중립 문구 — 막차 모드는 아래
+    // HOME_LAST_TRAIN_MESSAGES로 교체됨(버그30 — isLastMode 무관하게 "막차"로 고정돼 있던 문제 수정)
     1: '귀가 준비를 시작하세요. 아직 여유가 있어요.',
     2: '귀가 시간이 다가오고 있어요. 준비하세요!',
-    3: '지금 출발하지 않으면 막차를 놓칠 수 있어요!',
-    4: '즉시 출발! 막차 시간이 얼마 남지 않았어요!',
+    3: '지금 바로 출발하세요! 귀가가 늦어지고 있어요.',
+    4: '즉시 출발! 더 늦으면 귀가가 어렵습니다!',
   },
 };
+
+// 귀가 알람이 막차 모드(isLastMode)일 때 3·4단계에 덮어쓸 문구 — 데드라인 모드는 위 STAGE_MESSAGES.home 그대로 사용
+const HOME_LAST_TRAIN_MESSAGES: Partial<Record<AlarmStage, string>> = {
+  3: '지금 출발하지 않으면 막차를 놓칠 수 있어요!',
+  4: '즉시 출발! 막차 시간이 얼마 남지 않았어요!',
+};
+
+// 1~3단계를 건너뛰고 4단계가 바로 발송되는("이미 출발 시각이 지남") 경우 전용 문구.
+// 정상적으로 3단계까지 거쳐 4단계에 도달한 경우와 달리, 사용자가 지금까지의 경고를 하나도
+// 못 봤을 가능성이 높아 "더 늦으면"이 아니라 "이미 지났다"는 사실을 명확히 알려야 함.
+const LATE_STAGE4_MESSAGES: Record<AlarmType, string> = {
+  personal: '이미 출발 시각이 지났어요! 지금 바로 출발하세요.',
+  group: '이미 출발 시각이 지났어요! 그룹원들이 기다리고 있어요, 지금 바로 출발하세요.',
+  home: '이미 출발 시각이 지났어요! 지금 바로 출발하세요.',
+};
+const LATE_HOME_LAST_TRAIN_MESSAGE = '이미 출발 시각이 지났어요! 막차를 놓쳤을 수 있어요, 지금 바로 출발하세요.';
 
 async function ensureChannels(): Promise<void> {
   if (Platform.OS !== 'android') return;
@@ -418,13 +452,21 @@ function buildAlarmBody(
   destination: string | undefined,
   whichStation: string | null | undefined,
   minutesRemaining: number | undefined,
+  isLastMode?: boolean,
+  isLate?: boolean,
 ): string {
-  const stageMsg = STAGE_MESSAGES[type][stage];
+  const isHomeLastTrain = type === 'home' && isLastMode;
+  const stageMsg = isHomeLastTrain && HOME_LAST_TRAIN_MESSAGES[stage]
+    ? HOME_LAST_TRAIN_MESSAGES[stage]!
+    : STAGE_MESSAGES[type][stage];
+
   let message: string;
   if (whichStation && minutesRemaining != null && minutesRemaining > 0) {
     message = `${whichStation} 탑승까지 ${minutesRemaining}분 남았어요.`;
   } else if (whichStation && stage === 4) {
-    message = `${whichStation}으로 즉시 출발하세요!`;
+    message = isLate ? `이미 늦었어요! ${whichStation}으로 즉시 출발하세요!` : `${whichStation}으로 즉시 출발하세요!`;
+  } else if (stage === 4 && isLate) {
+    message = isHomeLastTrain ? LATE_HOME_LAST_TRAIN_MESSAGE : LATE_STAGE4_MESSAGES[type];
   } else {
     message = stageMsg;
   }
@@ -476,7 +518,7 @@ export async function sendAlarm(
         ...(stage <= 3 && {
           actions: [
             {
-              title: '✕ 닫기',
+              title: '✕ 이후 알림 끄기',
               pressAction: { id: 'dismiss' },
             },
           ],
@@ -591,20 +633,30 @@ export async function scheduleFutureAlarm(
   appointmentId?: number,
   whichStation?: string | null,
   minutesRemaining?: number,
+  destLat?: number,
+  destLng?: number,
+  transportMode?: KakaoMapTransportMode,
+  isLastMode?: boolean,
 ): Promise<string[]> {
   await ensureChannels();
   const config = STAGE_CONFIG[stage];
-  const title = `${config.title} - ${TYPE_NAMES[type]} 알람`;
-  const body = buildAlarmBody(stage, type, destination, whichStation, minutesRemaining);
   const repeatCount = stage === 4 ? 3 : 1;
   const ids: string[] = [];
   const isPast = triggerTimestamp <= Date.now();
+  const titleStage = stage === 4 && isPast ? LATE_STAGE4_TITLE : config.title;
+  const title = `${titleStage} - ${TYPE_NAMES[type]} 알람`;
+  const body = buildAlarmBody(stage, type, destination, whichStation, minutesRemaining, isLastMode, isPast);
+  // DRIVING/TRANSIT 공통 길찾기 딥링크 — 단일 딥링크 설계
+  // (docs/reference/kakao-map-deeplink-spec.md §2.2~2.4 참고)
+  const canNavigate = !!transportMode && destLat != null && destLng != null;
+  const navigateAction = { title: '🗺️ 길찾기', pressAction: { id: 'navigate' } };
 
   for (let i = 0; i < repeatCount; i++) {
     const notifBody = stage === 4 ? `${body} (${i + 1}/${repeatCount})` : body;
     const notifData = {
       ...(journeyId != null && { journeyId: String(journeyId) }),
       ...(appointmentId != null && { appointmentId: String(appointmentId) }),
+      ...(canNavigate && { destLat: String(destLat), destLng: String(destLng), transportMode: transportMode as string }),
     };
     const androidConfig = {
       channelId: channelIds[stage],
@@ -617,7 +669,13 @@ export async function scheduleFutureAlarm(
       vibrationPattern: config.vibrate ? [100, 500, 200, 500, 200, 500] : undefined,
       fullScreenAction: { id: 'default', launchActivity: 'default' },
       pressAction: { id: 'default' },
-      ...(stage <= 3 && { actions: [{ title: '✕ 닫기', pressAction: { id: 'dismiss' } }] }),
+      ...(stage <= 3 && {
+        actions: canNavigate
+          ? [{ title: '✕ 이후 알림 끄기', pressAction: { id: 'dismiss' } }, navigateAction]
+          : [{ title: '✕ 이후 알림 끄기', pressAction: { id: 'dismiss' } }],
+      }),
+      // 4단계는 원래 액션이 없었음(닫기 버튼도 없음 — 범위 밖) — 길찾기만 조건부로 추가
+      ...(stage === 4 && canNavigate && { actions: [navigateAction] }),
     };
 
     let id: string;
@@ -662,6 +720,10 @@ export async function syncStagedAlarms(
   preparationTime: number,
   whichStation: string | null | undefined,
   departureAlarmTime: string | null | undefined,
+  destLat?: number,
+  destLng?: number,
+  transportMode?: KakaoMapTransportMode,
+  isLastMode?: boolean,
 ): Promise<void> {
   if (!departureAlarmTime) return;
 
@@ -708,7 +770,7 @@ export async function syncStagedAlarms(
         const stage = (i + 1) as 1 | 2 | 3 | 4;
         // 4단계(i=3)이고 시각이 이미 지났으면 minutesRemaining=0 → 긴급 문구 표시
         const minutesRemaining = (i === 3 && now >= stepTimes[3]) ? 0 : mins(i);
-        const ids = await scheduleFutureAlarm(type, stage, destination, stepTimes[i], journeyId, appointmentId, normalizedStation, minutesRemaining);
+        const ids = await scheduleFutureAlarm(type, stage, destination, stepTimes[i], journeyId, appointmentId, normalizedStation, minutesRemaining, destLat, destLng, transportMode, isLastMode);
         allIds.push(...ids);
       }
       console.log(`[알람] syncStagedAlarms 등록 완료 — key:${key} ids:${allIds}`);

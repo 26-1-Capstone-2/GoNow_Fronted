@@ -6,6 +6,7 @@ import { createJourneysApi, ensureFutureDateTime, HomeJourneyPayload, JourneyDet
 import { alarmService } from '@/src/services/alarmService';
 import { extractApiErrorMessage } from '@/src/utils/notifications';
 import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
+import { toTransportMode, canNavigateAlarm, handleNavigateAlarm } from '@/src/utils/kakaoMapDeeplink';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ACTIVE_JOURNEYS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { usePlaces } from '@/src/hooks/usePlaces';
@@ -58,6 +59,8 @@ function fromAlarmItem(item: AlarmItem): HomeAlarm {
     ampm, hour, minute,
     home_name: item.dest_name,
     home_address: '',
+    home_lat: item.dest_lat,
+    home_lng: item.dest_lng,
     repeat: maskToRepeatDays(item.repeat_days ?? 0),
     enabled: item.is_active,
     transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
@@ -217,14 +220,14 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
       if (isEditMode && editAlarm.journeyId) {
         const res = await journeysApi.updateHome(editAlarm.journeyId, payload);
         if (res.data.journey_status === 'READY') {
-          alarmService.start({ alarmType: 'home', destination: editAlarm.home_name, journeyId: editAlarm.journeyId });
+          alarmService.start({ alarmType: 'home', destination: editAlarm.home_name, journeyId: editAlarm.journeyId, destLat: editAlarm.home_lat, destLng: editAlarm.home_lng, transportMode: toTransportMode(editAlarm.transport === 'car'), isLastMode: editAlarm.mode === 'lastTrain' });
         } else if (res.data.journey_status === 'SCHEDULED') {
           alarmService.stop(editAlarm.journeyId);
         }
       } else {
         const res = await journeysApi.createHome(payload);
         if (res.data.journey_status === 'READY') {
-          alarmService.start({ alarmType: 'home', destination: editAlarm.home_name, journeyId: res.data.journey_id });
+          alarmService.start({ alarmType: 'home', destination: editAlarm.home_name, journeyId: res.data.journey_id, destLat: editAlarm.home_lat, destLng: editAlarm.home_lng, transportMode: toTransportMode(editAlarm.transport === 'car'), isLastMode: editAlarm.mode === 'lastTrain' });
         }
       }
       await loadAlarms();
@@ -261,11 +264,17 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
       });
       if (!newEnabled) {
         alarmService.stop(alarm.journeyId);
-      } else if (['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
-        alarmService.start({ alarmType: 'home', destination: alarm.home_name, journeyId: alarm.journeyId });
+      } else if (!!alarm.myStatus && ['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
+        alarmService.start({ alarmType: 'home', destination: alarm.home_name, journeyId: alarm.journeyId, destLat: alarm.home_lat, destLng: alarm.home_lng, transportMode: toTransportMode(alarm.transport === 'car'), isLastMode: alarm.mode === 'lastTrain' });
       }
     }
   };
+
+  // DRIVING/TRANSIT 공통 카카오맵 딥링크 — 단일 딥링크 설계 (docs/reference/kakao-map-deeplink-spec.md §2.2~2.4 참고)
+  const canNavigate = (alarm: HomeAlarm) => canNavigateAlarm(alarm.myStatus);
+
+  const handleNavigate = (alarm: HomeAlarm) =>
+    handleNavigateAlarm(alarm.home_lat, alarm.home_lng, alarm.myStatus, alarm.transport === 'car');
 
   const toggleRepeat = (day: string) => {
     setEditAlarm((prev) => {
@@ -338,6 +347,11 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
                     </View>
                   </View>
                   <View style={styles.cardRight}>
+                    {canNavigate(alarm) && (
+                      <TouchableOpacity style={styles.navigateBtn} onPress={() => handleNavigate(alarm)}>
+                        <Feather name="navigation" size={14} color="#4A90D9" />
+                      </TouchableOpacity>
+                    )}
                     <Switch value={alarm.enabled} onValueChange={() => toggleAlarm(alarm)}
                       trackColor={{ false: '#E0E0E0', true: '#4CAF50' }} thumbColor="#FFFFFF" />
                   </View>
@@ -545,7 +559,8 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 16, paddingBottom: Platform.OS === 'ios' ? 40 : 24 },
   alarmCard: { flexDirection: 'row', alignItems: 'stretch', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: 16, backgroundColor: '#F5F5F5', borderRadius: 12, marginBottom: 8 },
   alarmInfo: { flex: 1, marginRight: 8, justifyContent: 'center' },
-  cardRight: { justifyContent: 'center' },
+  cardRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  navigateBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#EAF2FB', alignItems: 'center', justifyContent: 'center' },
   alarmDate: { fontSize: 11, fontWeight: '500', color: '#FF3B30', marginBottom: 3 },
   alarmPlace: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 5 },
   alarmMeta: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },

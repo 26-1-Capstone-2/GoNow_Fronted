@@ -9,7 +9,7 @@ export type UpdateHomePayload = {
   lng: string;
 };
 
-export type PriorityType = 'MIN_TIME' | 'MIN_TRANSFER' | 'MIN_WALK';
+export type PriorityType = 'MIN_TIME' | 'MIN_TRANSFER' | 'MIN_WALK' | 'MIN_WAIT';
 export type TransitType = 'ALL' | 'SUBWAY' | 'BUS';
 
 export type UpdateSettingPayload = {

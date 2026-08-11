@@ -3,6 +3,7 @@ import { createAppointmentsApi } from '@/src/api/appointments';
 import { createJourneysApi, targetTimeToAmpmHourMinute } from '@/src/api/journeys';
 import { createMembersApi } from '@/src/api/members';
 import { alarmService } from '@/src/services/alarmService';
+import { toTransportMode, canNavigateAlarm, handleNavigateAlarm } from '@/src/utils/kakaoMapDeeplink';
 import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ACTIVE_JOURNEYS_KEY, ACTIVE_APPOINTMENTS_KEY } from '@/src/tasks/backgroundLocationTask';
@@ -36,6 +37,8 @@ type AlarmCard = {
   ampm: string;
   time: string;
   place: string;
+  destLat: number;
+  destLng: number;
   enabled: boolean;
   transport: 'public' | 'car';
   isLastMode?: boolean;
@@ -53,6 +56,8 @@ function toAlarmCard(item: AlarmItem): AlarmCard {
     ampm,
     time: `${hour}:${minute}`,
     place: item.dest_name,
+    destLat: item.dest_lat,
+    destLng: item.dest_lng,
     enabled: item.is_active,
     transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
     isLastMode: item.is_last_mode,
@@ -111,8 +116,8 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
       });
       if (!newEnabled) {
         alarmService.stop(alarm.journeyId);
-      } else if (['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
-        alarmService.start({ alarmType, destination: alarm.place, journeyId: alarm.journeyId });
+      } else if (!!alarm.myStatus && ['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
+        alarmService.start({ alarmType, destination: alarm.place, journeyId: alarm.journeyId, destLat: alarm.destLat, destLng: alarm.destLng, transportMode: toTransportMode(alarm.transport === 'car'), isLastMode: alarm.isLastMode });
       }
     } else if (alarm.appointmentId) {
       appointmentsApi.toggleParticipantAlarm(alarm.appointmentId, newEnabled).catch(() => {
@@ -121,6 +126,13 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
       alarmService.setActive(newEnabled, undefined, alarm.appointmentId);
     }
   };
+
+  // DRIVING/TRANSIT 공통 카카오맵 딥링크 — 단일 딥링크 설계
+  // (docs/reference/kakao-map-deeplink-spec.md §2.2~2.4 참고)
+  const canNavigate = (alarm: AlarmCard) => canNavigateAlarm(alarm.myStatus);
+
+  const handleNavigate = (alarm: AlarmCard) =>
+    handleNavigateAlarm(alarm.destLat, alarm.destLng, alarm.myStatus, alarm.transport === 'car');
 
   return (
     <SafeAreaView style={styles.container}>
@@ -183,6 +195,11 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   </View>
                 </View>
                 <View style={styles.cardRight}>
+                  {canNavigate(alarm) && (
+                    <TouchableOpacity style={styles.navigateBtn} onPress={() => handleNavigate(alarm)}>
+                      <Feather name="navigation" size={14} color="#4A90D9" />
+                    </TouchableOpacity>
+                  )}
                   <Switch
                     value={alarm.enabled}
                     onValueChange={() => toggleAlarm(setPersonal, alarm)}
@@ -265,6 +282,11 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   >
                     <FontAwesome6 name="person-walking" size={14} color={isGroupActive ? '#FFFFFF' : '#CCCCCC'} />
                   </TouchableOpacity>
+                  {canNavigate(alarm) && (
+                    <TouchableOpacity style={styles.navigateBtn} onPress={() => handleNavigate(alarm)}>
+                      <Feather name="navigation" size={14} color="#4A90D9" />
+                    </TouchableOpacity>
+                  )}
                   <Switch
                     value={alarm.enabled}
                     onValueChange={() => toggleAlarm(setGroup, alarm)}
@@ -322,6 +344,11 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   </View>
                 </View>
                 <View style={styles.cardRight}>
+                  {canNavigate(alarm) && (
+                    <TouchableOpacity style={styles.navigateBtn} onPress={() => handleNavigate(alarm)}>
+                      <Feather name="navigation" size={14} color="#4A90D9" />
+                    </TouchableOpacity>
+                  )}
                   <Switch
                     value={alarm.enabled}
                     onValueChange={() => toggleAlarm(setHome, alarm)}
@@ -422,5 +449,13 @@ const styles = StyleSheet.create({
   },
   arrivalBtnActive: {
     backgroundColor: '#92DEFE',
+  },
+  navigateBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#EAF2FB',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

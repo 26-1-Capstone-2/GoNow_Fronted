@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
     Alert,
+    Linking,
     ScrollView,
     StyleSheet,
     Text,
@@ -266,6 +267,31 @@ export default function AlarmTestScreen() {
               <Text style={styles.stageBtnDesc}>나나나님이 오후 7시 3분에 도착하였습니다.</Text>
             </View>
             <Feather name="bell" size={18} color="#27AE60" />
+          </TouchableOpacity>
+        </View>
+
+        {/* 카카오맵 딥링크 테스트 */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>카카오맵 딥링크 테스트</Text>
+          <TouchableOpacity
+            style={styles.scenarioBtn}
+            onPress={() => {
+              Linking.openURL('kakaomap://').catch(() =>
+                Linking.openURL('https://map.kakao.com').catch(() => {})
+              );
+            }}
+            activeOpacity={0.7}
+          >
+            <Feather name="map-pin" size={20} color="#FFFFFF" />
+            <Text style={styles.scenarioBtnText}>카카오맵으로 이동 테스트</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.scenarioBtn, { marginTop: 10, backgroundColor: '#4A90D9' }]}
+            onPress={() => router.push('/kakao-map-test' as any)}
+            activeOpacity={0.7}
+          >
+            <Feather name="sliders" size={20} color="#FFFFFF" />
+            <Text style={styles.scenarioBtnText}>상세 테스트 (출발지/도착지 입력)</Text>
           </TouchableOpacity>
         </View>
 
