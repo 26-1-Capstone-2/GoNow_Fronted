@@ -165,7 +165,13 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
     }
 
     if (actionId === 'arrival-yes') {
-      if (storageKey) await cancelAndRemoveTriggerIds(storageKey);
+      if (storageKey) {
+        await cancelAndRemoveTriggerIds(storageKey);
+        // 아직 EXIT 콜백이 안 뜬 상태(100m 안)로 도착 확인을 누른 경우, 지오펜스 region이
+        // 정리 안 된 채 남을 수 있어 여기서도 명시적으로 정리 — 정상 플로우에서 흔히 일어남
+        const { exitNearDestGeofenceMode } = await import('@/src/tasks/nearDestGeofenceTask');
+        await exitNearDestGeofenceMode(storageKey).catch(() => {});
+      }
       if (data?.journeyId) {
         const { createJourneysApi } = await import('@/src/api/journeys');
         await createJourneysApi().arrive(Number(data.journeyId));
@@ -424,6 +430,20 @@ export function setupNotificationCategories(): void {
 export async function getChannelId(key: ChannelKey): Promise<string> {
   await ensureChannels();
   return channelIds[key];
+}
+
+// TODO: 실기기 지오펜싱 실측 테스트 완료 후 이 함수와 모든 호출부를 삭제할 것(임시 디버그용).
+// EXIT 콜백/FGS 온오프 등 백그라운드 동작을 로그 없이(폰 들고 밖에 나가서) 눈으로 확인하기 위한
+// 용도. 기존 "도착확인" 알림 채널을 그대로 재사용 — 새 채널 불필요.
+export async function sendDebugNotification(title: string, body: string): Promise<void> {
+  try {
+    const channelId = await getChannelId('arrival-check');
+    await notifee.displayNotification({
+      title: `🧪 ${title}`,
+      body,
+      android: { channelId, importance: AndroidImportance.HIGH, pressAction: { id: 'default' } },
+    });
+  } catch {}
 }
 
 // 사용자가 시스템 설정에서 소리/진동을 직접 바꾼 채널을 앱 기본값으로 되돌림.

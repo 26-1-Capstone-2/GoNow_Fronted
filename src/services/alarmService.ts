@@ -6,7 +6,6 @@ import { createAppointmentsApi } from '@/src/api/appointments';
 import { useAppointmentStatusStore } from '@/src/store/appointmentStatusStore';
 import {
   syncStagedAlarms,
-  sendArrivalCheckAlarm,
   sendArrivalAlarm,
   sendArrivalConfirmAlarm,
   cancelStagedAlarms,
@@ -14,11 +13,14 @@ import {
 } from '@/src/utils/notifications';
 import {
   DESIRED_INTERVALS_KEY,
+  startBackgroundLocationUpdates,
   stopBackgroundLocationUpdates,
   saveAlarmNavInfo,
   removeAlarmNavInfo,
+  addActiveId,
+  removeActiveId,
 } from '@/src/tasks/backgroundLocationTask';
-import { getNickname } from '@/src/store/authStore';
+import { enterNearDestGeofenceMode, exitNearDestGeofenceMode } from '@/src/tasks/nearDestGeofenceTask';
 import type { KakaoMapTransportMode } from '@/src/utils/kakaoMapDeeplink';
 
 const journeysApi = createJourneysApi();
@@ -46,7 +48,6 @@ class AlarmRunner {
   private intervalSec = DEFAULT_INTERVAL;
   private movingSent = false;
   private arrivedSent = false;
-  private nearDestSent = false;
   isActive = true;
   lastPreparationTime = 0;
   lastWhichStation: string | null | undefined = undefined;
@@ -71,14 +72,16 @@ class AlarmRunner {
       await saveAlarmNavInfo(navKey, {
         destLat: target.destLat,
         destLng: target.destLng,
+        destination: target.destination,
         transportMode: target.transportMode,
         isLastMode: target.isLastMode,
       });
+      // 같은 key로 여정이 재시작될 때 이전 세션의 미처리 NEARDEST 지오펜스가 남아있을 수 있어 방어적으로 정리
+      await exitNearDestGeofenceMode(navKey).catch(() => {});
     }
     this.status = 'SCHEDULED';
     this.movingSent = false;
     this.arrivedSent = false;
-    this.nearDestSent = false;
     this.intervalSec = DEFAULT_INTERVAL;
     this.isActive = target.isActive !== false;
     this.polling = false;
@@ -106,7 +109,12 @@ class AlarmRunner {
     }
     this.cancelRemainingStages();
     const navKey = this.currentKey();
-    if (navKey) removeAlarmNavInfo(navKey).catch(() => {});
+    if (navKey) {
+      removeAlarmNavInfo(navKey).catch(() => {});
+      // stop()이 불리는 모든 경로(도착확인 버튼, ARRIVED 감지, FCM auto_arrived 등)에서
+      // 공통으로 지오펜스까지 정리 — 호출부마다 따로 기억할 필요 없게 여기로 통합
+      exitNearDestGeofenceMode(navKey).catch(() => {});
+    }
     this.target = null;
     const cb = this.onFinish;
     this.onFinish = undefined;
@@ -136,6 +144,15 @@ class AlarmRunner {
   private scheduleNextPoll(): void {
     if (this.pollTimer) clearTimeout(this.pollTimer);
     this.pollTimer = setTimeout(() => this.poll(), this.intervalSec * 1000);
+  }
+
+  // NEARDEST 지오펜스 EXIT 처리 후(READY 복귀) nearDestGeofenceTask.ts가 호출 — 폴링 타이머
+  // 체인을 다시 가동한다. 전체 start()를 다시 부르지 않는 이유: movingSent/arrivedSent 등
+  // 기존 상태 플래그를 불필요하게 리셋하지 않기 위함.
+  resumePolling(): void {
+    if (!this.target) return;
+    console.log(`[alarmService] 지오펜스로부터 폴링 재개 — status:${this.status}`);
+    this.poll();
   }
 
   private async poll(): Promise<void> {
@@ -188,7 +205,15 @@ class AlarmRunner {
         }).catch(() => {});
       }
       if (!this.target) return;
-      this.scheduleNextPoll();
+      if (journey_status === 'NEARDEST') {
+        // NEARDEST 진입 — 폴링 타이머를 재예약하지 않고 지오펜스로 감시를 넘긴다(개인/귀가는 isActive 무관하게 항상 알림)
+        await enterNearDestGeofenceMode(this.currentKey()!, this.target.destLat, this.target.destLng, this.target.destination);
+        // 더 이상 /location 폴링이 필요 없으므로 배경 위치추적 태스크의 추적 목록에서도 제거
+        // (안 빼면 나중에 백그라운드 전환 시 이 알람 때문에 불필요한 호출/FGS 지연 종료가 생김)
+        removeActiveId(this.target.journeyId, undefined).catch(() => {});
+      } else {
+        this.scheduleNextPoll();
+      }
       await this.handlePersonalStatus(journey_status, preparation_time, interval, which_station, departure_alarm_time);
     } catch (e: any) {
       const msg = e?.message ?? String(e);
@@ -222,7 +247,15 @@ class AlarmRunner {
         }).catch(() => {});
       }
       if (!this.target) return;
-      this.scheduleNextPoll();
+      if (participant_status === 'NEARDEST') {
+        // NEARDEST 진입 — 폴링 타이머를 재예약하지 않고 지오펜스로 감시를 넘긴다.
+        // 추적 자체는 isActive와 무관하게 계속하되(그룹 전체 상태 계산에 필요), 알림만 isActive를 따름
+        await enterNearDestGeofenceMode(this.currentKey()!, this.target.destLat, this.target.destLng, this.target.destination, this.isActive);
+        // 더 이상 /location 폴링이 필요 없으므로 배경 위치추적 태스크의 추적 목록에서도 제거
+        removeActiveId(undefined, this.target.appointmentId).catch(() => {});
+      } else {
+        this.scheduleNextPoll();
+      }
       await this.handleGroupStatus(participant_status, preparation_time, estimated_arrival, interval, which_station, departure_alarm_time);
     } catch (e: any) {
       const msg = e?.message ?? String(e);
@@ -278,12 +311,8 @@ class AlarmRunner {
         console.log(`[alarmService] MOVING — 단계별 알람 취소 journeyId:${this.target?.journeyId}`);
       }
 
-      if (newStatus === 'NEARDEST' && !this.nearDestSent) {
-        this.nearDestSent = true;
-        // NEARDEST 진입 시 출발 알람 취소 안 함 — 출발 알람 시각 되면 그대로 울려야 함
-        console.log(`[alarmService] NEARDEST 도착 확인 알람 발송 — journeyId:${this.target?.journeyId}`);
-        sendArrivalCheckAlarm(getNickname()!, this.target!.destination, this.target?.journeyId);
-      }
+      // NEARDEST 도착 확인 알림은 이제 enterNearDestGeofenceMode()(nearDestGeofenceTask.ts)가
+      // 발송 — 포그라운드/백그라운드 공통 경로로 통합돼서 여기 별도 처리 불필요
 
       if (newStatus === 'ARRIVED') {
         this.cancelRemainingStages();
@@ -341,14 +370,8 @@ class AlarmRunner {
         }
       }
 
-      if (newStatus === 'NEARDEST' && !this.nearDestSent) {
-        this.nearDestSent = true;
-        // NEARDEST 진입 시 출발 알람 취소 안 함 — 출발 알람 시각 되면 그대로 울려야 함
-        if (this.isActive) {
-          console.log(`[alarmService] NEARDEST 도착 확인 알람 발송 — appointmentId:${this.target?.appointmentId}`);
-          sendArrivalCheckAlarm(getNickname()!, this.target!.destination, undefined, this.target?.appointmentId);
-        }
-      }
+      // NEARDEST 도착 확인 알림은 이제 enterNearDestGeofenceMode()(nearDestGeofenceTask.ts)가
+      // 발송 — 포그라운드/백그라운드 공통 경로로 통합돼서 여기 별도 처리 불필요
 
       if (newStatus === 'ARRIVED' && !this.arrivedSent) {
         this.arrivedSent = true;
@@ -397,13 +420,20 @@ class AlarmManager {
       const runner = new AlarmRunner();
       runner.setOnFinish(() => {
         this.runners.delete(k);
+        removeActiveId(target.journeyId, target.appointmentId).catch(() => {});
         console.log(`[AlarmManager] runner 제거 — key:${k} 남은 runners:${this.runners.size}`);
-        if (this.runners.size === 0) {
-          console.log('[AlarmManager] 모든 알람 종료 → stopBackgroundLocationUpdates');
+        // 남은 알람이 하나도 없을 때만 FGS를 끈다(hasActivePolling()이 지금은 runners.size > 0과
+        // 동일하지만, 판단 기준을 한 곳에 모아두기 위해 그대로 재사용)
+        if (!this.hasActivePolling()) {
+          console.log('[AlarmManager] 남은 알람 없음 → stopBackgroundLocationUpdates');
           stopBackgroundLocationUpdates().catch(() => {});
         }
       });
       this.runners.set(k, runner);
+      // 백그라운드 위치추적 태스크가 "추적할 게 있는지" 판단하는 유일한 근거라, runner를
+      // map에 등록하는 이 시점에 바로 같이 기록해둔다 — 백그라운드 전환 시점까지 미루면
+      // 그 사이 배경 틱이 먼저 발화해 빈 목록으로 잘못 읽는 경쟁 조건이 있었음.
+      addActiveId(effectiveTarget.journeyId, effectiveTarget.appointmentId).catch(() => {});
       console.log(`[AlarmManager.start] runners 등록 — key:${k} 총:${this.runners.size}개`);
       await runner.start(effectiveTarget);
     } finally {
@@ -414,12 +444,25 @@ class AlarmManager {
   stop(journeyId?: number, appointmentId?: number): void {
     const k = this.key(journeyId, appointmentId);
     console.log(`[AlarmManager.stop] 요청 — key:${k} 현재runners:${this.runners.size}`);
+    // runner.stop()이 내부적으로 onFinish를 호출하고, 거기서 이미 hasActivePolling() 기준으로
+    // FGS 필요 여부를 재점검한다 — 여기서 같은 체크를 또 하면 stopBackgroundLocationUpdates가
+    // 중복 호출된다(실기기에서 실제로 관측됨). runner가 없는 키면 onFinish 자체가 안 불리니
+    // 애초에 재점검할 것도 없다.
     this.runners.get(k)?.stop();
     this.runners.delete(k);
-    if (this.runners.size === 0) {
-      console.log('[AlarmManager.stop] 모든 알람 종료 → stopBackgroundLocationUpdates');
-      stopBackgroundLocationUpdates().catch(() => {});
+  }
+
+  // NEARDEST 지오펜스 EXIT 처리(nearDestGeofenceTask.ts) 후 READY로 복귀했을 때, 살아있는
+  // runner를 찾아 폴링을 재개시킨다. 앱이 포그라운드일 때만 의미 있음(백그라운드/종료 상태면
+  // runner 인스턴스 자체가 없거나 무의미 — 호출부가 그 경우 별도로 폴링 목록에 재등록함).
+  resumeFromGeofence(journeyId?: number, appointmentId?: number): void {
+    const k = this.key(journeyId, appointmentId);
+    const runner = this.runners.get(k);
+    if (!runner) {
+      console.log(`[AlarmManager.resumeFromGeofence] runner 없음 — key:${k}`);
+      return;
     }
+    runner.resumePolling();
   }
 
   stopAll(): void {
@@ -433,18 +476,24 @@ class AlarmManager {
     return this.runners.has(this.key(journeyId, appointmentId));
   }
 
-  hasRunning(): boolean {
+  // 2026-08-12 정책 변경: FGS는 "알람이 하나라도 있으면 상시 유지"로 단순화함(NEARDEST라고
+  // 꺼지지 않음) — 백그라운드에서 FGS를 새로 켜는 게 안드로이드 정책상 원천 불가능하다는 게
+  // 실기기로 확정됐기 때문에(docs/planning/geofencing-migration-plan.md "FGS 생명주기 정책"
+  // 참고), NEARDEST 진입 시 잠깐 끄는 배터리 이득보다 "다음 상태 전환 때 다시 못 켤 위험"이
+  // 훨씬 크다고 판단. 그래서 runner 상태와 무관하게 하나라도 있으면 true.
+  hasActivePolling(): boolean {
     return this.runners.size > 0;
   }
 
-  getRunningIds(): { journeyIds: number[], appointmentIds: number[] } {
-    const journeyIds: number[] = [];
-    const appointmentIds: number[] = [];
-    this.runners.forEach((_, key) => {
-      if (key.startsWith('j_')) journeyIds.push(Number(key.slice(2)));
-      else if (key.startsWith('a_')) appointmentIds.push(Number(key.slice(2)));
-    });
-    return { journeyIds, appointmentIds };
+  // FGS 필요 여부가 바뀔 수 있는 모든 지점(포그라운드 재진입, 알람 복원 완료, NEARDEST 진입,
+  // 지오펜스 EXIT로 READY 복귀)에서 공통으로 호출 — start/stopBackgroundLocationUpdates 둘 다
+  // 내부적으로 "이미 그 상태면 skip"하므로, 실제로 상태가 바뀔 때만 FGS가 토글된다.
+  async syncForegroundService(): Promise<void> {
+    if (this.hasActivePolling()) {
+      await startBackgroundLocationUpdates().catch(() => {});
+    } else {
+      await stopBackgroundLocationUpdates().catch(() => {});
+    }
   }
 
   cancelRemainingStages(journeyId?: number, appointmentId?: number): void {

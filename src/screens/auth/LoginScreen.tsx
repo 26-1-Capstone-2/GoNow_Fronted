@@ -16,6 +16,7 @@ import { createAuthApi } from '@/src/api/auth';
 import { createMembersApi } from '@/src/api/members';
 import { createAlarmsApi } from '@/src/api/alarms';
 import { alarmService } from '@/src/services/alarmService';
+import { reconcileNearDestGeofences } from '@/src/tasks/nearDestGeofenceTask';
 import { toTransportMode } from '@/src/utils/kakaoMapDeeplink';
 import { useAppNavigation } from '@/src/navigation';
 import { useAuthStore } from '@/src/store/authStore';
@@ -60,7 +61,13 @@ export default function LoginScreen() {
         const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
         const alarmsRes = await createAlarmsApi().getAlarms(todayStr);
         console.log(`[LoginScreen] getAlarms 응답 — 전체:${alarmsRes.data?.length ?? 0}`);
-        (alarmsRes.data ?? []).filter((a) => ['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(a.my_status) && a.is_active).forEach((a) => {
+        const readyItems = (alarmsRes.data ?? []).filter((a) => ['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(a.my_status) && a.is_active);
+        // 서버 기준 최신 활성 목록과 등록된 NEARDEST 지오펜스를 대조해 orphan 정리(저비용 안전망)
+        const activeKeys = readyItems.map((a) =>
+          a.alarm_type === 'GROUP' ? `a_${a.appointment_id}` : `j_${a.journey_id}`
+        );
+        reconcileNearDestGeofences(activeKeys).catch(() => {});
+        readyItems.forEach((a) => {
           if (a.alarm_type === 'GROUP' && a.appointment_id != null) {
             if (alarmService.isRunning(undefined, a.appointment_id)) return;
             alarmService.start({ alarmType: 'group', destination: a.dest_name, appointmentId: a.appointment_id, isActive: a.is_active, destLat: a.dest_lat, destLng: a.dest_lng, transportMode: toTransportMode(a.transport_type === 'DRIVING') });
@@ -72,6 +79,10 @@ export default function LoginScreen() {
             alarmService.start({ alarmType: 'personal', destination: a.dest_name, journeyId: a.journey_id, destLat: a.dest_lat, destLng: a.dest_lng, transportMode: toTransportMode(a.transport_type === 'DRIVING') });
           }
         });
+        // alarmService.start()는 runner를 map에 동기적으로 등록하므로, 위 forEach 직후 시점에
+        // 이미 반영돼있음 — 로그인 직후 FGS가 필요한 알람이 있으면 여기서 바로 켜줘야 함
+        // (다음 AppState active 전환까지 기다리면 그 사이 백그라운드 전환 시 추적이 아예 안 됨)
+        alarmService.syncForegroundService().catch(() => {});
       } catch (e) {
         console.log('[LoginScreen] READY 알람 복구 실패:', e);
       }

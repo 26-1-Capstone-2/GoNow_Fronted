@@ -1,0 +1,30 @@
+diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java
+index c54fb7d..d9ee246 100644
+--- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java
++++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java
+@@ -215,11 +215,20 @@ public class TaskManagerUtils implements TaskManagerUtilsInterface {
+   }
+ 
+   private JobInfo createJobInfo(int jobId, ComponentName jobService, PersistableBundle extras) {
+-    return new JobInfo.Builder(jobId, jobService)
+-      .setExtras(extras)
+-      .setMinimumLatency(0)
+-      .setOverrideDeadline(DEFAULT_OVERRIDE_DEADLINE)
+-      .build();
++    JobInfo.Builder builder = new JobInfo.Builder(jobId, jobService)
++      .setExtras(extras);
++    // GONOW_PATCH(2026-08-13): 지오펜스 EXIT 처리(이 Job 안에서 거는 /location 네트워크 호출)가
++    // 백그라운드에서 25~56초씩 불규칙하게 지연되는 현상을 실측으로 확인함 — 일반 JobScheduler
++    // 작업은 FGS와 달리 Doze/배터리 최적화의 지연 대상이기 때문으로 추정됨. Android 12+에서는
++    // setExpedited(true)로 FGS에 준하는 즉시 실행 + 네트워크 접근 보장을 받을 수 있다(단, EJ는
++    // setMinimumLatency/setOverrideDeadline과 함께 쓸 수 없어 구버전 경로와 분기함).
++    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
++      builder.setExpedited(true);
++    } else {
++      builder.setMinimumLatency(0);
++      builder.setOverrideDeadline(DEFAULT_OVERRIDE_DEADLINE);
++    }
++    return builder.build();
+   }
+ 
+   private JobInfo createJobInfo(Context context, TaskInterface task, int jobId, List<PersistableBundle> data) {

@@ -1,13 +1,13 @@
 import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState } from 'react-native';
 import {
   BACKGROUND_LOCATION_TASK,
-  ACTIVE_JOURNEYS_KEY,
-  ACTIVE_APPOINTMENTS_KEY,
   removeAlarmNavInfo,
+  addActiveId,
+  removeActiveId,
 } from '@/src/tasks/backgroundLocationTask';
+import { exitNearDestGeofenceMode } from '@/src/tasks/nearDestGeofenceTask';
 import { cancelStagedAlarms } from '@/src/utils/notifications';
 
 export const BACKGROUND_ALARM_TASK = 'BACKGROUND-ALARM-TASK';
@@ -41,12 +41,39 @@ TaskManager.defineTask(BACKGROUND_ALARM_TASK, async ({ data, error }) => {
     console.log(`[BACKGROUND_ALARM_TASK] ${fcmData.sync_event} — appointmentId:${appointmentId} 단계별 알람 취소`);
     await cancelStagedAlarms(`a_${appointmentId}`).catch(() => {});
     await removeAlarmNavInfo(`a_${appointmentId}`).catch(() => {});
-    const existingAppointments: number[] = await AsyncStorage.getItem(ACTIVE_APPOINTMENTS_KEY)
-      .then(r => r ? JSON.parse(r) : [] as number[]);
-    const filtered = existingAppointments.filter((id) => id !== appointmentId);
-    if (filtered.length !== existingAppointments.length) {
-      await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify(filtered));
-    }
+    await removeActiveId(undefined, appointmentId).catch(() => {});
+    return;
+  }
+
+  // NEARDEST 자동 ARRIVED (서버 스케줄러가 targetTime 초과로 강제 전환) → 클라이언트 정리
+  // NEARDEST는 지오펜싱 기반이라 폴링도 지오펜스 이벤트도 없어서, 이 FCM이 없으면 앱이
+  // 이 여정이 끝난 걸 영영 모름(포그라운드는 _layout.tsx의 fcmSub가 alarmService.stop()으로
+  // 처리하지만, 완전 종료 상태에선 AlarmRunner 인스턴스 자체가 없어 여기서 직접 정리해야 함)
+  if (fcmData.sync_event === 'auto_arrived' && (fcmData.journey_ids != null || fcmData.appointment_ids != null)) {
+    const arrivedJourneyIds: number[] = fcmData.journey_ids
+      ? String(fcmData.journey_ids).split(',').map(Number).filter(n => !isNaN(n))
+      : [];
+    const arrivedAppointmentIds: number[] = fcmData.appointment_ids
+      ? String(fcmData.appointment_ids).split(',').map(Number).filter(n => !isNaN(n))
+      : [];
+    console.log(`[BACKGROUND_ALARM_TASK] auto_arrived — journeyIds:${arrivedJourneyIds} appointmentIds:${arrivedAppointmentIds}`);
+
+    await Promise.all([
+      ...arrivedJourneyIds.map(async (id) => {
+        const key = `j_${id}`;
+        await cancelStagedAlarms(key).catch(() => {});
+        await removeAlarmNavInfo(key).catch(() => {});
+        await exitNearDestGeofenceMode(key).catch(() => {});
+        await removeActiveId(id, undefined).catch(() => {});
+      }),
+      ...arrivedAppointmentIds.map(async (id) => {
+        const key = `a_${id}`;
+        await cancelStagedAlarms(key).catch(() => {});
+        await removeAlarmNavInfo(key).catch(() => {});
+        await exitNearDestGeofenceMode(key).catch(() => {});
+        await removeActiveId(undefined, id).catch(() => {});
+      }),
+    ]);
     return;
   }
 
@@ -59,22 +86,16 @@ TaskManager.defineTask(BACKGROUND_ALARM_TASK, async ({ data, error }) => {
 
   if (journeyIds.length === 0 && appointmentIds.length === 0) return;
 
-  // 기존 active IDs와 병합
-  const [existingJourneys, existingAppointments] = await Promise.all([
-    AsyncStorage.getItem(ACTIVE_JOURNEYS_KEY).then(r => r ? JSON.parse(r) : [] as number[]),
-    AsyncStorage.getItem(ACTIVE_APPOINTMENTS_KEY).then(r => r ? JSON.parse(r) : [] as number[]),
-  ]);
-
-  const mergedJourneys = [...new Set([...existingJourneys, ...journeyIds])];
-  const mergedAppointments = [...new Set([...existingAppointments, ...appointmentIds])];
-
+  // 기존 active IDs와 병합 — addActiveId가 이미 "있으면 skip" 처리하므로 그냥 각각 호출하면 됨
   await Promise.all([
-    AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify(mergedJourneys)),
-    AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify(mergedAppointments)),
+    ...journeyIds.map((id) => addActiveId(id, undefined)),
+    ...appointmentIds.map((id) => addActiveId(undefined, id)),
   ]);
 
   // 백그라운드 위치 추적 시작 → backgroundLocationTask가 GPS 폴링하며 상태 감지
-  // FCM으로 깨어난 백그라운드에서는 foregroundService 없이 시작 (Android 정책상 불가)
+  // FCM으로 깨어난 백그라운드에서는 foregroundService 없이 시작 (Android 정책상 불가 —
+  // 고우선순위 FCM 예외로 우회 가능한지 2026-08-12 실기기로 검증했으나 실패 확정,
+  // docs/planning/geofencing-migration-plan.md "FGS 생명주기 정책" 참고)
   // 포그라운드 진입 시 startBackgroundLocationUpdates()가 foregroundService 포함으로 재시작됨
   const isRunning = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK).catch(() => false);
   if (!isRunning) {
