@@ -9,6 +9,7 @@ import {
   SESSION_READY_KEY,
   patchLocation,
   addActiveId,
+  clearDesiredInterval,
 } from '@/src/tasks/backgroundLocationTask';
 
 // Doze 모드에서 위치 요청이 응답 없이 무한 대기할 수 있어(실측으로 확인됨 — 백그라운드/종료
@@ -138,15 +139,37 @@ export async function reconcileNearDestGeofences(activeKeys: string[]): Promise<
 // 되돌린다 — 지오펜스 EXIT는 폴링과 달리 재시도가 없는 단발 이벤트라, 실패를 그냥 버리지
 // 않고 알려진 안정적 경로(기존 폴링)로 폴백시키는 게 안전하다.
 async function fallbackToPolling(journeyId?: number, appointmentId?: number): Promise<void> {
+  // NEARDEST였을 때 서버가 내려준 긴 폴링 주기(예: 300초)가 DESIRED_INTERVALS_KEY에 남아있으면,
+  // EXIT으로 READY에 복귀해도 다음 실제 /location 호출까지 그 오래된 주기만큼(최대 수 분)
+  // 기다려야 해서 재진입 감지(NEARDEST 재진입 시 도착 확인 알림 포함)가 크게 지연되는 버그가
+  // 있었음(2026-08-13 실기기 실측 — 5분 뒤에야 도착 확인 알림이 뜸). 폴링을 재개하는 시점에
+  // 오래된 주기를 지워서 기본값(30초)부터 다시 시작하게 한다.
+  const key = journeyId != null ? `j_${journeyId}` : appointmentId != null ? `a_${appointmentId}` : null;
+  if (key) {
+    await clearDesiredInterval(key);
+  }
+
   // backgroundLocationTask.ts의 잠금 걸린 공용 함수를 그대로 재사용 — 백그라운드 틱/alarmService
   // 시작·종료와 같은 큐를 타야 통째 덮어쓰기로 서로의 갱신을 유실시키는 일이 없다.
   await addActiveId(journeyId, appointmentId);
 
   if (AppState.currentState === 'active') {
-    // 순환 import 회피 — notifications.ts의 onBackgroundEvent와 동일한 동적 import 패턴
-    const { alarmService } = await import('@/src/services/alarmService');
-    alarmService.resumeFromGeofence(journeyId, appointmentId);
-    return;
+    try {
+      // 순환 import 회피 — notifications.ts의 onBackgroundEvent와 동일한 동적 import 패턴
+      const { alarmService } = await import('@/src/services/alarmService');
+      alarmService.resumeFromGeofence(journeyId, appointmentId);
+      return;
+    } catch (e: any) {
+      // dev-client(Metro 번들러) 환경은 일부 모듈을 그때그때 Metro 서버에서 받아오는데, USB가
+      // 빠져있거나 같은 네트워크가 아니면 이 동적 import 자체가 실패한다(실측:
+      // LoadBundleFromServerRequestError — 2026-08-13 실외 테스트 중 재현, 예외가 안 잡혀서
+      // TaskManager 태스크 전체가 죽었었음). EAS 빌드(프로덕션/preview)는 모든 JS가 빌드
+      // 시점에 정적으로 번들링돼 있어 이 실패 자체가 발생하지 않는 dev-client 전용 케이스다.
+      // 여기서 그냥 던지면 addActiveId()까지는 이미 반영됐는데도 폴링이 전혀 재개 안 된 채
+      // 다음 포그라운드 전환까지 방치되므로, 실패 시 아래 백그라운드 폴링 경로로 폴백시켜
+      // 최소한의 복구 수단을 보장한다.
+      console.log('[NEARDEST 지오펜스] alarmService 동적 import 실패 — 백그라운드 폴링으로 폴백:', e?.message);
+    }
   }
 
   const isRunning = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK).catch(() => false);

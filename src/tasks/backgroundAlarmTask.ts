@@ -1,11 +1,10 @@
 import * as TaskManager from 'expo-task-manager';
-import * as Location from 'expo-location';
 import { AppState } from 'react-native';
 import {
-  BACKGROUND_LOCATION_TASK,
   removeAlarmNavInfo,
   addActiveId,
   removeActiveId,
+  startGpsPolling,
 } from '@/src/tasks/backgroundLocationTask';
 import { exitNearDestGeofenceMode } from '@/src/tasks/nearDestGeofenceTask';
 import { cancelStagedAlarms } from '@/src/utils/notifications';
@@ -92,23 +91,14 @@ TaskManager.defineTask(BACKGROUND_ALARM_TASK, async ({ data, error }) => {
     ...appointmentIds.map((id) => addActiveId(undefined, id)),
   ]);
 
-  // 백그라운드 위치 추적 시작 → backgroundLocationTask가 GPS 폴링하며 상태 감지
-  // FCM으로 깨어난 백그라운드에서는 foregroundService 없이 시작 (Android 정책상 불가 —
+  // 백그라운드 위치 추적 시작 → backgroundLocationTask가 GPS 폴링하며 상태 감지.
+  // FCM으로 깨어난 시점엔 FGS를 새로 못 켠다(Android 정책상 백그라운드에서 FGS 시작 불가 —
   // 고우선순위 FCM 예외로 우회 가능한지 2026-08-12 실기기로 검증했으나 실패 확정,
-  // docs/planning/geofencing-migration-plan.md "FGS 생명주기 정책" 참고)
-  // 포그라운드 진입 시 startBackgroundLocationUpdates()가 foregroundService 포함으로 재시작됨
-  const isRunning = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK).catch(() => false);
-  if (!isRunning) {
-    await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-      accuracy: Location.Accuracy.High,
-      timeInterval: 30000,
-      distanceInterval: 0,
-    }).then(() => {
-      console.log('[BACKGROUND_ALARM_TASK] 위치추적 시작 완료 (foregroundService 없음 — Android 정책상 백그라운드에서 불가)');
-    }).catch((e) => {
-      console.log('[BACKGROUND_ALARM_TASK] 위치추적 시작 실패:', e?.message);
-    });
-  } else {
-    console.log('[BACKGROUND_ALARM_TASK] 위치추적 이미 실행 중');
-  }
+  // docs/planning/geofencing-migration-plan.md "FGS 생명주기 정책" 참고). 2026-08-13:
+  // FGS와 GPS 폴링을 완전히 분리(modules/foreground-service)한 이후로는 startGpsPolling()이
+  // 애초에 항상 FGS 없이만 GPS 구독을 시작하므로, 여기서 "FGS 없이 시작"이라고 따로 신경 쓸
+  // 필요가 없어졌다. FGS는 이후 포그라운드 진입 시 startAlarmForegroundService()가 독립적으로
+  // 담당하고, 이 GPS 구독은 "승격" 없이 그대로 계속 쓰인다(예전엔 이 구독을 stop→FGS 포함
+  // 재시작하는 위험한 승격 로직이 있었으나 완전히 제거됨).
+  await startGpsPolling();
 });

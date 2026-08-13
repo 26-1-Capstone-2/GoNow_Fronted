@@ -41,3 +41,7 @@ app-example
 # generated native folders
 /ios
 /android
+
+# 로컬 Expo 모듈(modules/*)의 Gradle 빌드 캐시/산출물
+modules/*/android/build/
+modules/*/android/.cxx/

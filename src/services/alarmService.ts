@@ -1,6 +1,5 @@
 import * as Location from 'expo-location';
 import { AppState } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createJourneysApi, JourneyStatus } from '@/src/api/journeys';
 import { createAppointmentsApi } from '@/src/api/appointments';
 import { useAppointmentStatusStore } from '@/src/store/appointmentStatusStore';
@@ -12,13 +11,15 @@ import {
   AlarmType,
 } from '@/src/utils/notifications';
 import {
-  DESIRED_INTERVALS_KEY,
-  startBackgroundLocationUpdates,
+  startAlarmForegroundService,
   stopBackgroundLocationUpdates,
   saveAlarmNavInfo,
   removeAlarmNavInfo,
   addActiveId,
   removeActiveId,
+  clearActiveIds,
+  maybeSyncGpsPolling,
+  setDesiredInterval,
 } from '@/src/tasks/backgroundLocationTask';
 import { enterNearDestGeofenceMode, exitNearDestGeofenceMode } from '@/src/tasks/nearDestGeofenceTask';
 import type { KakaoMapTransportMode } from '@/src/utils/kakaoMapDeeplink';
@@ -198,11 +199,7 @@ class AlarmRunner {
         console.log(`[포그라운드] interval 갱신 — journeyId:${this.target!.journeyId} ${this.intervalSec}s → ${interval}s`);
         this.intervalSec = interval;
         const key = `j_${this.target!.journeyId}`;
-        AsyncStorage.getItem(DESIRED_INTERVALS_KEY).then(raw => {
-          const intervals = raw ? JSON.parse(raw) : {};
-          intervals[key] = interval;
-          AsyncStorage.setItem(DESIRED_INTERVALS_KEY, JSON.stringify(intervals));
-        }).catch(() => {});
+        setDesiredInterval(key, interval).catch(() => {});
       }
       if (!this.target) return;
       if (journey_status === 'NEARDEST') {
@@ -210,7 +207,10 @@ class AlarmRunner {
         await enterNearDestGeofenceMode(this.currentKey()!, this.target.destLat, this.target.destLng, this.target.destination);
         // 더 이상 /location 폴링이 필요 없으므로 배경 위치추적 태스크의 추적 목록에서도 제거
         // (안 빼면 나중에 백그라운드 전환 시 이 알람 때문에 불필요한 호출/FGS 지연 종료가 생김)
-        removeActiveId(this.target.journeyId, undefined).catch(() => {});
+        // await로 순서 보장 후 maybeSyncGpsPolling() 호출 — 앱이 계속 포그라운드에 머물면
+        // 헤드리스 배경 틱이 안 돌아서 GPS 폴링 구독이 안 멈추는 구멍을 여기서 메운다.
+        await removeActiveId(this.target.journeyId, undefined);
+        await maybeSyncGpsPolling();
       } else {
         this.scheduleNextPoll();
       }
@@ -240,11 +240,7 @@ class AlarmRunner {
         console.log(`[포그라운드] interval 갱신 — appointmentId:${this.target!.appointmentId} ${this.intervalSec}s → ${interval}s`);
         this.intervalSec = interval;
         const key = `a_${this.target!.appointmentId}`;
-        AsyncStorage.getItem(DESIRED_INTERVALS_KEY).then(raw => {
-          const intervals = raw ? JSON.parse(raw) : {};
-          intervals[key] = interval;
-          AsyncStorage.setItem(DESIRED_INTERVALS_KEY, JSON.stringify(intervals));
-        }).catch(() => {});
+        setDesiredInterval(key, interval).catch(() => {});
       }
       if (!this.target) return;
       if (participant_status === 'NEARDEST') {
@@ -252,7 +248,10 @@ class AlarmRunner {
         // 추적 자체는 isActive와 무관하게 계속하되(그룹 전체 상태 계산에 필요), 알림만 isActive를 따름
         await enterNearDestGeofenceMode(this.currentKey()!, this.target.destLat, this.target.destLng, this.target.destination, this.isActive);
         // 더 이상 /location 폴링이 필요 없으므로 배경 위치추적 태스크의 추적 목록에서도 제거
-        removeActiveId(undefined, this.target.appointmentId).catch(() => {});
+        // await로 순서 보장 후 maybeSyncGpsPolling() 호출 — 앱이 계속 포그라운드에 머물면
+        // 헤드리스 배경 틱이 안 돌아서 GPS 폴링 구독이 안 멈추는 구멍을 여기서 메운다.
+        await removeActiveId(undefined, this.target.appointmentId);
+        await maybeSyncGpsPolling();
       } else {
         this.scheduleNextPoll();
       }
@@ -420,14 +419,24 @@ class AlarmManager {
       const runner = new AlarmRunner();
       runner.setOnFinish(() => {
         this.runners.delete(k);
-        removeActiveId(target.journeyId, target.appointmentId).catch(() => {});
         console.log(`[AlarmManager] runner 제거 — key:${k} 남은 runners:${this.runners.size}`);
-        // 남은 알람이 하나도 없을 때만 FGS를 끈다(hasActivePolling()이 지금은 runners.size > 0과
-        // 동일하지만, 판단 기준을 한 곳에 모아두기 위해 그대로 재사용)
-        if (!this.hasActivePolling()) {
-          console.log('[AlarmManager] 남은 알람 없음 → stopBackgroundLocationUpdates');
-          stopBackgroundLocationUpdates().catch(() => {});
-        }
+        // removeActiveId()가 AsyncStorage에 반영된 뒤에 폴링 필요 여부를 재판단해야 하므로
+        // await로 순서를 보장한다(2026-08-13 발견 — 예전엔 fire-and-forget이라, 남은 runner가
+        // 있어도 그게 전부 NEARDEST(지오펜스 감시)뿐이면 GPS 폴링은 필요 없는 경우를 놓쳐서
+        // 알람 삭제 후에도 GPS 폴링이 계속 도는 버그가 있었음. 실기기 실측으로 확인됨).
+        (async () => {
+          await removeActiveId(target.journeyId, target.appointmentId);
+          if (!this.hasActivePolling()) {
+            // 남은 알람이 하나도 없을 때만 FGS까지 끈다(hasActivePolling()이 지금은
+            // runners.size > 0과 동일하지만, 판단 기준을 한 곳에 모아두기 위해 그대로 재사용)
+            console.log('[AlarmManager] 남은 알람 없음 → stopBackgroundLocationUpdates');
+            await stopBackgroundLocationUpdates();
+          } else {
+            // 남은 runner가 있어도 전부 NEARDEST뿐이면 GPS 폴링은 이제 필요 없을 수 있음 —
+            // ACTIVE_JOURNEYS_KEY/ACTIVE_APPOINTMENTS_KEY 기준으로 다시 확인(FGS는 안 건드림)
+            await maybeSyncGpsPolling();
+          }
+        })().catch(() => {});
       });
       this.runners.set(k, runner);
       // 백그라운드 위치추적 태스크가 "추적할 게 있는지" 판단하는 유일한 근거라, runner를
@@ -465,11 +474,20 @@ class AlarmManager {
     runner.resumePolling();
   }
 
-  stopAll(): void {
+  // 로그아웃 등 "전부 한 번에" 종료하는 지점 전용. runner.stop()을 그냥 forEach로 돌리면 각
+  // runner의 onFinish가 개별적으로 hasActivePolling()을 재확인해서 stopBackgroundLocationUpdates가
+  // 최대 N번 중복 호출된다(stop() 단건의 comment에 적힌 것과 같은 문제가 N배로 커짐) — 전체
+  // 종료 상황에선 "남은 알람이 있는지" 재확인 자체가 무의미하므로, onFinish를 개별적으로 태우지
+  // 않고 여기서 한 번만 정리한다.
+  async stopAll(): Promise<void> {
     console.log(`[AlarmManager.stopAll] 전체 종료 — runners:${this.runners.size}개`);
-    this.runners.forEach(r => r.stop());
+    this.runners.forEach((r) => {
+      r.setOnFinish(() => {});
+      r.stop();
+    });
     this.runners.clear();
-    stopBackgroundLocationUpdates().catch(() => {});
+    await clearActiveIds();
+    await stopBackgroundLocationUpdates();
   }
 
   isRunning(journeyId?: number, appointmentId?: number): boolean {
@@ -486,11 +504,16 @@ class AlarmManager {
   }
 
   // FGS 필요 여부가 바뀔 수 있는 모든 지점(포그라운드 재진입, 알람 복원 완료, NEARDEST 진입,
-  // 지오펜스 EXIT로 READY 복귀)에서 공통으로 호출 — start/stopBackgroundLocationUpdates 둘 다
+  // 지오펜스 EXIT로 READY 복귀)에서 공통으로 호출 — start/stopAlarmForegroundService 둘 다
   // 내부적으로 "이미 그 상태면 skip"하므로, 실제로 상태가 바뀔 때만 FGS가 토글된다.
+  // GPS 폴링은 FGS와 별개로 maybeSyncGpsPolling()이 ACTIVE_JOURNEYS_KEY/ACTIVE_APPOINTMENTS_KEY
+  // 기준으로 판단한다 — 예전엔 여기서 무조건 startBackgroundLocationUpdates()(FGS+GPS 묶음)를
+  // 불러서, 추적 중인 알람이 전부 NEARDEST(지오펜스 전용)뿐이어도 포그라운드 복귀할 때마다
+  // GPS 폴링이 불필요하게 다시 켜지는 버그가 있었음(2026-08-13 실기기 실측으로 발견).
   async syncForegroundService(): Promise<void> {
     if (this.hasActivePolling()) {
-      await startBackgroundLocationUpdates().catch(() => {});
+      await startAlarmForegroundService().catch(() => {});
+      await maybeSyncGpsPolling().catch(() => {});
     } else {
       await stopBackgroundLocationUpdates().catch(() => {});
     }
