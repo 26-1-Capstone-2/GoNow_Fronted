@@ -5,8 +5,6 @@ import { createMembersApi } from '@/src/api/members';
 import { alarmService } from '@/src/services/alarmService';
 import { toTransportMode, canNavigateAlarm, handleNavigateAlarm } from '@/src/utils/kakaoMapDeeplink';
 import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ACTIVE_JOURNEYS_KEY, ACTIVE_APPOINTMENTS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, FontAwesome5, FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -166,10 +164,8 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
               if (!alarm.journeyId) return;
               try {
                 await journeysApi.deleteJourney(alarm.journeyId);
+                // alarmService.stop()이 내부적으로 ACTIVE_JOURNEYS_KEY 제거까지 안전하게(잠금 걸린 채) 처리함
                 alarmService.stop(alarm.journeyId);
-                const raw = await AsyncStorage.getItem(ACTIVE_JOURNEYS_KEY);
-                const ids: number[] = raw ? JSON.parse(raw) : [];
-                await AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify(ids.filter(id => id !== alarm.journeyId)));
               } catch { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
               setPersonal(prev => prev.filter(a => a.id !== alarm.id));
               bumpAlarmVersion();
@@ -240,10 +236,8 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   const res = await appointmentsApi.removeParticipant(alarm.appointmentId, myMemberId);
                   if (!res.success) { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
                 }
+                // alarmService.stop()이 내부적으로 ACTIVE_APPOINTMENTS_KEY 제거까지 안전하게(잠금 걸린 채) 처리함
                 alarmService.stop(undefined, alarm.appointmentId);
-                const raw = await AsyncStorage.getItem(ACTIVE_APPOINTMENTS_KEY);
-                const ids: number[] = raw ? JSON.parse(raw) : [];
-                await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify(ids.filter(id => id !== alarm.appointmentId)));
               } catch { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
               setGroup(prev => prev.filter(a => a.id !== alarm.id));
               bumpAlarmVersion();
@@ -313,10 +307,8 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
               if (!alarm.journeyId) return;
               try {
                 await journeysApi.deleteJourney(alarm.journeyId);
+                // alarmService.stop()이 내부적으로 ACTIVE_JOURNEYS_KEY 제거까지 안전하게(잠금 걸린 채) 처리함
                 alarmService.stop(alarm.journeyId);
-                const raw = await AsyncStorage.getItem(ACTIVE_JOURNEYS_KEY);
-                const ids: number[] = raw ? JSON.parse(raw) : [];
-                await AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify(ids.filter(id => id !== alarm.journeyId)));
               } catch { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
               setHome(prev => prev.filter(a => a.id !== alarm.id));
               bumpAlarmVersion();

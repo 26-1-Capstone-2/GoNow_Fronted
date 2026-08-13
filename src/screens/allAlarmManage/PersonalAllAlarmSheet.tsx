@@ -6,8 +6,6 @@ import { createJourneysApi, ensureFutureDateTime, JourneyDetail, maskToRepeatDay
 import { alarmService } from '@/src/services/alarmService';
 import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
 import { toTransportMode, canNavigateAlarm, handleNavigateAlarm } from '@/src/utils/kakaoMapDeeplink';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ACTIVE_JOURNEYS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { usePlaces } from '@/src/hooks/usePlaces';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -228,10 +226,8 @@ export default function PersonalAllAlarmSheet({ onClose }: Props) {
     if (editAlarm.journeyId) {
       try {
         await journeysApi.deleteJourney(editAlarm.journeyId);
+        // alarmService.stop()이 내부적으로 ACTIVE_JOURNEYS_KEY 제거까지 안전하게(잠금 걸린 채) 처리함
         alarmService.stop(editAlarm.journeyId);
-        const raw = await AsyncStorage.getItem(ACTIVE_JOURNEYS_KEY);
-        const ids: number[] = raw ? JSON.parse(raw) : [];
-        await AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify(ids.filter(id => id !== editAlarm.journeyId)));
       } catch { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
     }
     setAlarms((prev) => prev.filter((a) => a.id !== editAlarm.id));
@@ -295,10 +291,8 @@ export default function PersonalAllAlarmSheet({ onClose }: Props) {
                 if (alarm.journeyId) {
                   try {
                     await journeysApi.deleteJourney(alarm.journeyId);
+                    // alarmService.stop()이 내부적으로 ACTIVE_JOURNEYS_KEY 제거까지 안전하게(잠금 걸린 채) 처리함
                     alarmService.stop(alarm.journeyId);
-                    const raw = await AsyncStorage.getItem(ACTIVE_JOURNEYS_KEY);
-                    const ids: number[] = raw ? JSON.parse(raw) : [];
-                    await AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify(ids.filter(id => id !== alarm.journeyId)));
                   } catch { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
                 }
                 setAlarms((prev) => prev.filter((a) => a.id !== alarm.id));

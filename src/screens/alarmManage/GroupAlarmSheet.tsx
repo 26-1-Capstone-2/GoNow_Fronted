@@ -5,8 +5,6 @@ import { createAppointmentsApi } from '@/src/api/appointments';
 import { alarmService } from '@/src/services/alarmService';
 import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
 import { toTransportMode } from '@/src/utils/kakaoMapDeeplink';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ACTIVE_APPOINTMENTS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { targetTimeToAmpmHourMinute } from '@/src/api/journeys';
 import { createMembersApi } from '@/src/api/members';
 import { usePlaces } from '@/src/hooks/usePlaces';
@@ -400,10 +398,8 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
     try {
       const res = await appointmentsApi.deleteAppointment(editAlarm.appointmentId);
       if (res.success) {
+        // alarmService.stop()이 내부적으로 ACTIVE_APPOINTMENTS_KEY 제거까지 안전하게(잠금 걸린 채) 처리함
         alarmService.stop(undefined, editAlarm.appointmentId);
-        const raw = await AsyncStorage.getItem(ACTIVE_APPOINTMENTS_KEY);
-        const ids: number[] = raw ? JSON.parse(raw) : [];
-        await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify(ids.filter(id => id !== editAlarm.appointmentId)));
         await loadAlarms();
         bumpAlarmVersion();
         initialMode ? onClose() : setView('list');
@@ -486,19 +482,14 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
                   if (isHost) {
                     const res = await appointmentsApi.deleteAppointment(alarm.appointmentId);
                     if (res.success) {
+                      // alarmService.stop()이 내부적으로 ACTIVE_APPOINTMENTS_KEY 제거까지 안전하게(잠금 걸린 채) 처리함
                       alarmService.stop(undefined, alarm.appointmentId);
-                      const raw = await AsyncStorage.getItem(ACTIVE_APPOINTMENTS_KEY);
-                      const ids: number[] = raw ? JSON.parse(raw) : [];
-                      await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify(ids.filter(id => id !== alarm.appointmentId)));
                       await loadAlarms(); bumpAlarmVersion();
                     }
                   } else {
                     const res = await appointmentsApi.removeParticipant(alarm.appointmentId, myMemberId);
                     if (res.success) {
                       alarmService.stop(undefined, alarm.appointmentId);
-                      const raw = await AsyncStorage.getItem(ACTIVE_APPOINTMENTS_KEY);
-                      const ids: number[] = raw ? JSON.parse(raw) : [];
-                      await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify(ids.filter(id => id !== alarm.appointmentId)));
                       await loadAlarms(); bumpAlarmVersion();
                     }
                   }
