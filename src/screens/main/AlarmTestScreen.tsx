@@ -1,4 +1,6 @@
 import { AlarmStage, AlarmType, requestNotificationPermission, sendAlarm, sendAllArrivalAlarms, sendArrivalAlarm, sendArrivalCheckAlarm, sendArrivalConfirmAlarm } from '@/src/utils/notifications';
+import ForegroundService from '@/modules/foreground-service';
+import { startGpsPolling, stopGpsPolling } from '@/src/tasks/backgroundLocationTask';
 import { Feather, FontAwesome6 } from '@expo/vector-icons';
 import notifee from '@notifee/react-native';
 import { useRouter } from 'expo-router';
@@ -267,6 +269,56 @@ export default function AlarmTestScreen() {
               <Text style={styles.stageBtnDesc}>나나나님이 오후 7시 3분에 도착하였습니다.</Text>
             </View>
             <Feather name="bell" size={18} color="#27AE60" />
+          </TouchableOpacity>
+        </View>
+
+        {/* FGS-GPS 분리 모듈 테스트 (임시 — Stage 1 격리 검증용, 검증 끝나면 이 섹션 삭제) */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>FGS 분리 모듈 테스트 (임시)</Text>
+          <Text style={styles.sectionDesc}>GPS 구독 없이 알림만 뜨는지 adb로 확인용</Text>
+          <TouchableOpacity
+            style={[styles.scenarioBtn, { backgroundColor: '#4CAF50' }]}
+            onPress={() => {
+              ForegroundService.start('GoNow 알람 실행 중', '출발 시간을 모니터링하고 있어요.');
+              setLastSent('ForegroundService.start() 호출됨');
+            }}
+            activeOpacity={0.7}
+          >
+            <Feather name="play-circle" size={20} color="#FFFFFF" />
+            <Text style={styles.scenarioBtnText}>FGS 시작</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.scenarioBtn, { marginTop: 10, backgroundColor: '#E74C3C' }]}
+            onPress={() => {
+              ForegroundService.stop();
+              setLastSent('ForegroundService.stop() 호출됨');
+            }}
+            activeOpacity={0.7}
+          >
+            <Feather name="stop-circle" size={20} color="#FFFFFF" />
+            <Text style={styles.scenarioBtnText}>FGS 중지</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.scenarioBtn, { marginTop: 10, backgroundColor: '#4A90D9' }]}
+            onPress={() => {
+              startGpsPolling();
+              setLastSent('startGpsPolling() 호출됨');
+            }}
+            activeOpacity={0.7}
+          >
+            <Feather name="navigation" size={20} color="#FFFFFF" />
+            <Text style={styles.scenarioBtnText}>GPS 폴링 시작</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.scenarioBtn, { marginTop: 10, backgroundColor: '#9B59B6' }]}
+            onPress={() => {
+              stopGpsPolling();
+              setLastSent('stopGpsPolling() 호출됨');
+            }}
+            activeOpacity={0.7}
+          >
+            <Feather name="navigation-2" size={20} color="#FFFFFF" />
+            <Text style={styles.scenarioBtnText}>GPS 폴링 중지</Text>
           </TouchableOpacity>
         </View>
 
