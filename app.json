@@ -55,6 +55,7 @@
     },
     "plugins": [
       "expo-router",
+      "./plugins/withNotifeeMavenRepo.js",
       [
         "expo-location",
         {
