@@ -5,11 +5,10 @@ import { AppState } from 'react-native';
 import { TOKEN_KEY, NICKNAME_KEY } from '@/src/store/authStore';
 import { sendArrivalCheckAlarm, sendDebugNotification } from '@/src/utils/notifications';
 import {
-  BACKGROUND_LOCATION_TASK,
   SESSION_READY_KEY,
   patchLocation,
   addActiveId,
-  clearDesiredInterval,
+  startGpsPolling,
 } from '@/src/tasks/backgroundLocationTask';
 
 // Doze 모드에서 위치 요청이 응답 없이 무한 대기할 수 있어(실측으로 확인됨 — 백그라운드/종료
@@ -139,21 +138,25 @@ export async function reconcileNearDestGeofences(activeKeys: string[]): Promise<
 // 되돌린다 — 지오펜스 EXIT는 폴링과 달리 재시도가 없는 단발 이벤트라, 실패를 그냥 버리지
 // 않고 알려진 안정적 경로(기존 폴링)로 폴백시키는 게 안전하다.
 async function fallbackToPolling(journeyId?: number, appointmentId?: number): Promise<void> {
-  // NEARDEST였을 때 서버가 내려준 긴 폴링 주기(예: 300초)가 DESIRED_INTERVALS_KEY에 남아있으면,
-  // EXIT으로 READY에 복귀해도 다음 실제 /location 호출까지 그 오래된 주기만큼(최대 수 분)
-  // 기다려야 해서 재진입 감지(NEARDEST 재진입 시 도착 확인 알림 포함)가 크게 지연되는 버그가
-  // 있었음(2026-08-13 실기기 실측 — 5분 뒤에야 도착 확인 알림이 뜸). 폴링을 재개하는 시점에
-  // 오래된 주기를 지워서 기본값(30초)부터 다시 시작하게 한다.
-  const key = journeyId != null ? `j_${journeyId}` : appointmentId != null ? `a_${appointmentId}` : null;
-  if (key) {
-    await clearDesiredInterval(key);
-  }
+  // 2026-08-14(재검토, 실기기로 발견 — 되돌림): 예전(2026-08-13)엔 여기서 clearDesiredInterval()로
+  // DESIRED_INTERVALS_KEY를 강제로 지워서 EXIT 직후 기본값(30초)부터 다시 시작하게 했다 — 그
+  // 당시엔 NEARDEST 시절의 긴 주기가 그대로 남아있어 재진입 감지가 5분씩 느려지는 문제가
+  // 있었기 때문. 그런데 이후 NEARDEST 자체가 서버 계산으로 이미 짧은 interval(30~120초, 시간
+  // 기반)을 받도록 개선되면서 이 방어 코드가 불필요해졌고, 오히려 역효과를 낸다 — 지운 직후
+  // 서버가 "interval:null"(변경 없음)로 응답하면 아무도 복구를 안 해줘서 백그라운드 네이티브
+  // 구독이 30초에 영구히 갇힌다(포그라운드는 러너 메모리 intervalSec을 그대로 써서 정상으로
+  // 보이는 통에 실측 전까진 안 드러났음 — 실외 EXIT 테스트로 발견). NEARDEST 시절 값을 그대로
+  // 이어받는 게 이미 충분히 짧고, 위 DESIRED_INTERVALS_KEY 초기화 버그와 같은 클래스라 제거.
 
   // backgroundLocationTask.ts의 잠금 걸린 공용 함수를 그대로 재사용 — 백그라운드 틱/alarmService
   // 시작·종료와 같은 큐를 타야 통째 덮어쓰기로 서로의 갱신을 유실시키는 일이 없다.
   await addActiveId(journeyId, appointmentId);
 
   if (AppState.currentState === 'active') {
+    // 2026-08-14: 화면에 뜨는 알림은 EXIT 처리 완료 알림(AppState 필드 포함, 위 TaskManager.defineTask
+    // 안)에 이미 나가므로 여기서 별도 알림을 또 보내면 사실상 같은 정보가 알림 두 개로 쪼개져
+    // 나오는 것 — adb로 상세 추적할 때만 필요한 로그로 남긴다.
+    console.log(`[NEARDEST 지오펜스] fallbackToPolling — 포그라운드 경로(resumeFromGeofence) 선택 — j:${journeyId ?? '-'} a:${appointmentId ?? '-'}`);
     try {
       // 순환 import 회피 — notifications.ts의 onBackgroundEvent와 동일한 동적 import 패턴
       const { alarmService } = await import('@/src/services/alarmService');
@@ -172,18 +175,16 @@ async function fallbackToPolling(journeyId?: number, appointmentId?: number): Pr
     }
   }
 
-  const isRunning = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK).catch(() => false);
-  if (!isRunning) {
-    // FCM 헤드리스 웨이크업(backgroundAlarmTask.ts)과 동일한 패턴 — foregroundService 없이 시작
-    // (Android 정책상 백그라운드에서 포그라운드 서비스 시작 불가)
-    await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
-      accuracy: Location.Accuracy.High,
-      timeInterval: 30000,
-      distanceInterval: 0,
-    }).catch((e) => {
-      console.log('[NEARDEST 지오펜스] 폴백 위치추적 시작 실패:', e?.message);
-    });
-  }
+  // backgroundLocationTask.ts의 공용 함수를 그대로 재사용 — foregroundService 옵션 없이만
+  // 시작하므로(Android 정책상 백그라운드에서 포그라운드 서비스 시작 불가) 여기서도 안전하고,
+  // 2026-08-14(버그3/8)부터는 하드코딩된 30초 대신 getMinDesiredIntervalMs() 기준 동적
+  // interval로 시작한다 — 방금 위에서 addActiveId()로 이 key를 추가했으니 그 값이 이미
+  // 최솟값 계산에 반영된다. 이미 실행 중이면 내부에서 interval 변경 여부만 확인하고 필요
+  // 시에만 재시작하므로 매번 호출해도 안전.
+  console.log(`[NEARDEST 지오펜스] fallbackToPolling — 백그라운드 경로(startGpsPolling) 선택 — j:${journeyId ?? '-'} a:${appointmentId ?? '-'}`);
+  await startGpsPolling().catch((e) => {
+    console.log('[NEARDEST 지오펜스] 폴백 위치추적 시작 실패:', e?.message);
+  });
 }
 
 TaskManager.defineTask(NEARDEST_GEOFENCE_TASK, async ({ data, error }) => {
@@ -286,8 +287,11 @@ TaskManager.defineTask(NEARDEST_GEOFENCE_TASK, async ({ data, error }) => {
 
     const status = journeyId != null ? response?.data?.journey_status : response?.data?.participant_status;
     const elapsed = Date.now() - t0;
-    console.log(`[NEARDEST_GEOFENCE_TASK] +${elapsed}ms /location 응답 — key:${key} status:${status} 좌표출처:${coordSource}`);
-    await sendDebugNotification('EXIT 처리 완료', `+${elapsed}ms key:${key} status:${status} 좌표출처:${coordSource === 'cache' ? '캐시' : '신규GPS'}`);
+    console.log(`[NEARDEST_GEOFENCE_TASK] +${elapsed}ms /location 응답 — key:${key} status:${status} 좌표출처:${coordSource} AppState:${AppState.currentState}`);
+    // 2026-08-14(사용자 요청): 알림에서 "AppState:background" 같은 raw 값 대신, 화면에서 바로
+    // 읽히는 "(포그라운드)"/"(백그라운드)" 표기로 제목 옆에 붙인다.
+    const appStateLabel = AppState.currentState === 'active' ? '포그라운드' : '백그라운드';
+    await sendDebugNotification(`EXIT 처리 완료 (${appStateLabel})`, `+${elapsed}ms key:${key} status:${status} 좌표출처:${coordSource === 'cache' ? '캐시' : '신규GPS'}`);
 
     await exitNearDestGeofenceMode(key);
 

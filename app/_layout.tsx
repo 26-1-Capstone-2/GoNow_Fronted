@@ -6,7 +6,7 @@ import { createAlarmsApi } from '@/src/api/alarms';
 import { alarmService } from '@/src/services/alarmService';
 import * as Notifications from 'expo-notifications';
 import { BACKGROUND_ALARM_TASK } from '@/src/tasks/backgroundAlarmTask';
-import { DESIRED_INTERVALS_KEY, SESSION_READY_KEY } from '@/src/tasks/backgroundLocationTask';
+import { SESSION_READY_KEY } from '@/src/tasks/backgroundLocationTask';
 import { reconcileNearDestGeofences } from '@/src/tasks/nearDestGeofenceTask';
 import { getToken, useAuthStore, TOKEN_KEY } from '@/src/store/authStore';
 import { useAppointmentStatusStore } from '@/src/store/appointmentStatusStore';
@@ -43,13 +43,18 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 async function checkAndApplyUpdate(): Promise<void> {
-  if (__DEV__ || !Updates.isEnabled) return;
+  if (__DEV__ || !Updates.isEnabled) {
+    console.log(`[expo-updates] 체크 스킵 — __DEV__:${__DEV__} isEnabled:${Updates.isEnabled}`);
+    return;
+  }
   try {
     const result = await withTimeout(Updates.checkForUpdateAsync(), 5000);
+    console.log(`[expo-updates] 체크 완료 — isAvailable:${result.isAvailable}`);
     if (!result.isAvailable) return;
     await sendDebugNotification('업데이트 발견', '새 번들 다운로드 중...');
     await withTimeout(Updates.fetchUpdateAsync(), 15000);
     await sendDebugNotification('업데이트 적용', '재시작합니다');
+    console.log('[expo-updates] reloadAsync() 호출 직전 — 이 로그 이후 JS가 재시작되면 "Running main"이 다시 찍힘');
     await Updates.reloadAsync();
   } catch (e: any) {
     console.log('[expo-updates] 체크/적용 실패, 기존 번들로 계속:', e?.message ?? e);
@@ -60,12 +65,19 @@ export default function RootLayout() {
   const colorScheme = useColorScheme();
 
   useEffect(() => {
+    // 2026-08-14(진단용 로그, 힘든 콜드스타트 버그 재검토): useEffect가 여러 번 마운트되면(예:
+    // Activity 재생성 시 React 트리가 완전히 재마운트되지 않고 이전 인스턴스가 살아남는 경우)
+    // AppState 리스너가 중복 등록될 수 있다는 의심이 있어, 인스턴스를 구분할 수 있게 마킹해둔다.
+    const instanceId = Math.random().toString(36).slice(2, 8);
+    console.log(`[_layout] useEffect 마운트 — instanceId:${instanceId}`);
     let cleanup = () => {};
 
     const init = async () => {
+      console.log(`[_layout] init() 시작 — instanceId:${instanceId}`);
       // 이 아래 초기화보다 먼저 — 업데이트가 있으면 여기서 즉시 재시작되므로 나머지 초기화는
       // 새 번들에서 다시 실행된다(리로드 시 현재 함수 실행은 중단됨)
       await checkAndApplyUpdate();
+      console.log(`[_layout] checkAndApplyUpdate() 통과 — instanceId:${instanceId}`);
 
       // 앱 시작 시 이전 세션 유령 ID 초기화 (await 필수 — 완료 전 startReadyAlarms 실행 방지)
       // SESSION_READY_KEY를 먼저 '0'으로 초기화 → backgroundLocationTask가 init() 완료 전 발화해도 skip
@@ -82,9 +94,15 @@ export default function RootLayout() {
       // 등록되기 전 그 짧은 틈에 헤드리스 배경 태스크가 하필 발화하면 "추적할 게 없다"고 오판할
       // 여지가 있었다. 로그아웃(ProfileSettingsScreen.tsx)이 이미 명시적으로 비워주고, 방치된
       // 유령 ID가 남아있어도 다음 폴링에서 서버가 404를 주면 자동으로 정리되므로 안전하다.
-      // DESIRED_INTERVALS_KEY는 "얼마나 자주 부를지"만 다루는 값이라 오래된 값이 한 주기 정도
-      // 남아있어도 상관없어 그대로 초기화한다.
-      await AsyncStorage.setItem(DESIRED_INTERVALS_KEY, JSON.stringify({}));
+      // 2026-08-14(재검토 발견): 예전엔 DESIRED_INTERVALS_KEY를 "얼마나 자주 부를지만 다루는
+      // 값이라 오래된 값이 남아있어도 무해하다"는 전제로 여기서 무조건 초기화했다. 그런데 이
+      // 전제가 틀렸다 — 안드로이드가 프로세스를 완전히 죽이지 않고 Activity만 재생성하면(위
+      // ACTIVE_JOURNEYS_KEY 주석과 같은 부류) alarmService의 러너 인스턴스는 메모리에 살아남아
+      // this.intervalSec(예: 300초)을 그대로 유지하는데, 저장소 값만 여기서 지워지면 백그라운드
+      // 헤드리스 틱은 기본값(30초)으로 되돌아가 버린다 — 포그라운드는 300초 대기, 백그라운드는
+      // 30초마다 호출하는 불일치가 실기기로 재현됨. ACTIVE_JOURNEYS_KEY/ACTIVE_APPOINTMENTS_KEY와
+      // 동일한 이유로 여기서도 더 이상 비우지 않는다 — 활성 상태가 아닌 key의 값은
+      // getMinDesiredIntervalMs()가 애초에 안 읽으므로 무해하고, 활성 상태인 key는 지우면 안 된다.
 
       // 알림 권한 요청은 더 이상 여기서 자동으로 안 함 — PermissionSetupScreen(회원가입 직후/설정 화면)에서
       // 맥락 설명과 함께 요청하도록 이동함
@@ -124,13 +142,25 @@ export default function RootLayout() {
           reconcileNearDestGeofences(activeKeys).catch(() => {});
           readyItems.forEach((a) => {
             if (a.alarm_type === 'GROUP' && a.appointment_id != null) {
-              if (alarmService.isRunning(undefined, a.appointment_id)) return;
+              if (alarmService.isRunning(undefined, a.appointment_id)) {
+                console.log(`[startReadyAlarms] appointmentId:${a.appointment_id} 이미 실행 중 — start() 스킵`);
+                return;
+              }
+              console.log(`[startReadyAlarms] appointmentId:${a.appointment_id} start() 호출`);
               alarmService.start({ alarmType: 'group', destination: a.dest_name, appointmentId: a.appointment_id, isActive: a.is_active, destLat: a.dest_lat, destLng: a.dest_lng, transportMode: toTransportMode(a.transport_type === 'DRIVING') });
             } else if (a.alarm_type === 'HOME' && a.journey_id != null) {
-              if (alarmService.isRunning(a.journey_id)) return;
+              if (alarmService.isRunning(a.journey_id)) {
+                console.log(`[startReadyAlarms] journeyId:${a.journey_id}(HOME) 이미 실행 중 — start() 스킵`);
+                return;
+              }
+              console.log(`[startReadyAlarms] journeyId:${a.journey_id}(HOME) start() 호출`);
               alarmService.start({ alarmType: 'home', destination: a.dest_name, journeyId: a.journey_id, destLat: a.dest_lat, destLng: a.dest_lng, transportMode: toTransportMode(a.transport_type === 'DRIVING'), isLastMode: a.is_last_mode });
             } else if (a.alarm_type === 'PERSONAL' && a.journey_id != null) {
-              if (alarmService.isRunning(a.journey_id)) return;
+              if (alarmService.isRunning(a.journey_id)) {
+                console.log(`[startReadyAlarms] journeyId:${a.journey_id}(PERSONAL) 이미 실행 중 — start() 스킵`);
+                return;
+              }
+              console.log(`[startReadyAlarms] journeyId:${a.journey_id}(PERSONAL) start() 호출`);
               alarmService.start({ alarmType: 'personal', destination: a.dest_name, journeyId: a.journey_id, destLat: a.dest_lat, destLng: a.dest_lng, transportMode: toTransportMode(a.transport_type === 'DRIVING') });
             }
           });
@@ -175,32 +205,66 @@ export default function RootLayout() {
       }
 
       // AppState 감지 → active/background 3초 디바운스로 중복 발화 방지
+      // 2026-08-14(버그3/8, 재검토 중 실기기로 발견): 디바운스가 "같은 방향 이벤트끼리만" 비교하면
+      // background→active→background처럼 짧은 시간 안에 방향이 왕복될 때, 두 번째 background가
+      // 직전 background로부터 3초가 안 지났다는 이유만으로 스킵될 수 있다 — 그 사이 진짜 active가
+      // 끼어 있었는데도 무시되는 것. 이러면 alarmService.pauseAll()이 안 불려서, 포그라운드가
+      // resumeIfDue()로 예약해둔 타이머가 안 지워진 채 남았다가 한참 뒤(심지어 NEARDEST 진입
+      // 이후에도) poll()을 직접 발동시키는 버그로 이어졌다(실기기 로그로 재현·추적됨, poll() 쪽
+      // 방어선은 alarmService.ts에 별도로 추가함). 그래서 반대 방향 이벤트를 성공적으로 처리할
+      // 때마다 상대쪽 타임스탬프를 리셋한다 — 같은 방향 연타는 여전히 걸러내면서, 진짜 방향
+      // 전환은 타이밍과 무관하게 항상 처리되도록 한다.
       let lastForegroundAt = 0;
       let lastBackgroundAt = 0;
       const appStateSub = AppState.addEventListener('change', async (nextState) => {
-        console.log('[AppState] 상태 변경:', nextState);
+        console.log(`[AppState] 상태 변경(instanceId:${instanceId}):`, nextState);
         if (nextState === 'active') {
           const now = Date.now();
           if (now - lastForegroundAt < 3000) {
-            console.log('[AppState] active 3초 내 중복 — skip');
+            console.log(`[AppState] active 3초 내 중복 — skip (instanceId:${instanceId})`);
             return;
           }
           lastForegroundAt = now;
-          console.log('[AppState] active → startReadyAlarms 호출');
+          lastBackgroundAt = 0;
+          console.log(`[AppState] active → startReadyAlarms 호출 (instanceId:${instanceId})`);
           startReadyAlarms();
           // 기존 runner들의 현재 상태 기준으로 FGS 필요 여부 재점검(실제로 바뀔 때만 토글됨).
           // startReadyAlarms()가 새로 복원하는 알람은 doStartReadyAlarms() 안에서 별도로 재점검함.
+          // maybeSyncGpsPolling()이 이제 AppState 인지형이라, 이 호출이 네이티브 GPS 구독도
+          // 함께 끈다(버그8 — 포그라운드에선 AlarmRunner가 GPS를 전담).
           await alarmService.syncForegroundService();
+          // 백그라운드에서 interval이 바뀌었어도 AlarmRunner는 자기 메모리 값에 머물러 있으므로
+          // (alarmService.ts의 resumeAll() 주석 참고) 즉시 재폴링시켜 최신 interval/상태를
+          // 곧바로 이어받는다(버그3/8 — 포그라운드/백그라운드가 하나의 연속된 interval을 공유).
+          alarmService.resumeAll();
         } else if (nextState === 'background') {
           const nowBg = Date.now();
           if (nowBg - lastBackgroundAt < 3000) {
             return;
           }
           lastBackgroundAt = nowBg;
+          lastForegroundAt = 0;
+          // 2026-08-14(버그3/8, 시도했다가 되돌림): 이 분기를 setTimeout으로 짧게 지연시켜서
+          // "생성 직후 UI 블립" 문제를 막아보려 했으나, 정작 이 타이머가 돌아야 할 구간(백그라운드
+          // 전환 직후)이 바로 안드로이드가 JS 타이머를 지연/제한시키는 구간이라 실기기에서 8분간
+          // 네이티브 GPS 구독이 전혀 안 켜지는 훨씬 심각한 회귀가 발생했다(타이머가 안 돌다가
+          // 포그라운드 복귀 시점에야 발동해서 "블립"으로 오판돼 취소됨). 즉시 실행으로 되돌림 —
+          // 생성 시 중복 호출 문제는 poll() 쪽에서 별도로 막는다(alarmService.ts 참고).
           // ACTIVE_JOURNEYS_KEY/ACTIVE_APPOINTMENTS_KEY는 이제 alarmService.start()/종료 시점에
           // 곧바로 기록되므로(backgroundLocationTask.ts의 addActiveId/removeActiveId), 여기서
           // 백그라운드 전환 시점에 다시 쓸 필요가 없다 — 예전엔 이 쓰기가 끝나기 전에 배경
           // 위치추적 태스크가 먼저 발화해 빈 목록으로 잘못 읽고 FGS를 꺼버리는 경쟁 조건이 있었음.
+          // 2026-08-14(버그3/8, 재발 수정): 포그라운드에서 마지막으로 걸어둔 AlarmRunner의
+          // pollTimer를 배경 전환 즉시 능동적으로 정리한다 — 방치하면 안드로이드가 이 JS 타이머를
+          // 지연시켰다가 다음 포그라운드 복귀와 겹쳐서 몰아 발동시킬 수 있다(resumeIfDue() 주석,
+          // AlarmManager.pauseAll() 주석 참고. 실기기로 재현된 재발 버그).
+          alarmService.pauseAll();
+          // 2026-08-14(버그3/8): 백그라운드 전환 시점에 네이티브 GPS 구독을 명시적으로 켠다 —
+          // 예전엔 이 브랜치가 비어있어서, 포그라운드의 AlarmRunner가 GPS를 전담하는 동안
+          // 네이티브 구독은 "어쩌다 켜져 있으면 유지"될 뿐 명시적으로 시작되는 지점이 없었다.
+          // syncForegroundService()가 내부에서 maybeSyncGpsPolling()을 호출해 AppState 기준으로
+          // 판단하므로(이제 'active'가 아니면 대상 존재 시 동적 interval로 시작) 그대로 재사용.
+          await alarmService.syncForegroundService();
         }
       });
 
@@ -215,10 +279,25 @@ export default function RootLayout() {
       // stopBackgroundLocationUpdates가 중복 호출되는 게 실기기에서 실제로 관측됨(기능상
       // 해는 없지만 불필요한 네이티브 서비스 토글). 여기서 갱신해두면 리스너 쪽이 자연히 skip한다.
       if (AppState.currentState === 'active') {
-        console.log('[init] 이미 active 상태 — startReadyAlarms 직접 호출');
+        console.log(`[init] 이미 active 상태 — startReadyAlarms 직접 호출 (instanceId:${instanceId})`);
         lastForegroundAt = Date.now();
         startReadyAlarms();
         await alarmService.syncForegroundService();
+        // 2026-08-14(진단 로그로 실기기 확정): 안드로이드가 앱을 스와이프해도 JS 인스턴스가
+        // 완전히 새로 시작되지 않고 이전 AlarmManager.runners가 메모리에 그대로 남아있는
+        // 경우가 있다(위 ACTIVE_JOURNEYS_KEY/DESIRED_INTERVALS_KEY 주석과 같은 부류의 현상 —
+        // "Running main"이 다시 찍혀도 runners Map은 살아남는 것으로 실기기 로그에서 확인됨).
+        // 이 경우 doStartReadyAlarms()의 isRunning() 체크가 true로 나와 start()가 다시 안
+        // 불리므로, 예전 러너를 깨울 유일한 방법은 resumeAll()이다. 그런데 이 분기는
+        // "이미 active라 리스너의 'active' 이벤트가 다시는 안 올 상황"을 위해 만든 예외
+        // 경로인데, resumeAll() 호출이 빠져 있었다 — 리스너의 'active' 분기(아래)는
+        // resumeAll()을 부르지만 이 분기는 안 불러서, 예전 러너가 깨어날 방법이 전혀 없이
+        // 영구히 멈춰있는 버그로 이어졌다(실기기로 재현·확정 — getAlarms 응답 이후 어떤
+        // JS 로그도 더 안 찍히는 것으로 확인). 진짜 콜드 스타트라 runners가 비어있는
+        // 경우엔 resumeAll()이 그냥 no-op이라 안전하다.
+        alarmService.resumeAll();
+      } else {
+        console.log(`[init] active 상태 아님(AppState:${AppState.currentState}) — 리스너가 감지할 때까지 대기 (instanceId:${instanceId})`);
       }
 
     // FCM 서버 푸시 수신 → 해당하는 알람 모두 동시 시작
@@ -412,14 +491,19 @@ export default function RootLayout() {
     });
 
       cleanup = () => {
+        console.log(`[_layout] cleanup 실행 — appStateSub 해제 (instanceId:${instanceId})`);
         fcmSub.remove();
         notifSub();
         appStateSub.remove();
       };
+      console.log(`[_layout] init() 완료 — 리스너 등록 완료 (instanceId:${instanceId})`);
     };
 
     init();
-    return () => cleanup();
+    return () => {
+      console.log(`[_layout] useEffect 언마운트 — instanceId:${instanceId}`);
+      cleanup();
+    };
   }, []);
 
   return (

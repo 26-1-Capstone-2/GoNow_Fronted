@@ -25,7 +25,24 @@ const LAST_CALL_TIMES_KEY = 'gonow_last_call_times';           // Record<key, ms
 // 인메모리 변수로는 안 되고 AsyncStorage에 영속시켜야 함(ACTIVE_JOURNEYS_KEY 등과 동일한 이유).
 const LOCATION_FGS_ACTIVE_KEY = 'gonow_location_fgs_active';
 
+// 서버가 아무 값도 안 준 경우의 기본값(폴백)로만 쓴다 — 실제 네이티브 구독 등록값은
+// getMinDesiredIntervalMs()가 DESIRED_INTERVALS_KEY 기준으로 동적으로 결정한다(버그3/8 수정,
+// 2026-08-14). FGS와 GPS를 분리한 덕분에(위 LOCATION_FGS_ACTIVE_KEY 주석 참고) 이 구독을
+// stop→restart해도 FGS 관련 크래시 위험이 없어져서, 값이 바뀔 때마다 안전하게 재등록할 수 있다.
 const BACKGROUND_LOCATION_TIME_INTERVAL_MS = 30000;
+// ⚠️ 2026-08-14 임시 테스트 코드 — 검증 끝나면 반드시 제거할 것. alarmService.ts의 동명 상수와
+// 반드시 같은 값으로 맞춰야 한다(포/백이 서로 다른 값을 강제하면 그 자체로 새 불일치가 생김).
+const DEBUG_FORCE_INTERVAL_SEC: number | null = 15;
+// 2026-08-14(버그3/8, 재발 수정): 알람 생성 직후 짧은 AppState 블립 동안 포그라운드(alarmService.ts)
+// 쪽 poll()이 GPS 콜드 픽스를 기다리는 사이, 이 헤드리스 틱이 먼저 같은 key로 /location을 호출해
+// 버릴 수 있다(반대로 이 틱이 먼저 호출하고 포그라운드가 뒤늦게 중복 호출하는 문제는 이미
+// alarmService.ts에 같은 상수로 가드를 넣었다 — 여긴 반대 방향 대칭 가드). 정상적인 폴링 간격
+// (최소 30초)보다 훨씬 짧게 잡아서 정상 동작과는 겹치지 않는다.
+const DUPLICATE_CALL_GUARD_MS = 5000;
+// 네이티브 구독에 지금 등록된 timeInterval(ms) — Location API가 "등록된 값"을 조회하는
+// 방법을 제공하지 않아서 직접 추적한다. startGpsPolling()이 이 값과 새로 계산한 값을
+// 비교해서 다르면만 stop→restart한다.
+const CURRENT_GPS_INTERVAL_KEY = 'gonow_current_gps_interval_ms';
 
 // /location 응답 자체엔 목적지 좌표가 없어서(목적지는 안 바뀌는 값이라 매 폴링에 안 실어줌),
 // 헤드리스(백그라운드) 경로가 카카오맵 딥링크 버튼을 알림에 붙이려면 이 캐시가 필요함.
@@ -97,14 +114,32 @@ async function hasAnyTrackedAlarm(): Promise<boolean> {
 // 잠금 없이 각자 통째로 덮어쓰면 유실된 갱신 때문에 실제로는 추적 중인데 빈 목록으로 잘못
 // 읽혀 FGS가 잘못 꺼지는 문제가 있었음 — 이 두 함수로 모든 갱신 지점을 통일한다.
 let activeIdsQueue: Promise<void> = Promise.resolve();
-function withActiveIdsLock(fn: () => Promise<void>): Promise<void> {
-  const run = activeIdsQueue.then(fn, fn);
+// 2026-08-14(진단용 로그, 힘든 콜드스타트 버그 재검토): 이 락 큐 자체가 어딘가에서 멈추는 게
+// 아닌지 의심되는 상황이라(콜드 스타트 후 addActiveId 완료 로그가 안 찍힌 사례 있었음),
+// label로 어느 호출이 언제 락을 잡고 언제 놓는지 추적 가능하게 한다.
+function withActiveIdsLock(label: string, fn: () => Promise<void>): Promise<void> {
+  console.log(`[activeIdsLock] 대기열 진입 — label:${label}`);
+  const run = activeIdsQueue.then(
+    async () => {
+      console.log(`[activeIdsLock] 락 획득 — label:${label}`);
+      try {
+        await fn();
+        console.log(`[activeIdsLock] 락 해제(성공) — label:${label}`);
+      } catch (e) {
+        console.log(`[activeIdsLock] 락 해제(실패) — label:${label}`, e);
+        throw e;
+      }
+    },
+    (e) => {
+      console.log(`[activeIdsLock] 이전 큐 실패로 락 획득 — label:${label}`, e);
+    }
+  );
   activeIdsQueue = run.catch(() => {});
   return run;
 }
 
 export function addActiveId(journeyId?: number, appointmentId?: number): Promise<void> {
-  return withActiveIdsLock(async () => {
+  return withActiveIdsLock(`add(j:${journeyId ?? '-'},a:${appointmentId ?? '-'})`, async () => {
     try {
       if (journeyId != null) {
         const raw = await AsyncStorage.getItem(ACTIVE_JOURNEYS_KEY);
@@ -128,7 +163,7 @@ export function addActiveId(journeyId?: number, appointmentId?: number): Promise
 // 로그아웃처럼 "전부 한 번에 정리"가 필요한 지점 전용 — 개별 add/removeActiveId와 같은 잠금을
 // 타야 다른 갱신과 순서가 섞여도 유실 없이 처리된다(alarmService.ts의 stopAll() 참고).
 export function clearActiveIds(): Promise<void> {
-  return withActiveIdsLock(async () => {
+  return withActiveIdsLock('clear', async () => {
     await AsyncStorage.multiSet([
       [ACTIVE_JOURNEYS_KEY, '[]'],
       [ACTIVE_APPOINTMENTS_KEY, '[]'],
@@ -137,7 +172,7 @@ export function clearActiveIds(): Promise<void> {
 }
 
 export function removeActiveId(journeyId?: number, appointmentId?: number): Promise<void> {
-  return withActiveIdsLock(async () => {
+  return withActiveIdsLock(`remove(j:${journeyId ?? '-'},a:${appointmentId ?? '-'})`, async () => {
     try {
       if (journeyId != null) {
         const raw = await AsyncStorage.getItem(ACTIVE_JOURNEYS_KEY);
@@ -166,9 +201,9 @@ export function removeActiveId(journeyId?: number, appointmentId?: number): Prom
 // 다시 써버리면서 그 삭제를 되살리는 경쟁이 생긴다(2026-08-13 고친 "NEARDEST 재진입 5분 지연"
 // 버그가 이 경쟁 창에서 재발할 수 있는 구조였음 — 그래서 뒤늦게 추가).
 let intervalsQueue: Promise<void> = Promise.resolve();
-function withIntervalsLock(fn: () => Promise<void>): Promise<void> {
+function withIntervalsLock<T>(fn: () => Promise<T>): Promise<T> {
   const run = intervalsQueue.then(fn, fn);
-  intervalsQueue = run.catch(() => {});
+  intervalsQueue = run.then(() => undefined, () => undefined);
   return run;
 }
 
@@ -183,16 +218,56 @@ export function setDesiredInterval(key: string, interval: number): Promise<void>
   });
 }
 
-export function clearDesiredInterval(key: string): Promise<void> {
+// 2026-08-14(버그3/8, 검토 중 발견): 생성 직후 중복 호출 가드(alarmService.ts의
+// DUPLICATE_CALL_GUARD_MS)가 스킵할 때, 스킵한 쪽(주로 foreground AlarmRunner)은 상대방이 방금
+// 서버로부터 받은 실제 interval을 모른 채 자기 메모리의 기본값(30초)으로 재예약해버려서, 얼마 뒤
+// 또 한 번 불필요한 조기 호출이 나가는 잔여 문제가 있었다 — 스킵 시 이미 저장된 최신 desired
+// interval을 조회해 반영하도록 이 getter를 추가했다.
+export function getDesiredInterval(key: string): Promise<number | null> {
   return withIntervalsLock(async () => {
     try {
       const raw = await AsyncStorage.getItem(DESIRED_INTERVALS_KEY);
-      if (!raw) return;
-      const intervals: Record<string, number> = JSON.parse(raw);
-      if (key in intervals) {
-        delete intervals[key];
-        await AsyncStorage.setItem(DESIRED_INTERVALS_KEY, JSON.stringify(intervals));
-      }
+      const intervals: Record<string, number> = raw ? JSON.parse(raw) : {};
+      return intervals[key] ?? null;
+    } catch {
+      return null;
+    }
+  });
+}
+
+// 2026-08-14(버그3/8): LAST_CALL_TIMES_KEY("마지막으로 실제 /location을 호출한 시각")를
+// alarmService.ts(포그라운드 AlarmRunner)도 같이 읽고 쓰게 됐다 — 원래는 이 파일의 헤드리스
+// 틱만 쓰는 값이라 _taskRunning 가드만으로 충분했지만, 이제 두 실행 컨텍스트가 동시에
+// 건드릴 수 있어 DESIRED_INTERVALS_KEY와 같은 이유로 직렬화가 필요하다. 포그라운드가 이 값을
+// 같이 쓰는 이유: 포그라운드 복귀 시 무조건 즉시 재폴링하면(경과 시간 무관) 포그라운드/백그라운드를
+// 빠르게 반복할 때마다 서버가 준 interval보다 더 자주 호출하게 되는 문제가 있어서 — 이제
+// "마지막 실제 호출 이후 얼마나 지났는지"를 포그라운드/백그라운드 공통 기준으로 판단한다.
+let lastCallTimesQueue: Promise<void> = Promise.resolve();
+function withLastCallTimesLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = lastCallTimesQueue.then(fn, fn);
+  lastCallTimesQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+export function getLastCallTime(key: string): Promise<number> {
+  return withLastCallTimesLock(async () => {
+    try {
+      const raw = await AsyncStorage.getItem(LAST_CALL_TIMES_KEY);
+      const times: Record<string, number> = raw ? JSON.parse(raw) : {};
+      return times[key] ?? 0;
+    } catch {
+      return 0;
+    }
+  });
+}
+
+export function setLastCallTime(key: string, ms: number): Promise<void> {
+  return withLastCallTimesLock(async () => {
+    try {
+      const raw = await AsyncStorage.getItem(LAST_CALL_TIMES_KEY);
+      const times: Record<string, number> = raw ? JSON.parse(raw) : {};
+      times[key] = ms;
+      await AsyncStorage.setItem(LAST_CALL_TIMES_KEY, JSON.stringify(times));
     } catch {}
   });
 }
@@ -270,6 +345,30 @@ export async function patchLocation(path: string, token: string, lat: number, ln
   }
 }
 
+// 활성 추적 대상(ACTIVE_JOURNEYS_KEY/ACTIVE_APPOINTMENTS_KEY) 중 DESIRED_INTERVALS_KEY에 저장된
+// 서버 지시값의 최솟값을 ms로 반환한다 — 여러 알람을 동시에 추적 중이면 가장 급한 쪽 기준으로
+// 네이티브 GPS 구독 자체의 주기를 맞춰야 한다(개별 key의 실제 /location 호출 스킵 여부는
+// 헤드리스 틱 안의 elapsed 체크가 이미 별도로 담당 — 이 함수는 "네이티브가 얼마나 자주
+// 깨어나야 하는가"만 결정). 대상이 없으면 기본값(30초)으로 폴백.
+async function getMinDesiredIntervalMs(): Promise<number> {
+  const [journeysRaw, appointmentsRaw, desiredRaw] = await Promise.all([
+    AsyncStorage.getItem(ACTIVE_JOURNEYS_KEY),
+    AsyncStorage.getItem(ACTIVE_APPOINTMENTS_KEY),
+    AsyncStorage.getItem(DESIRED_INTERVALS_KEY),
+  ]);
+  const journeyIds: number[] = journeysRaw ? JSON.parse(journeysRaw) : [];
+  const appointmentIds: number[] = appointmentsRaw ? JSON.parse(appointmentsRaw) : [];
+  const desired: Record<string, number> = desiredRaw ? JSON.parse(desiredRaw) : {};
+  const keys = [...journeyIds.map((id) => `j_${id}`), ...appointmentIds.map((id) => `a_${id}`)];
+  if (keys.length === 0) return BACKGROUND_LOCATION_TIME_INTERVAL_MS;
+  const perKey = keys.map((k) => `${k}:${desired[k] ?? 30}s`);
+  const minSeconds = Math.min(...keys.map((k) => desired[k] ?? 30));
+  // 알람이 여러 개 동시에 추적 중일 때 "어느 key가 최솟값을 만들었는지"가 startGpsPolling()의
+  // 최종 로그(timeInterval:Nms)만으론 안 보여서, 계산 근거 자체를 여기서 남겨둔다.
+  console.log(`[getMinDesiredIntervalMs] ${perKey.join(', ')} → 최소:${minSeconds}s`);
+  return minSeconds * 1000;
+}
+
 let _startingLocationUpdates = false; // startGpsPolling 동시 호출 race condition 방지
 
 // FGS(상단바 알림)만 켠다/끈다 — GPS는 전혀 안 건드린다(modules/foreground-service, Stage 1에서
@@ -321,6 +420,11 @@ export async function stopAlarmForegroundService(): Promise<void> {
 // hasStartedLocationUpdatesAsync() 하나로 실행 여부 판단이 충분하다 — 예전에 있던 "FGS 없는
 // 구독 발견 시 stop→재시작(승격)" 로직은 이제 개념 자체가 사라져 필요 없다(과거
 // ForegroundServiceDidNotStartInTimeException 크래시 전례가 있던 위험한 패턴이었음).
+// 2026-08-14(버그3/8): timeInterval을 하드코딩된 30초 대신 getMinDesiredIntervalMs()로 동적
+// 계산한다. 이미 실행 중이어도 등록된 값(CURRENT_GPS_INTERVAL_KEY)과 새로 계산한 값이
+// 다르면 stop→restart — FGS와 완전히 분리된 순수 GPS 구독이라 이 재시작이 어느 컨텍스트
+// (포그라운드/백그라운드/헤드리스)에서 불려도 안전하다(예전 크래시는 FGS 포함 구독을
+// 백그라운드에서 재시작하려다 난 것 — 지금은 그 조합 자체가 없음).
 export async function startGpsPolling(): Promise<void> {
   if (_startingLocationUpdates) {
     console.log('[startGpsPolling] 시작 중 — skip');
@@ -328,17 +432,29 @@ export async function startGpsPolling(): Promise<void> {
   }
   _startingLocationUpdates = true;
   try {
+    const desiredMs = await getMinDesiredIntervalMs();
     const isRunning = await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK).catch(() => false);
     if (isRunning) {
-      console.log('[startGpsPolling] 이미 실행 중 — skip');
-      return;
+      const currentMs = Number((await AsyncStorage.getItem(CURRENT_GPS_INTERVAL_KEY).catch(() => null)) ?? '0');
+      if (currentMs === desiredMs) {
+        console.log(`[startGpsPolling] 이미 실행 중(interval:${desiredMs}ms 동일) — skip`);
+        return;
+      }
+      console.log(`[startGpsPolling] interval 변경 감지(${currentMs}ms → ${desiredMs}ms) — 재시작`);
+      await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK).catch(() => {});
+      // 2026-08-14: 이 시점은 "OS에 구독을 등록/재등록"한 순간일 뿐 실제 GPS 호출과는 무관해서
+      // (포그라운드↔백그라운드를 오갈 때마다 매번 뜨는 게 오히려 헷갈린다는 실사용 피드백으로
+      // 확인) 알림은 제거하고 로그만 남긴다. 실제 호출 시점 알림은 아래 patchLocation 응답
+      // 처리 지점(이 파일의 헤드리스 틱, alarmService.ts의 poll)에서 따로 남긴다.
+    } else {
+      console.log(`[startGpsPolling] 시작(timeInterval:${desiredMs}ms)`);
     }
-    console.log(`[startGpsPolling] 시작(timeInterval:${BACKGROUND_LOCATION_TIME_INTERVAL_MS}ms)`);
     await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, {
       accuracy: Location.Accuracy.High,
-      timeInterval: BACKGROUND_LOCATION_TIME_INTERVAL_MS,
+      timeInterval: desiredMs,
       distanceInterval: 0,
     });
+    await AsyncStorage.setItem(CURRENT_GPS_INTERVAL_KEY, String(desiredMs));
   } finally {
     _startingLocationUpdates = false;
   }
@@ -352,19 +468,46 @@ export async function stopGpsPolling(): Promise<void> {
   }
   console.log('[stopGpsPolling] 중지');
   await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK).catch(() => {});
+  await AsyncStorage.removeItem(CURRENT_GPS_INTERVAL_KEY).catch(() => {});
 }
 
-// ACTIVE_JOURNEYS_KEY/ACTIVE_APPOINTMENTS_KEY를 다시 읽어 "지금 GPS 폴링이 실제로 필요한가"를
-// 재판단하고 그에 맞게 시작/중지한다(FGS는 안 건드림 — hasAnyTrackedAlarm() 기준의 별도 판단과
-// 완전히 분리). 양방향(대상 있으면 시작, 없으면 중지)인 이유는 호출부가 두 종류라서다:
-// ① NEARDEST 진입 등으로 폴링 대상이 줄어든 직후(alarmService.ts의 pollPersonal/pollGroup
-// NEARDEST 분기, AlarmManager onFinish) — 헤드리스 배경 틱은 AppState가 'active'면 아예
-// skip하므로, 포그라운드에 계속 머물면 GPS 중단 로직이 영원히 안 도는 구멍을 메운다.
-// ② syncForegroundService()(포그라운드 재진입 등) — 예전엔 무조건 startGpsPolling()을 불러서,
-// 추적 중인 알람이 전부 NEARDEST(지오펜스 전용)뿐이어도 포그라운드 복귀할 때마다 불필요하게
-// GPS 폴링이 다시 켜지는 버그가 있었음(2026-08-13 실기기 실측으로 발견) — 여기서도 이 함수로
-// 통일해 "진짜 필요할 때만" 켜지도록 고쳤다.
+// ACTIVE_JOURNEYS_KEY/ACTIVE_APPOINTMENTS_KEY와 AppState를 다시 읽어 "지금 GPS 폴링이
+// 실제로 필요한가"를 재판단하고 그에 맞게 시작/중지한다(FGS는 안 건드림 —
+// hasAnyTrackedAlarm() 기준의 별도 판단과 완전히 분리).
+// 2026-08-14(버그8): 포그라운드에서는 alarmService.ts의 AlarmRunner가 GPS 획득을 전담하므로
+// (자체 JS 타이머 + getCurrentPositionAsync() 단발 요청 — 포그라운드에서는 JS 타이머가
+// 신뢰할 수 있어 이 방식으로 충분하다), 네이티브 구독을 같이 켜두면 GPS 칩이 이중으로
+// 깨어난다. 그래서 AppState.currentState === 'active'면 추적 대상 존재 여부와 무관하게
+// 무조건 끈다 — 이게 이 함수가 양방향(시작/중지)인 이유이자 핵심 로직이다.
+// 백그라운드에서는 반대로 JS 타이머가 신뢰할 수 없어서(XMLHttpRequest.timeout 관련 조사로
+// 실측 확인, docs/history/resolved-bugs.md "2026-08-13" 참고) 네이티브 구독이 유일하게
+// 신뢰할 수 있는 폴링 수단이라, 추적 대상이 있으면 켠다(interval은 startGpsPolling() 내부의
+// getMinDesiredIntervalMs()가 서버 지시값 기준으로 동적 계산).
+// 2026-08-14(재검토, 실기기로 발견): resumeIfDue()가 "이 key가 NEARDEST인가"를 판단할 때
+// AlarmRunner.status(포그라운드 러너의 메모리 값)를 썼는데, NEARDEST를 백그라운드 헤드리스
+// 틱이 먼저 감지한 경우(걸어서 이동 중이면 흔함) 그 값이 갱신 안 돼서 지오펜스 전담 구간인데도
+// 포그라운드 복귀 시 재폴링해버리는 문제가 있었다. 신뢰할 수 있는 단일 진실 공급원은 어디서나
+// 이미 쓰는 ACTIVE_JOURNEYS_KEY/ACTIVE_APPOINTMENTS_KEY 멤버십이라 이걸로 판단하게 한다 —
+// NEARDEST 진입 시 removeActiveId()가 포그라운드/백그라운드 어느 쪽이 감지했든 항상 일어나는
+// 유일하게 일관된 신호다.
+export async function isKeyActivelyTracked(key: string): Promise<boolean> {
+  const [journeysRaw, appointmentsRaw] = await Promise.all([
+    AsyncStorage.getItem(ACTIVE_JOURNEYS_KEY),
+    AsyncStorage.getItem(ACTIVE_APPOINTMENTS_KEY),
+  ]);
+  const journeyIds: number[] = journeysRaw ? JSON.parse(journeysRaw) : [];
+  const appointmentIds: number[] = appointmentsRaw ? JSON.parse(appointmentsRaw) : [];
+  if (key.startsWith('j_')) return journeyIds.includes(Number(key.slice(2)));
+  if (key.startsWith('a_')) return appointmentIds.includes(Number(key.slice(2)));
+  return false;
+}
+
 export async function maybeSyncGpsPolling(): Promise<void> {
+  if (AppState.currentState === 'active') {
+    console.log('[maybeSyncGpsPolling] 포그라운드 — 네이티브 구독 중단(AlarmRunner 전담)');
+    await stopGpsPolling();
+    return;
+  }
   const [journeysRaw, appointmentsRaw] = await Promise.all([
     AsyncStorage.getItem(ACTIVE_JOURNEYS_KEY),
     AsyncStorage.getItem(ACTIVE_APPOINTMENTS_KEY),
@@ -472,6 +615,10 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   // 바꾼 key만 델타로 모아뒀다가, 쓰기 시점에 최신 상태를 다시 읽어 병합한다.
   const intervalSets: Record<string, number> = {};
   const intervalDeletes = new Set<string>();
+  // 2026-08-14: LAST_CALL_TIMES_KEY도 이제 alarmService.ts(포그라운드)가 같이 읽으므로
+  // (위 withLastCallTimesLock 주석 참고) 같은 이유로 델타만 모아뒀다가 병합해서 쓴다.
+  const lastCallTimeSets: Record<string, number> = {};
+  const lastCallTimeDeletes = new Set<string>();
 
   await Promise.all([
     ...journeyIds.map(async (id) => {
@@ -484,7 +631,24 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
         remainingJourneys.push(id);
         return;
       }
+      // 위 elapsed 체크는 틱 시작 시점의 스냅샷 기준이라, 그 사이(대개 GPS 픽스 대기 중) 포그라운드
+      // 쪽이 이미 호출했을 수 있다 — 실제 호출 직전에 최신 값으로 한 번 더 확인한다.
+      const freshLastCall = await getLastCallTime(key);
+      if (freshLastCall > 0 && now - freshLastCall < DUPLICATE_CALL_GUARD_MS) {
+        console.log(`[백그라운드] journeyId:${id} 최근 ${DUPLICATE_CALL_GUARD_MS / 1000}초 내 이미 호출됨(포그라운드) — 중복 스킵`);
+        remainingJourneys.push(id);
+        return;
+      }
       lastCallTimes[key] = now;
+      lastCallTimeSets[key] = now;
+      lastCallTimeDeletes.delete(key);
+      // 2026-08-14(재검토, 잔여 경쟁 제거): 이 값은 원래 틱이 다 끝난 뒤 한꺼번에(delta 병합으로)
+      // 저장됐는데, 그 사이(포그라운드가 자기 GPS 픽스를 기다리는 몇 초 동안) alarmService.ts의
+      // 중복 가드가 아직 저장 안 된 값을 읽어 못 보고 지나칠 아주 좁은 이론적 틈이 있었다.
+      // 실기기로 재현된 적은 없지만(포그라운드 콜드 픽스가 훨씬 느려서 실질적으로 안전했음),
+      // 호출을 실제로 시작하는 이 시점에 바로 한 번 더 기록해 그 틈 자체를 없앤다 — 아래
+      // 델타 병합 저장과 값이 같아 중복 저장이어도 무해하다.
+      setLastCallTime(key, now).catch(() => {});
 
       try {
         console.log(`[백그라운드] /location 호출 — journeyId:${id}`);
@@ -494,11 +658,18 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
         const type: AlarmType = journey_type === 'HOME' ? 'home' : 'personal';
 
         if (interval != null) {
-          console.log(`[백그라운드] interval 갱신 — journeyId:${id} → ${interval}s`);
-          desiredIntervals[key] = interval;
-          intervalSets[key] = interval;
+          const effectiveInterval = DEBUG_FORCE_INTERVAL_SEC ?? interval;
+          console.log(`[백그라운드] interval 갱신 — journeyId:${id} → ${effectiveInterval}s${DEBUG_FORCE_INTERVAL_SEC != null ? `(서버값 ${interval}s 무시, 테스트 강제)` : ''}`);
+          desiredIntervals[key] = effectiveInterval;
+          intervalSets[key] = effectiveInterval;
           intervalDeletes.delete(key);
         }
+        // 2026-08-14: 등록 시점 알림 대신, 실제 호출이 성공한 이 시점에 "다음 호출까지 약
+        // N초"를 알려주는 게 더 직관적이다(사용자 피드백) — 다음 호출 예정 간격은 방금 받은
+        // 새 값(있으면) 또는 이미 알고 있던 값(desiredIntervals[key], 없으면 기본 30초).
+        // 2026-08-14(사용자 요청): 서버가 실제로 준 값도 함께 보여준다(interval: 서버값 →
+        // 적용값초) — DEBUG_FORCE_INTERVAL_SEC로 강제 중일 때 서버 원본값을 가리지 않기 위함.
+        sendDebugNotification('GPS 호출 완료(백그라운드)', `journeyId:${id} status:${journey_status} interval: ${interval != null ? interval : '유지'} → ${desiredIntervals[key] ?? 30}초`).catch(() => {});
 
         if ((journey_status === 'DEPARTING' || journey_status === 'NEARDEST') && departure_alarm_time) {
           console.log(`[백그라운드] ${journey_status} — journeyId:${id} 단계별 알람 동기화`);
@@ -508,7 +679,11 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
 
         if (journey_status === 'ARRIVED') {
           console.log(`[백그라운드] ARRIVED — journeyId:${id} ID 제거`);
-          delete lastCallTimes[key];
+          // 2026-08-14(재검토): 지금 상태머신상 SCHEDULED에서 생성 직후 첫 폴링만으로 바로
+          // ARRIVED에 도달하는 경로는 없어서(반드시 NEARDEST를 거침) 지금은 안전하지만, NEARDEST
+          // 분기와 같은 이유로 lastCallTimes는 여기서도 안 지운다 — 나중에 상태머신이 바뀌어
+          // 생성 직후 바로 ARRIVED 도달이 가능해지면 같은 경쟁이 재현될 수 있는 패턴이라 미리
+          // 통일해둔다(위 NEARDEST 분기 주석 참고).
           delete desiredIntervals[key];
           intervalDeletes.add(key);
           delete intervalSets[key];
@@ -516,13 +691,24 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
           removeActiveId(id, undefined).catch(() => {});
         } else if (journey_status === 'NEARDEST') {
           console.log(`[백그라운드] NEARDEST — journeyId:${id} 지오펜스로 전환, 폴링 중단`);
-          delete lastCallTimes[key];
-          // desiredIntervals[key]는 여기서 안 지운다 — NEARDEST 동안은 폴링 대상 목록에서
-          // 빠져있어 아무도 안 읽으므로 무해하고, 포그라운드 진입 경로(alarmService.ts)는
-          // 애초에 이 값을 안 건드려서 여기만 지우면 진입 경로별로 비대칭이 생긴다. 대신
-          // "지오펜스에서 폴링으로 복귀하는" 단일 지점(nearDestGeofenceTask.ts의
-          // fallbackToPolling())에서 무조건 지우도록 통일했다(2026-08-13, 여러 ENTER 경로에
-          // 각자 정리를 맡기는 것보다 안전 — 실제로 이 비대칭 때문에 5분 지연 버그가 있었음).
+          // 2026-08-14(재검토, 실기기로 발견): 예전엔 여기서 lastCallTimes[key]도 지웠는데,
+          // 생성 직후 경쟁에서 이 틱이 먼저 NEARDEST를 확인하고 방금 자기가 기록한 값을 곧바로
+          // 지워버리면, 아직 자기 GPS 픽스를 기다리느라 느린 포그라운드 쪽이 뒤늦게 중복 가드를
+          // 확인할 때 "호출 기록 없음"으로 오판해 똑같은 alarm에 또 실제 호출을 만드는 문제가
+          // 실기기로 재현됐다(귀가 알람을 목적지 100m 이내에서 생성한 테스트). 이 값은 지워도
+          // desiredIntervals와 달리 안 지운다고 해를 끼치지 않는다 — NEARDEST 진입 후 이 key는
+          // ACTIVE_JOURNEYS_KEY에서 빠져서 elapsed 체크 쪽에서 아무도 안 읽고, 남은 유일한
+          // 소비자인 중복 가드 입장에선 오히려 남겨두는 쪽이 안전하다. ARRIVED/삭제 시에는
+          // 기존대로 정상적으로 지워진다.
+          // desiredIntervals[key]는 여기서도 안 지운다 — NEARDEST 동안은 폴링 대상 목록에서
+          // 빠져있어 아무도 안 읽으므로 무해하다. 2026-08-13엔 EXIT 지점(nearDestGeofenceTask.ts의
+          // fallbackToPolling())에서 clearDesiredInterval()로 무조건 지우도록 했었는데, 그건
+          // NEARDEST 자체가 아직 짧은 interval을 못 받던 시절의 임시방편이었다 — 이후 NEARDEST가
+          // 서버로부터 이미 짧은 interval(30~120초)을 받도록 개선되면서 그 초기화가 오히려
+          // "EXIT 직후 서버가 interval:null(변경 없음)로 응답하면 복구가 안 돼 백그라운드가 30초에
+          // 영구히 갇히는" 부작용만 남겨서 2026-08-14 재검토 때 제거했다(위 lastCallTimes 주석과
+          // 같은 클래스의 문제). 지금은 아무도 이 값을 지우지 않고, NEARDEST 시절의 마지막 값을
+          // EXIT 이후에도 그대로 이어받는다 — 어차피 짧은 값이라 재진입 감지에도 문제없다.
           await enterNearDestGeofenceMode(key, navInfo[key]?.destLat, navInfo[key]?.destLng, navInfo[key]?.destination);
           removeActiveId(id, undefined).catch(() => {});
         } else {
@@ -532,6 +718,8 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
         if (e?.message?.startsWith('HTTP 4')) {
           console.log(`[백그라운드] journeyId:${id} 서버 ${e.message} → ID 제거 (삭제된 알람)`);
           delete lastCallTimes[key];
+          lastCallTimeDeletes.add(key);
+          delete lastCallTimeSets[key];
           delete desiredIntervals[key];
           intervalDeletes.add(key);
           delete intervalSets[key];
@@ -553,7 +741,19 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
         remainingAppointments.push(id);
         return;
       }
+      // journeyIds 루프와 동일 — 틱 시작 시점 스냅샷 이후 포그라운드가 이미 호출했을 수 있어
+      // 실제 호출 직전에 최신 값으로 한 번 더 확인한다.
+      const freshLastCall = await getLastCallTime(key);
+      if (freshLastCall > 0 && now - freshLastCall < DUPLICATE_CALL_GUARD_MS) {
+        console.log(`[백그라운드] appointmentId:${id} 최근 ${DUPLICATE_CALL_GUARD_MS / 1000}초 내 이미 호출됨(포그라운드) — 중복 스킵`);
+        remainingAppointments.push(id);
+        return;
+      }
       lastCallTimes[key] = now;
+      lastCallTimeSets[key] = now;
+      lastCallTimeDeletes.delete(key);
+      // journeyIds 루프와 동일 — 잔여 경쟁 제거(위 주석 참고).
+      setLastCallTime(key, now).catch(() => {});
 
       try {
         console.log(`[백그라운드] /location 호출 — appointmentId:${id}`);
@@ -562,11 +762,13 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
         console.log(`[백그라운드] /location 응답 — appointmentId:${id} status:${participant_status} interval:${interval}`);
 
         if (interval != null) {
-          console.log(`[백그라운드] interval 갱신 — appointmentId:${id} → ${interval}s`);
-          desiredIntervals[key] = interval;
-          intervalSets[key] = interval;
+          const effectiveInterval = DEBUG_FORCE_INTERVAL_SEC ?? interval;
+          console.log(`[백그라운드] interval 갱신 — appointmentId:${id} → ${effectiveInterval}s${DEBUG_FORCE_INTERVAL_SEC != null ? `(서버값 ${interval}s 무시, 테스트 강제)` : ''}`);
+          desiredIntervals[key] = effectiveInterval;
+          intervalSets[key] = effectiveInterval;
           intervalDeletes.delete(key);
         }
+        sendDebugNotification('GPS 호출 완료(백그라운드)', `appointmentId:${id} status:${participant_status} interval: ${interval != null ? interval : '유지'} → ${desiredIntervals[key] ?? 30}초`).catch(() => {});
 
         if ((participant_status === 'DEPARTING' || participant_status === 'NEARDEST') && departure_alarm_time) {
           console.log(`[백그라운드] ${participant_status} — appointmentId:${id} 단계별 알람 동기화`);
@@ -576,7 +778,7 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
 
         if (participant_status === 'ARRIVED') {
           console.log(`[백그라운드] ARRIVED — appointmentId:${id} ID 제거`);
-          delete lastCallTimes[key];
+          // lastCallTimes는 여기서 안 지운다 — 이유는 위 journey_status ARRIVED 분기 주석 참고.
           delete desiredIntervals[key];
           intervalDeletes.add(key);
           delete intervalSets[key];
@@ -584,7 +786,8 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
           removeActiveId(undefined, id).catch(() => {});
         } else if (participant_status === 'NEARDEST') {
           console.log(`[백그라운드] NEARDEST — appointmentId:${id} 지오펜스로 전환, 폴링 중단`);
-          delete lastCallTimes[key];
+          // lastCallTimes[key]는 여기서 안 지운다 — 이유는 위 journey_status NEARDEST 분기
+          // 주석 참고(생성 직후 경쟁에서 중복 호출을 만들던 실기기 재현 버그).
           // desiredIntervals[key]는 여기서 안 지운다 — 이유는 위 journey_status NEARDEST
           // 분기 주석 참고(fallbackToPolling()에서 통일해서 지움).
           await enterNearDestGeofenceMode(key, navInfo[key]?.destLat, navInfo[key]?.destLng, navInfo[key]?.destination);
@@ -597,6 +800,8 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
           console.log(`[백그라운드] appointmentId:${id} 서버 ${e.message} → ID 제거 (삭제된 알람)`);
           await cancelStagedAlarms(key);
           delete lastCallTimes[key];
+          lastCallTimeDeletes.add(key);
+          delete lastCallTimeSets[key];
           delete desiredIntervals[key];
           intervalDeletes.add(key);
           delete intervalSets[key];
@@ -613,13 +818,18 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
   // ACTIVE_JOURNEYS_KEY/ACTIVE_APPOINTMENTS_KEY는 위에서 개별 removeActiveId()로 이미 최신화됨
   // — 여기서 remainingJourneys/remainingAppointments로 통째 덮어쓰면, 이 틱이 도는 동안 다른
   // 경로(지오펜스 폴백 등)가 새로 추가한 ID를 유실시킬 수 있어 의도적으로 안 씀.
-  // LAST_CALL_TIMES_KEY는 이 파일 안에서만 쓰이는 값이라(다른 태스크가 안 건드림) _taskRunning
-  // 가드만으로 충분해 그대로 통째 덮어쓴다. DESIRED_INTERVALS_KEY는 nearDestGeofenceTask.ts/
-  // alarmService.ts도 건드리므로 위 withIntervalsLock으로 최신 상태를 다시 읽어 이 틱이 실제로
-  // 바꾼 key(intervalSets/intervalDeletes)만 병합해서 쓴다(통째 덮어쓰면 그 사이 다른 태스크의
-  // 삭제를 되살릴 위험이 있음).
+  // LAST_CALL_TIMES_KEY/DESIRED_INTERVALS_KEY 둘 다 alarmService.ts(포그라운드)도 같이
+  // 건드리므로(2026-08-14, 버그3/8) 위 withLastCallTimesLock/withIntervalsLock으로 최신 상태를
+  // 다시 읽어 이 틱이 실제로 바꾼 key만 병합해서 쓴다(통째 덮어쓰면 그 사이 다른 컨텍스트의
+  // 갱신을 되살릴 위험이 있음 — DESIRED_INTERVALS_KEY에서 이미 겪은 것과 같은 클래스의 문제).
   await Promise.all([
-    AsyncStorage.setItem(LAST_CALL_TIMES_KEY, JSON.stringify(lastCallTimes)),
+    withLastCallTimesLock(async () => {
+      const raw = await AsyncStorage.getItem(LAST_CALL_TIMES_KEY);
+      const fresh: Record<string, number> = raw ? JSON.parse(raw) : {};
+      for (const [k, v] of Object.entries(lastCallTimeSets)) fresh[k] = v;
+      for (const k of lastCallTimeDeletes) delete fresh[k];
+      await AsyncStorage.setItem(LAST_CALL_TIMES_KEY, JSON.stringify(fresh));
+    }),
     withIntervalsLock(async () => {
       const raw = await AsyncStorage.getItem(DESIRED_INTERVALS_KEY);
       const fresh: Record<string, number> = raw ? JSON.parse(raw) : {};
@@ -640,6 +850,12 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
       console.log('[BackgroundLocation] 모든 알람 완료 → FGS도 종료');
       await stopAlarmForegroundService();
     }
+  } else if (Object.keys(intervalSets).length > 0) {
+    // 이 틱에서 interval이 바뀐 key가 있었으면 네이티브 구독의 등록값도 최신으로 맞춘다
+    // (startGpsPolling() 내부에서 실제로 값이 다를 때만 재시작하므로 매번 불러도 안전 —
+    // 버그3: 이게 없으면 서버가 새 interval을 줘도 다음 앱 재시작/전환 전까지 반영 안 됨).
+    console.log('[BackgroundLocation] interval 변경 감지 — GPS 구독 재동기화');
+    await startGpsPolling();
   }
   } finally {
     _taskRunning = false;
