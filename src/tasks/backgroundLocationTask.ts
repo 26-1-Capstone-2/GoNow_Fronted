@@ -6,6 +6,9 @@ import { TOKEN_KEY } from '@/src/store/authStore';
 import { syncStagedAlarms, cancelStagedAlarms, AlarmType, sendDebugNotification } from '@/src/utils/notifications';
 import type { KakaoMapTransportMode } from '@/src/utils/kakaoMapDeeplink';
 import { enterNearDestGeofenceMode } from '@/src/tasks/nearDestGeofenceTask';
+import { enterDepartingGeofenceMode } from '@/src/tasks/departingGeofenceTask';
+import { enterMovingGeofenceMode, exitMovingGeofenceMode } from '@/src/tasks/movingGeofenceTask';
+import { dlog } from '@/src/utils/deviceLogger';
 import ForegroundService from '@/modules/foreground-service';
 
 export const BACKGROUND_LOCATION_TASK = 'BACKGROUND-LOCATION-TASK';
@@ -651,10 +654,10 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
       setLastCallTime(key, now).catch(() => {});
 
       try {
-        console.log(`[백그라운드] /location 호출 — journeyId:${id}`);
+        dlog('POLLING', `/location 호출 — journeyId:${id}`);
         const res = await patchLocation(`/api/journeys/${id}/location`, token, lat, lng);
         const { journey_status, preparation_time, journey_type, dest_name, which_station, interval, departure_alarm_time } = res?.data ?? {};
-        console.log(`[백그라운드] /location 응답 — journeyId:${id} status:${journey_status} interval:${interval}`);
+        dlog('POLLING', `/location 응답 — journeyId:${id} status:${journey_status} interval:${interval}`);
         const type: AlarmType = journey_type === 'HOME' ? 'home' : 'personal';
 
         if (interval != null) {
@@ -678,7 +681,7 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
         }
 
         if (journey_status === 'ARRIVED') {
-          console.log(`[백그라운드] ARRIVED — journeyId:${id} ID 제거`);
+          dlog('POLLING', `ARRIVED — journeyId:${id} ID 제거 (폴링이 확정)`);
           // 2026-08-14(재검토): 지금 상태머신상 SCHEDULED에서 생성 직후 첫 폴링만으로 바로
           // ARRIVED에 도달하는 경로는 없어서(반드시 NEARDEST를 거침) 지금은 안전하지만, NEARDEST
           // 분기와 같은 이유로 lastCallTimes는 여기서도 안 지운다 — 나중에 상태머신이 바뀌어
@@ -689,8 +692,12 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
           delete intervalSets[key];
           removeAlarmNavInfo(key).catch(() => {});
           removeActiveId(id, undefined).catch(() => {});
+          // MOVING 보조 지오펜스가 등록돼 있었을 수 있다 — 폴링이 지오펜스보다 먼저 ARRIVED를
+          // 확정한 경합 상황(2026-08-17 실기기 테스트로 지적됨)에서, 폴링만 정리하고 지오펜스
+          // 등록을 그대로 방치하면 이미 끝난 여정에 대한 지오펜스가 기기에 계속 남는다.
+          exitMovingGeofenceMode(key).catch(() => {});
         } else if (journey_status === 'NEARDEST') {
-          console.log(`[백그라운드] NEARDEST — journeyId:${id} 지오펜스로 전환, 폴링 중단`);
+          dlog('POLLING', `NEARDEST — journeyId:${id} 지오펜스로 전환, 폴링 중단`);
           // 2026-08-14(재검토, 실기기로 발견): 예전엔 여기서 lastCallTimes[key]도 지웠는데,
           // 생성 직후 경쟁에서 이 틱이 먼저 NEARDEST를 확인하고 방금 자기가 기록한 값을 곧바로
           // 지워버리면, 아직 자기 GPS 픽스를 기다리느라 느린 포그라운드 쪽이 뒤늦게 중복 가드를
@@ -711,6 +718,19 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
           // EXIT 이후에도 그대로 이어받는다 — 어차피 짧은 값이라 재진입 감지에도 문제없다.
           await enterNearDestGeofenceMode(key, navInfo[key]?.destLat, navInfo[key]?.destLng, navInfo[key]?.destination);
           removeActiveId(id, undefined).catch(() => {});
+        } else if (journey_status === 'DEPARTING') {
+          dlog('POLLING', `DEPARTING — journeyId:${id} 지오펜스로 전환, 폴링 중단`);
+          // 앵커 근사치 근거는 departingGeofenceTask.ts의 enterDepartingGeofenceMode() 주석 참고
+          // — READY가 아직 폴링 기반이라 이 호출에 실제로 보낸 좌표(lat,lng)를 앵커로 씀.
+          await enterDepartingGeofenceMode(key, lat, lng, navInfo[key]?.destLat, navInfo[key]?.destLng);
+          removeActiveId(id, undefined).catch(() => {});
+        } else if (journey_status === 'MOVING') {
+          // MOVING은 폴링 유지(실시간 ETA 계산 필요) — 목적지 100m ENTER 보조 지오펜스만 추가
+          // 등록(Phase 2). enterMovingGeofenceMode()가 내부적으로 이미 등록됐는지 확인하므로
+          // 매 폴링 틱마다 호출해도 안전(두 번째부터는 내부에서 조용히 skip).
+          dlog('POLLING', `MOVING — journeyId:${id} 폴링 유지, 보조 지오펜스 확인/등록`);
+          await enterMovingGeofenceMode(key, navInfo[key]?.destLat, navInfo[key]?.destLng);
+          remainingJourneys.push(id);
         } else {
           remainingJourneys.push(id);
         }
@@ -725,6 +745,7 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
           delete intervalSets[key];
           removeAlarmNavInfo(key).catch(() => {});
           removeActiveId(id, undefined).catch(() => {});
+          exitMovingGeofenceMode(key).catch(() => {}); // 삭제된 알람에 대한 MOVING 지오펜스 방치 방지(위 ARRIVED 분기와 동일 이유)
         } else {
           console.log(`[백그라운드] journeyId:${id} 네트워크 오류 → 다음 주기 재시도`, e?.message);
           remainingJourneys.push(id);
@@ -756,10 +777,10 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
       setLastCallTime(key, now).catch(() => {});
 
       try {
-        console.log(`[백그라운드] /location 호출 — appointmentId:${id}`);
+        dlog('POLLING', `/location 호출 — appointmentId:${id}`);
         const res = await patchLocation(`/api/appointments/${id}/participants/location`, token, lat, lng);
         const { participant_status, preparation_time, dest_name, which_station, interval, departure_alarm_time } = res?.data ?? {};
-        console.log(`[백그라운드] /location 응답 — appointmentId:${id} status:${participant_status} interval:${interval}`);
+        dlog('POLLING', `/location 응답 — appointmentId:${id} status:${participant_status} interval:${interval}`);
 
         if (interval != null) {
           const effectiveInterval = DEBUG_FORCE_INTERVAL_SEC ?? interval;
@@ -777,21 +798,32 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
         }
 
         if (participant_status === 'ARRIVED') {
-          console.log(`[백그라운드] ARRIVED — appointmentId:${id} ID 제거`);
+          dlog('POLLING', `ARRIVED — appointmentId:${id} ID 제거 (폴링이 확정)`);
           // lastCallTimes는 여기서 안 지운다 — 이유는 위 journey_status ARRIVED 분기 주석 참고.
           delete desiredIntervals[key];
           intervalDeletes.add(key);
           delete intervalSets[key];
           removeAlarmNavInfo(key).catch(() => {});
           removeActiveId(undefined, id).catch(() => {});
+          // 폴링이 지오펜스보다 먼저 ARRIVED를 확정한 경합 상황 대비 — 위 journey_status
+          // ARRIVED 분기와 동일 이유.
+          exitMovingGeofenceMode(key).catch(() => {});
         } else if (participant_status === 'NEARDEST') {
-          console.log(`[백그라운드] NEARDEST — appointmentId:${id} 지오펜스로 전환, 폴링 중단`);
+          dlog('POLLING', `NEARDEST — appointmentId:${id} 지오펜스로 전환, 폴링 중단`);
           // lastCallTimes[key]는 여기서 안 지운다 — 이유는 위 journey_status NEARDEST 분기
           // 주석 참고(생성 직후 경쟁에서 중복 호출을 만들던 실기기 재현 버그).
           // desiredIntervals[key]는 여기서 안 지운다 — 이유는 위 journey_status NEARDEST
           // 분기 주석 참고(fallbackToPolling()에서 통일해서 지움).
           await enterNearDestGeofenceMode(key, navInfo[key]?.destLat, navInfo[key]?.destLng, navInfo[key]?.destination);
           removeActiveId(undefined, id).catch(() => {});
+        } else if (participant_status === 'DEPARTING') {
+          dlog('POLLING', `DEPARTING — appointmentId:${id} 지오펜스로 전환, 폴링 중단`);
+          await enterDepartingGeofenceMode(key, lat, lng, navInfo[key]?.destLat, navInfo[key]?.destLng);
+          removeActiveId(undefined, id).catch(() => {});
+        } else if (participant_status === 'MOVING') {
+          dlog('POLLING', `MOVING — appointmentId:${id} 폴링 유지, 보조 지오펜스 확인/등록`);
+          await enterMovingGeofenceMode(key, navInfo[key]?.destLat, navInfo[key]?.destLng);
+          remainingAppointments.push(id);
         } else {
           remainingAppointments.push(id);
         }
@@ -807,6 +839,7 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
           delete intervalSets[key];
           removeAlarmNavInfo(key).catch(() => {});
           removeActiveId(undefined, id).catch(() => {});
+          exitMovingGeofenceMode(key).catch(() => {}); // 삭제된 알람에 대한 MOVING 지오펜스 방치 방지(위 ARRIVED 분기와 동일 이유)
         } else {
           console.log(`[백그라운드] appointmentId:${id} 네트워크 오류 → 다음 주기 재시도`, e?.message);
           remainingAppointments.push(id);

@@ -808,13 +808,3 @@ export function extractApiErrorMessage(raw: string, fallback: string): string {
   } catch {}
   return fallback;
 }
-
-export async function sendAllArrivalAlarms(
-  members: { name: string; arrivalTime: string }[],
-  destination: string,
-): Promise<void> {
-  for (let i = 0; i < members.length; i++) {
-    if (i > 0) await new Promise<void>((res) => setTimeout(res, 3000));
-    await sendArrivalAlarm(members[i].name, members[i].arrivalTime, destination);
-  }
-}

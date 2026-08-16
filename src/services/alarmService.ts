@@ -28,6 +28,8 @@ import {
   isKeyActivelyTracked,
 } from '@/src/tasks/backgroundLocationTask';
 import { enterNearDestGeofenceMode, exitNearDestGeofenceMode } from '@/src/tasks/nearDestGeofenceTask';
+import { enterDepartingGeofenceMode, exitDepartingGeofenceMode } from '@/src/tasks/departingGeofenceTask';
+import { enterMovingGeofenceMode, exitMovingGeofenceMode } from '@/src/tasks/movingGeofenceTask';
 import type { KakaoMapTransportMode } from '@/src/utils/kakaoMapDeeplink';
 
 const DEFAULT_INTERVAL = 30;
@@ -90,8 +92,10 @@ class AlarmRunner {
         transportMode: target.transportMode,
         isLastMode: target.isLastMode,
       });
-      // 같은 key로 여정이 재시작될 때 이전 세션의 미처리 NEARDEST 지오펜스가 남아있을 수 있어 방어적으로 정리
+      // 같은 key로 여정이 재시작될 때 이전 세션의 미처리 NEARDEST/DEPARTING 지오펜스가 남아있을 수 있어 방어적으로 정리
       await exitNearDestGeofenceMode(navKey).catch(() => {});
+      await exitDepartingGeofenceMode(navKey).catch(() => {});
+      await exitMovingGeofenceMode(navKey).catch(() => {});
     }
     this.status = 'SCHEDULED';
     this.movingSent = false;
@@ -132,6 +136,8 @@ class AlarmRunner {
       // stop()이 불리는 모든 경로(도착확인 버튼, ARRIVED 감지, FCM auto_arrived 등)에서
       // 공통으로 지오펜스까지 정리 — 호출부마다 따로 기억할 필요 없게 여기로 통합
       exitNearDestGeofenceMode(navKey).catch(() => {});
+      exitDepartingGeofenceMode(navKey).catch(() => {});
+      exitMovingGeofenceMode(navKey).catch(() => {});
     }
     this.target = null;
     const cb = this.onFinish;
@@ -374,6 +380,12 @@ class AlarmRunner {
         // 헤드리스 배경 틱이 안 돌아서 GPS 폴링 구독이 안 멈추는 구멍을 여기서 메운다.
         await removeActiveId(this.target.journeyId, undefined);
         await maybeSyncGpsPolling();
+      } else if (journey_status === 'DEPARTING') {
+        // DEPARTING 진입 — 폴링 타이머를 재예약하지 않고 지오펜스로 감시를 넘긴다. 앵커 근사치
+        // 근거는 departingGeofenceTask.ts의 enterDepartingGeofenceMode() 주석 참고.
+        await enterDepartingGeofenceMode(this.currentKey()!, lat, lng, this.target.destLat, this.target.destLng);
+        await removeActiveId(this.target.journeyId, undefined);
+        await maybeSyncGpsPolling();
       } else {
         this.scheduleNextPoll();
       }
@@ -433,6 +445,12 @@ class AlarmRunner {
         // 헤드리스 배경 틱이 안 돌아서 GPS 폴링 구독이 안 멈추는 구멍을 여기서 메운다.
         await removeActiveId(undefined, this.target.appointmentId);
         await maybeSyncGpsPolling();
+      } else if (participant_status === 'DEPARTING') {
+        // DEPARTING 진입 — 폴링 타이머를 재예약하지 않고 지오펜스로 감시를 넘긴다.
+        // 추적 자체는 isActive와 무관하게 계속(그룹 전체 상태 계산에 필요).
+        await enterDepartingGeofenceMode(this.currentKey()!, lat, lng, this.target.destLat, this.target.destLng);
+        await removeActiveId(undefined, this.target.appointmentId);
+        await maybeSyncGpsPolling();
       } else {
         this.scheduleNextPoll();
       }
@@ -489,6 +507,9 @@ class AlarmRunner {
       if (newStatus === 'MOVING') {
         this.cancelRemainingStages();
         console.log(`[alarmService] MOVING — 단계별 알람 취소 journeyId:${this.target?.journeyId}`);
+        // 목적지 100m ENTER 보조 지오펜스 등록(Phase 2) — 폴링(실시간 ETA용)은 그대로 유지.
+        const key = this.currentKey();
+        if (key) enterMovingGeofenceMode(key, this.target?.destLat, this.target?.destLng).catch(() => {});
       }
 
       // NEARDEST 도착 확인 알림은 이제 enterNearDestGeofenceMode()(nearDestGeofenceTask.ts)가
@@ -548,6 +569,10 @@ class AlarmRunner {
           console.log(`[alarmService] MOVING — 단계별 알람 취소 appointmentId:${this.target?.appointmentId} ETA:${arrivalTime}`);
           // sendArrivalAlarm('나', arrivalTime, this.target!.destination); // FCM으로 대체
         }
+        // 목적지 100m ENTER 보조 지오펜스 등록(Phase 2) — isActive와 무관하게 추적은 계속(그룹 전체
+        // 상태 계산에 필요, NEARDEST/DEPARTING과 동일 원칙). 폴링(실시간 ETA용)은 그대로 유지.
+        const key = this.currentKey();
+        if (key) enterMovingGeofenceMode(key, this.target?.destLat, this.target?.destLng).catch(() => {});
       }
 
       // NEARDEST 도착 확인 알림은 이제 enterNearDestGeofenceMode()(nearDestGeofenceTask.ts)가

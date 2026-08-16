@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState } from 'react-native';
 import { TOKEN_KEY, NICKNAME_KEY } from '@/src/store/authStore';
 import { sendArrivalCheckAlarm, sendDebugNotification } from '@/src/utils/notifications';
+import { dlog } from '@/src/utils/deviceLogger';
 import {
   SESSION_READY_KEY,
   patchLocation,
@@ -96,7 +97,7 @@ export function enterNearDestGeofenceMode(
     }
     regions[key] = { latitude: destLat, longitude: destLng };
     await saveRegionsAndSync(regions);
-    console.log(`[NEARDEST 지오펜스] key:${key} 등록 완료 (${destLat}, ${destLng})`);
+    dlog('NEARDEST', `key:${key} 등록 완료 (${destLat.toFixed(6)}, ${destLng.toFixed(6)})`);
 
     if (!notify) return;
     const nickname = (await AsyncStorage.getItem(NICKNAME_KEY)) ?? '사용자';
@@ -194,20 +195,19 @@ TaskManager.defineTask(NEARDEST_GEOFENCE_TASK, async ({ data, error }) => {
   // patchLocation() 참고). t0 기준 단계별 경과 시간 로그는 앞으로도 지오펜스 관련 지연을
   // 진단할 때 계속 유용하므로 유지한다.
   const t0 = Date.now();
-  console.log('[NEARDEST_GEOFENCE_TASK] 발화');
   if (error) {
-    console.log('[NEARDEST_GEOFENCE_TASK] 에러:', JSON.stringify(error));
+    dlog('NEARDEST', `태스크 에러: ${JSON.stringify(error)}`);
     return;
   }
 
   const sessionReady = await AsyncStorage.getItem(SESSION_READY_KEY);
   if (sessionReady !== '1') {
-    console.log('[NEARDEST_GEOFENCE_TASK] 세션 미준비 — init() 완료 전 skip');
+    dlog('NEARDEST', '세션 미준비 — init() 완료 전 skip');
     return;
   }
 
   const { eventType, region } = (data as { eventType?: number; region?: Location.LocationRegion & { error?: string } }) ?? {};
-  console.log(`[NEARDEST_GEOFENCE_TASK] +${Date.now() - t0}ms eventType:${eventType} region:${JSON.stringify(region)}`);
+  dlog('NEARDEST', `발화 — eventType:${eventType} identifier:${region?.identifier ?? '-'}`);
 
   // GONOW_PATCH(2026-08-13): expo-location 네이티브 패치(GeofencingTaskConsumer.kt)가
   // addGeofences() 등록 실패를 이 eventType(-1)으로 알려준다 — 원래는 실패해도 조용히
@@ -216,7 +216,7 @@ TaskManager.defineTask(NEARDEST_GEOFENCE_TASK, async ({ data, error }) => {
   // 폴링으로 되돌린다.
   if (eventType === -1) {
     const errorMsg = region?.error ?? 'unknown';
-    console.log(`[NEARDEST_GEOFENCE_TASK] 지오펜스 등록 실패 감지 — ${errorMsg}`);
+    dlog('NEARDEST', `지오펜스 등록 실패 감지 — ${errorMsg}`);
     await sendDebugNotification('지오펜스 등록 실패 감지', String(errorMsg));
     const affected = await loadRegions();
     const affectedKeys = Object.keys(affected);
@@ -235,20 +235,20 @@ TaskManager.defineTask(NEARDEST_GEOFENCE_TASK, async ({ data, error }) => {
   }
 
   if (eventType !== Location.LocationGeofencingEventType.Exit || !region?.identifier) {
-    console.log('[NEARDEST_GEOFENCE_TASK] EXIT 아니거나 identifier 없음 — skip');
+    dlog('NEARDEST', 'EXIT 아니거나 identifier 없음 — skip');
     return;
   }
 
   const key = region.identifier;
   const { journeyId, appointmentId } = parseKey(key);
   if (journeyId == null && appointmentId == null) {
-    console.log(`[NEARDEST_GEOFENCE_TASK] key 파싱 실패 — key:${key}`);
+    dlog('NEARDEST', `key 파싱 실패 — key:${key}`);
     return;
   }
 
   const token = await AsyncStorage.getItem(TOKEN_KEY);
   if (!token) {
-    console.log('[NEARDEST_GEOFENCE_TASK] 토큰 없음 — skip');
+    dlog('NEARDEST', '토큰 없음 — skip');
     return;
   }
 
@@ -272,13 +272,12 @@ TaskManager.defineTask(NEARDEST_GEOFENCE_TASK, async ({ data, error }) => {
     } catch {}
   }
   if (!coords) {
-    console.log(`[NEARDEST_GEOFENCE_TASK] +${Date.now() - t0}ms 좌표 획득 실패 — key:${key} 일반 폴링으로 폴백`);
+    dlog('NEARDEST', `key:${key} +${Date.now() - t0}ms 좌표 획득 실패 — 폴백`);
     await sendDebugNotification('좌표 획득 실패 → 폴백', `key:${key}`);
     await exitNearDestGeofenceMode(key);
     await fallbackToPolling(journeyId, appointmentId);
     return;
   }
-  console.log(`[NEARDEST_GEOFENCE_TASK] +${Date.now() - t0}ms 좌표 확보 완료(${coordSource}) — /location 호출 시작`);
 
   try {
     const response = journeyId != null
@@ -287,21 +286,22 @@ TaskManager.defineTask(NEARDEST_GEOFENCE_TASK, async ({ data, error }) => {
 
     const status = journeyId != null ? response?.data?.journey_status : response?.data?.participant_status;
     const elapsed = Date.now() - t0;
-    console.log(`[NEARDEST_GEOFENCE_TASK] +${elapsed}ms /location 응답 — key:${key} status:${status} 좌표출처:${coordSource} AppState:${AppState.currentState}`);
     // 2026-08-14(사용자 요청): 알림에서 "AppState:background" 같은 raw 값 대신, 화면에서 바로
     // 읽히는 "(포그라운드)"/"(백그라운드)" 표기로 제목 옆에 붙인다.
     const appStateLabel = AppState.currentState === 'active' ? '포그라운드' : '백그라운드';
+    dlog('NEARDEST', `key:${key} +${elapsed}ms /location 응답 status:${status} (${appStateLabel}, 좌표출처:${coordSource})`);
     await sendDebugNotification(`EXIT 처리 완료 (${appStateLabel})`, `+${elapsed}ms key:${key} status:${status} 좌표출처:${coordSource === 'cache' ? '캐시' : '신규GPS'}`);
 
     await exitNearDestGeofenceMode(key);
 
     if (status === 'READY') {
+      dlog('NEARDEST', `key:${key} → READY 복귀, 폴링 재개`);
       await fallbackToPolling(journeyId, appointmentId);
     }
     // NEARDEST(고정, P>=Q)면 아무것도 안 함 — 더 이상 위치로 할 수 있는 일이 없음
     // (/arrive 수동 확인이나 서버 스케줄러의 자동 ARRIVED만 남음)
   } catch (e) {
-    console.log(`[NEARDEST_GEOFENCE_TASK] /location 호출 실패 — key:${key} 일반 폴링으로 폴백`, e);
+    dlog('NEARDEST', `key:${key} /location 호출 실패 — 폴백. 에러:${String(e)}`);
     await sendDebugNotification('/location 호출 실패 → 폴백', `key:${key} 좌표출처:${coordSource === 'cache' ? '캐시' : '신규GPS'} 에러:${String(e)}`);
     await exitNearDestGeofenceMode(key);
     await fallbackToPolling(journeyId, appointmentId);

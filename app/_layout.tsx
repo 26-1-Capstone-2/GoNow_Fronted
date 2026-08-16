@@ -8,6 +8,8 @@ import * as Notifications from 'expo-notifications';
 import { BACKGROUND_ALARM_TASK } from '@/src/tasks/backgroundAlarmTask';
 import { SESSION_READY_KEY } from '@/src/tasks/backgroundLocationTask';
 import { reconcileNearDestGeofences } from '@/src/tasks/nearDestGeofenceTask';
+import { reconcileDepartingGeofences } from '@/src/tasks/departingGeofenceTask';
+import { reconcileMovingGeofences } from '@/src/tasks/movingGeofenceTask';
 import { getToken, useAuthStore, TOKEN_KEY } from '@/src/store/authStore';
 import { useAppointmentStatusStore } from '@/src/store/appointmentStatusStore';
 import { useCalendarStore } from '@/src/store/calendarStore';
@@ -140,6 +142,8 @@ export default function RootLayout() {
             a.alarm_type === 'GROUP' ? `a_${a.appointment_id}` : `j_${a.journey_id}`
           );
           reconcileNearDestGeofences(activeKeys).catch(() => {});
+          reconcileDepartingGeofences(activeKeys).catch(() => {});
+          reconcileMovingGeofences(activeKeys).catch(() => {});
           readyItems.forEach((a) => {
             if (a.alarm_type === 'GROUP' && a.appointment_id != null) {
               if (alarmService.isRunning(undefined, a.appointment_id)) {
