@@ -1,5 +1,5 @@
 import * as Location from 'expo-location';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import type { JourneyStatus } from '@/src/api/journeys';
 import { useAppointmentStatusStore } from '@/src/store/appointmentStatusStore';
 import { getToken } from '@/src/store/authStore';
@@ -30,6 +30,8 @@ import {
 import { enterNearDestGeofenceMode, exitNearDestGeofenceMode } from '@/src/tasks/nearDestGeofenceTask';
 import { enterDepartingGeofenceMode, exitDepartingGeofenceMode } from '@/src/tasks/departingGeofenceTask';
 import { enterMovingGeofenceMode, exitMovingGeofenceMode } from '@/src/tasks/movingGeofenceTask';
+import { enterReadyGeofenceMode, exitReadyGeofenceMode } from '@/src/tasks/readyGeofenceTask';
+import { dlog } from '@/src/utils/deviceLogger';
 import type { KakaoMapTransportMode } from '@/src/utils/kakaoMapDeeplink';
 
 const DEFAULT_INTERVAL = 30;
@@ -42,6 +44,10 @@ const DEBUG_FORCE_INTERVAL_SEC: number | null = 15;
 // 시도할 수 있다 — 한쪽이 방금(이 시간 내에) 이미 호출했으면 다른 쪽은 중복으로 보고 스킵한다.
 // 정상적인 주기적 폴링 간격(최소 30초)보다 훨씬 짧게 잡아서 정상 동작과는 절대 안 겹치게 한다.
 const DUPLICATE_CALL_GUARD_MS = 5000;
+
+// stop() 직후 이 시간 안에는 startReadyAlarms()의 재조정 로직이 재시작을 시도해도 건너뛴다 —
+// 서버가 /arrive 등을 반영하는 데 걸리는 시간보다 넉넉하게 잡음(AlarmManager.wasRecentlyStopped() 참고).
+const RECENTLY_STOPPED_WINDOW_MS = 15000;
 
 interface AlarmTarget {
   alarmType: AlarmType;
@@ -78,7 +84,7 @@ class AlarmRunner {
 
   async start(target: AlarmTarget): Promise<void> {
     const id = target.journeyId ?? `apt${target.appointmentId}`;
-    console.log(`[alarmService.start] 시작 — type:${target.alarmType} id:${id} dest:${target.destination}`);
+    dlog('FOREGROUND', `[alarmService.start] 시작 — type:${target.alarmType} id:${id} dest:${target.destination}`);
     this.target = target;
     // 헤드리스(백그라운드) 경로는 /location 응답만으론 목적지 좌표를 알 수 없어서(응답에 안 실림),
     // 카카오맵 딥링크 버튼을 계속 붙이려면 여기서 미리 캐싱해둬야 함 (backgroundLocationTask.ts가 읽어감)
@@ -96,6 +102,7 @@ class AlarmRunner {
       await exitNearDestGeofenceMode(navKey).catch(() => {});
       await exitDepartingGeofenceMode(navKey).catch(() => {});
       await exitMovingGeofenceMode(navKey).catch(() => {});
+      await exitReadyGeofenceMode(navKey).catch(() => {});
     }
     this.status = 'SCHEDULED';
     this.movingSent = false;
@@ -109,10 +116,10 @@ class AlarmRunner {
 
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== 'granted') {
-      console.log(`[alarmService.start] GPS 권한 없음 — id:${id} 폴링 시작 불가`);
+      dlog('FOREGROUND', `[alarmService.start] GPS 권한 없음 — id:${id} 폴링 시작 불가`);
       return;
     }
-    console.log(`[alarmService.start] 완료 — id:${id} 폴링 시작`);
+    dlog('FOREGROUND', `[alarmService.start] 완료 — id:${id} 폴링 시작`);
     // 2026-08-14: 이 최초 호출은 스테일 타이머가 만들어낼 수 없다(막 생성된 러너라 애초에
     // pollTimer 자체가 없음) — 아래 poll()의 isKeyActivelyTracked() 방어 체크는 오히려
     // addActiveId()가 아직 저장을 못 끝냈을 때 이 최초 poll을 막아버리는 부작용만 있으므로
@@ -123,7 +130,7 @@ class AlarmRunner {
   stop(): void {
     if (this.target) {
       const id = this.target.journeyId ?? `apt${this.target.appointmentId}`;
-      console.log(`[alarmService.stop] 종료 — type:${this.target.alarmType} id:${id} 마지막상태:${this.status}`);
+      dlog('FOREGROUND', `[alarmService.stop] 종료 — type:${this.target.alarmType} id:${id} 마지막상태:${this.status}`);
     }
     if (this.pollTimer) {
       clearTimeout(this.pollTimer);
@@ -138,6 +145,7 @@ class AlarmRunner {
       exitNearDestGeofenceMode(navKey).catch(() => {});
       exitDepartingGeofenceMode(navKey).catch(() => {});
       exitMovingGeofenceMode(navKey).catch(() => {});
+      exitReadyGeofenceMode(navKey).catch(() => {});
     }
     this.target = null;
     const cb = this.onFinish;
@@ -186,8 +194,13 @@ class AlarmRunner {
   // 다르다(단순 포그라운드 복귀는 실제 상태 변화의 증거가 아니므로 경과 시간을 따짐).
   resumePolling(): void {
     if (!this.target) return;
-    console.log(`[alarmService] 지오펜스로부터 폴링 재개 — status:${this.status}`);
-    this.poll();
+    dlog('FOREGROUND', `[alarmService] 지오펜스로부터 폴링 재개 — status:${this.status}`);
+    dlog('FOREGROUND', `resumePolling — key:${this.currentKey()} status:${this.status} → poll() 즉시 실행`);
+    // skipActiveCheck=true 필수 — 이 key는 지오펜스로 넘어갈 때 이미 활성 추적 목록에서
+    // 빠져있는 상태라(removeActiveId), 기본값(false)이면 poll() 내부의 "활성 추적 대상
+    // 아님 — 낡은 타이머로 인한 호출 차단" 가드에 걸려 실제 호출이 안 나간다. start()의
+    // 최초 호출과 동일한 이유로 이 체크를 건너뛰어야 함.
+    this.poll(true);
   }
 
   // 2026-08-14(버그3/8, 재발 수정): 백그라운드 전환 시점에 AlarmManager.pauseAll()이 호출한다 —
@@ -223,28 +236,31 @@ class AlarmRunner {
     // 못 걸러진다는 게 재검토 중 드러났다. 최종 판단은 어디서나 이미 쓰는 단일 진실 공급원인
     // ACTIVE_JOURNEYS_KEY/ACTIVE_APPOINTMENTS_KEY 멤버십으로 한다 — NEARDEST 진입 시
     // removeActiveId()가 감지 주체와 무관하게 항상 일관되게 이 목록에서 빼주기 때문이다.
-    if (this.status === 'NEARDEST') return;
+    // 2026-08-17: READY/DEPARTING도 Phase 3로 지오펜싱 전환되면서 같은 이유로 추가 —
+    // 안 넣으면 지오펜스로 넘어간 뒤에도 포그라운드 복귀 때마다 불필요한 재폴링이 발생한다
+    // (실기기 테스트로 확인됨 — READY 지오펜스가 30초 간격으로 계속 재등록되는 증상).
+    if (['NEARDEST', 'READY', 'DEPARTING'].includes(this.status)) return;
     const key = this.currentKey();
     if (key && !(await isKeyActivelyTracked(key))) {
-      console.log(`[alarmService] 포그라운드 복귀 — key:${key} 활성 추적 대상 아님(NEARDEST 등) — 재폴링 스킵`);
+      dlog('FOREGROUND', `[alarmService] 포그라운드 복귀 — key:${key} 활성 추적 대상 아님(NEARDEST 등) — 재폴링 스킵`);
       return;
     }
     const lastCall = key ? await getLastCallTime(key) : 0;
     // lastCall이 0이면(호출 기록 없음 — 방금 생성된 알람) elapsed가 Date.now() 자체가 되어
     // "경과 17억초" 같은 의미 없는 로그가 찍힌다. 판단(즉시 poll)은 원래도 맞았으니 로그만 구분.
     if (lastCall === 0) {
-      console.log(`[alarmService] 포그라운드 복귀 — 호출 기록 없음, 즉시 재폴링`);
+      dlog('FOREGROUND', `[alarmService] 포그라운드 복귀 — 호출 기록 없음, 즉시 재폴링`);
       this.poll();
       return;
     }
     const elapsed = Date.now() - lastCall;
     const intervalMs = this.intervalSec * 1000;
     if (elapsed >= intervalMs) {
-      console.log(`[alarmService] 포그라운드 복귀 — 경과 ${Math.round(elapsed / 1000)}s ≥ ${this.intervalSec}s, 즉시 재폴링`);
+      dlog('FOREGROUND', `[alarmService] 포그라운드 복귀 — 경과 ${Math.round(elapsed / 1000)}s ≥ ${this.intervalSec}s, 즉시 재폴링`);
       this.poll();
     } else {
       const remainingMs = intervalMs - elapsed;
-      console.log(`[alarmService] 포그라운드 복귀 — interval 미달(경과 ${Math.round(elapsed / 1000)}s/${this.intervalSec}s), ${Math.round(remainingMs / 1000)}s 후 재시도로 예약`);
+      dlog('FOREGROUND', `[alarmService] 포그라운드 복귀 — interval 미달(경과 ${Math.round(elapsed / 1000)}s/${this.intervalSec}s), ${Math.round(remainingMs / 1000)}s 후 재시도로 예약`);
       if (this.pollTimer) clearTimeout(this.pollTimer);
       this.pollTimer = setTimeout(() => this.poll(), remainingMs);
     }
@@ -258,7 +274,8 @@ class AlarmRunner {
   // 건너뛰어도 이 체크가 막으려는 시나리오와 무관해 안전하다.
   private async poll(skipActiveCheck = false): Promise<void> {
     const idForLog = this.target?.journeyId ?? `apt${this.target?.appointmentId}`;
-    console.log(`[포그라운드] poll() 진입 — id:${idForLog} skipActiveCheck:${skipActiveCheck} AppState:${AppState.currentState} polling:${this.polling} status:${this.status}`);
+    dlog('FOREGROUND', `[포그라운드] poll() 진입 — id:${idForLog} skipActiveCheck:${skipActiveCheck} AppState:${AppState.currentState} polling:${this.polling} status:${this.status}`);
+    dlog('FOREGROUND', `poll() 진입 — id:${idForLog} skipActiveCheck:${skipActiveCheck} AppState:${AppState.currentState} polling:${this.polling} status:${this.status}`);
     if (!this.target) return;
     if (AppState.currentState !== 'active') {
       // 백그라운드에선 backgroundLocationTask.ts의 네이티브 GPS 구독이 폴링을 전담한다(버그3/8,
@@ -278,7 +295,8 @@ class AlarmRunner {
       return;
     }
     if (this.polling) {
-      console.log(`[포그라운드] poll 이미 진행 중 — skip`);
+      dlog('FOREGROUND', `[포그라운드] poll 이미 진행 중 — skip`);
+      dlog('FOREGROUND', `poll() 차단 — id:${idForLog} 이미 진행 중`);
       return;
     }
     // 2026-08-14(버그3/8, 재검토 중 실기기로 발견): resumeIfDue()가 예약한 타이머가
@@ -293,7 +311,8 @@ class AlarmRunner {
     // 단일 진실 공급원인 ACTIVE_JOURNEYS_KEY/ACTIVE_APPOINTMENTS_KEY 기준으로 판단한다.
     const activeKey = this.currentKey();
     if (!skipActiveCheck && activeKey && !(await isKeyActivelyTracked(activeKey))) {
-      console.log(`[포그라운드] poll() 방어선 — key:${activeKey} 활성 추적 대상 아님(NEARDEST 등) — 낡은 타이머로 인한 호출 차단`);
+      dlog('FOREGROUND', `[포그라운드] poll() 방어선 — key:${activeKey} 활성 추적 대상 아님(NEARDEST 등) — 낡은 타이머로 인한 호출 차단`);
+      dlog('FOREGROUND', `poll() 차단 — key:${activeKey} 활성 추적 대상 아님(지오펜스 전담 구간) — 낡은 타이머로 인한 호출 차단`);
       if (this.pollTimer) {
         clearTimeout(this.pollTimer);
         this.pollTimer = null;
@@ -314,7 +333,7 @@ class AlarmRunner {
       }
     } catch (e: any) {
       const id = this.target?.journeyId ?? `apt${this.target?.appointmentId}`;
-      console.log(`[포그라운드] GPS 위치 획득 실패 — id:${id}`, e);
+      dlog('FOREGROUND', `[포그라운드] GPS 위치 획득 실패 — id:${id} error:${e}`);
       this.scheduleNextPoll();
     } finally {
       this.polling = false;
@@ -336,17 +355,17 @@ class AlarmRunner {
       // 기본값(30초)으로 재예약해서 얼마 뒤 또 조기 호출을 만든다.
       const desired = await getDesiredInterval(key);
       if (desired != null) this.intervalSec = desired;
-      console.log(`[포그라운드] 최근 ${DUPLICATE_CALL_GUARD_MS / 1000}초 내 이미 호출됨(다른 드라이버) — 중복 스킵 journeyId:${this.target.journeyId} (다음 interval:${this.intervalSec}s)`);
+      dlog('FOREGROUND', `[포그라운드] 최근 ${DUPLICATE_CALL_GUARD_MS / 1000}초 내 이미 호출됨(다른 드라이버) — 중복 스킵 journeyId:${this.target.journeyId} (다음 interval:${this.intervalSec}s)`);
       this.scheduleNextPoll();
       return;
     }
-    console.log(`[포그라운드] /location 호출 — journeyId:${this.target.journeyId} (${lat.toFixed(5)}, ${lng.toFixed(5)}) interval:${this.intervalSec}s`);
+    dlog('FOREGROUND', `[포그라운드] /location 호출 — journeyId:${this.target.journeyId} (${lat.toFixed(5)}, ${lng.toFixed(5)}) interval:${this.intervalSec}s`);
     // 2026-08-14(버그3/8): 백그라운드 헤드리스 틱과 동일하게, 호출 시도 시점에 바로 기록한다(성공
     // 여부와 무관 — 실패해도 다음 tick에서 바로 재시도하지 않도록). AlarmManager.resumeAll()이
     // 포그라운드 복귀 시 이 값 기준으로 "경과 시간"을 계산해 불필요한 중복 호출을 막는다.
     setLastCallTime(key, Date.now()).catch(() => {});
     const token = getToken();
-    if (!token) { console.log(`[포그라운드] 토큰 없음 — journeyId:${this.target.journeyId} 호출 스킵`); this.scheduleNextPoll(); return; }
+    if (!token) { dlog('FOREGROUND', `[포그라운드] 토큰 없음 — journeyId:${this.target.journeyId} 호출 스킵`); this.scheduleNextPoll(); return; }
     try {
       // 2026-08-14(재검토 발견): 예전엔 fetch 기반 journeysApi.updateLocation()을 썼는데, 이 poll()
       // 타이머가 하필 백그라운드 전환 직전에 발동하면(실기기로 재현 — 그룹 알람 테스트 중 응답이
@@ -355,12 +374,12 @@ class AlarmRunner {
       // resolved-bugs.md 2026-08-13 참고)를 XMLHttpRequest.timeout(네이티브 레벨 타임아웃)으로
       // 해결한 검증된 경로라 — 포그라운드 경로도 여기에 통일해서 같은 보호를 받게 한다.
       const res = await patchLocation(`/api/journeys/${this.target.journeyId}/location`, token, lat, lng);
-      if (!res.data) { console.log(`[포그라운드] /location 응답 data 없음 — journeyId:${this.target.journeyId}`); return; }
+      if (!res.data) { dlog('FOREGROUND', `[포그라운드] /location 응답 data 없음 — journeyId:${this.target.journeyId}`); return; }
       const { journey_status, preparation_time, interval, which_station, departure_alarm_time } = res.data;
-      console.log(`[포그라운드] /location 응답 — journeyId:${this.target.journeyId} status:${journey_status} interval:${interval} which_station:${which_station} departure_alarm_time:${departure_alarm_time}`);
+      dlog('FOREGROUND', `[포그라운드] /location 응답 — journeyId:${this.target.journeyId} status:${journey_status} interval:${interval} which_station:${which_station} departure_alarm_time:${departure_alarm_time}`);
       if (interval !== null) {
         const effectiveInterval = DEBUG_FORCE_INTERVAL_SEC ?? interval;
-        console.log(`[포그라운드] interval 갱신 — journeyId:${this.target!.journeyId} ${this.intervalSec}s → ${effectiveInterval}s${DEBUG_FORCE_INTERVAL_SEC != null ? `(서버값 ${interval}s 무시, 테스트 강제)` : ''}`);
+        dlog('FOREGROUND', `[포그라운드] interval 갱신 — journeyId:${this.target!.journeyId} ${this.intervalSec}s → ${effectiveInterval}s${DEBUG_FORCE_INTERVAL_SEC != null ? `(서버값 ${interval}s 무시, 테스트 강제)` : ''}`);
         this.intervalSec = effectiveInterval;
         const key = `j_${this.target!.journeyId}`;
         setDesiredInterval(key, effectiveInterval).catch(() => {});
@@ -370,9 +389,14 @@ class AlarmRunner {
       // 2026-08-14(사용자 요청): 서버가 실제로 준 값도 함께 보여준다(interval: 서버값 →
       // 적용값초) — DEBUG_FORCE_INTERVAL_SEC로 강제 중일 때 서버 원본값을 가리지 않기 위함.
       sendDebugNotification('GPS 호출 완료(포그라운드)', `journeyId:${this.target!.journeyId} status:${journey_status} interval: ${interval != null ? interval : '유지'} → ${this.intervalSec}초`).catch(() => {});
+      dlog('FOREGROUND', `journeyId:${this.target!.journeyId} /location 응답 status:${journey_status}`);
       if (!this.target) return;
-      if (journey_status === 'NEARDEST') {
+      if (journey_status === 'NEARDEST' && Platform.OS === 'android') {
         // NEARDEST 진입 — 폴링 타이머를 재예약하지 않고 지오펜스로 감시를 넘긴다(개인/귀가는 isActive 무관하게 항상 알림)
+        // 안드로이드 전용(iOS는 지오펜싱 불가라 기존 폴링 유지 — READY 분기와 동일 이유)
+        // READY 지오펜스가 등록돼 있었을 수 있다(예: departing_transition FCM으로 러너를 재개시켰는데
+        // 그 사이 목적지 100m 이내까지 들어온 경우) — 방치하면 READY/NEARDEST 지오펜스가 동시에 남는다.
+        await exitReadyGeofenceMode(this.currentKey()!).catch(() => {});
         await enterNearDestGeofenceMode(this.currentKey()!, this.target.destLat, this.target.destLng, this.target.destination);
         // 더 이상 /location 폴링이 필요 없으므로 배경 위치추적 태스크의 추적 목록에서도 제거
         // (안 빼면 나중에 백그라운드 전환 시 이 알람 때문에 불필요한 호출/FGS 지연 종료가 생김)
@@ -380,12 +404,30 @@ class AlarmRunner {
         // 헤드리스 배경 틱이 안 돌아서 GPS 폴링 구독이 안 멈추는 구멍을 여기서 메운다.
         await removeActiveId(this.target.journeyId, undefined);
         await maybeSyncGpsPolling();
-      } else if (journey_status === 'DEPARTING') {
+        dlog('NEARDEST', `key:${this.currentKey()} 포그라운드 폴링에서 지오펜스로 전환 완료`);
+      } else if (journey_status === 'DEPARTING' && Platform.OS === 'android') {
         // DEPARTING 진입 — 폴링 타이머를 재예약하지 않고 지오펜스로 감시를 넘긴다. 앵커 근사치
         // 근거는 departingGeofenceTask.ts의 enterDepartingGeofenceMode() 주석 참고.
+        // 안드로이드 전용(iOS는 지오펜싱 불가라 기존 폴링 유지 — READY 분기와 동일 이유)
+        // READY 지오펜스 정리 이유는 위 NEARDEST 분기와 동일 — departing_transition FCM으로
+        // 재개된 러너가 여기로 올 수 있는데, 그때 READY 지오펜스가 아직 안 지워져 있음.
+        await exitReadyGeofenceMode(this.currentKey()!).catch(() => {});
         await enterDepartingGeofenceMode(this.currentKey()!, lat, lng, this.target.destLat, this.target.destLng);
         await removeActiveId(this.target.journeyId, undefined);
         await maybeSyncGpsPolling();
+        dlog('DEPARTING', `key:${this.currentKey()} 포그라운드 폴링에서 지오펜스로 전환 완료 — 앵커(${lat.toFixed(6)}, ${lng.toFixed(6)})`);
+      } else if (journey_status === 'READY' && Platform.OS === 'android') {
+        // READY — 지오펜싱으로 감시 이관(Phase 3, 안드로이드 전용 — iOS는 지오펜싱 불가라
+        // 기존 폴링 유지). 방금 실제로 GPS를 찍은 좌표라 근사치 오차 없이 정확한 앵커로 등록됨.
+        await enterReadyGeofenceMode(this.currentKey()!, lat, lng, this.target.destLat, this.target.destLng);
+        await removeActiveId(this.target.journeyId, undefined);
+        await maybeSyncGpsPolling();
+        dlog('READY', `key:${this.currentKey()} 포그라운드 폴링에서 지오펜스로 전환 완료 — 앵커(${lat.toFixed(6)}, ${lng.toFixed(6)})`);
+        // handlePersonalStatus()의 READY 분기는 "이전 상태가 READY가 아니었으면 즉시 재poll"하는
+        // 로직이 있다(iOS의 연속 폴링 체인을 잇기 위한 것) — 방금 지오펜스로 넘겼는데 이게 또
+        // 실제 GPS+서버 호출을 한 번 더 만들면 지오펜싱 전환의 의미가 없어진다. this.status를
+        // 미리 맞춰서 그 트리거만 건너뛰게 한다(departureAlarmTime 있으면 여전히 syncStages는 됨).
+        this.status = 'READY';
       } else {
         this.scheduleNextPoll();
       }
@@ -393,10 +435,10 @@ class AlarmRunner {
     } catch (e: any) {
       const msg = e?.message ?? String(e);
       if (msg.includes('"success":false') || msg.startsWith('HTTP 4')) {
-        console.log(`[포그라운드] /location 서버 오류 — journeyId:${this.target?.journeyId} 폴링 중단`);
+        dlog('FOREGROUND', `[포그라운드] /location 서버 오류 — journeyId:${this.target?.journeyId} 폴링 중단`);
         this.stop();
       } else {
-        console.log(`[포그라운드] /location 호출 실패 — journeyId:${this.target?.journeyId}`, e);
+        dlog('FOREGROUND', `[포그라운드] /location 호출 실패 — journeyId:${this.target?.journeyId} error:${e}`);
         this.scheduleNextPoll();
       }
     }
@@ -410,47 +452,66 @@ class AlarmRunner {
     if (recentCall > 0 && Date.now() - recentCall < DUPLICATE_CALL_GUARD_MS) {
       const desired = await getDesiredInterval(key);
       if (desired != null) this.intervalSec = desired;
-      console.log(`[포그라운드] 최근 ${DUPLICATE_CALL_GUARD_MS / 1000}초 내 이미 호출됨(다른 드라이버) — 중복 스킵 appointmentId:${this.target.appointmentId} (다음 interval:${this.intervalSec}s)`);
+      dlog('FOREGROUND', `[포그라운드] 최근 ${DUPLICATE_CALL_GUARD_MS / 1000}초 내 이미 호출됨(다른 드라이버) — 중복 스킵 appointmentId:${this.target.appointmentId} (다음 interval:${this.intervalSec}s)`);
       this.scheduleNextPoll();
       return;
     }
-    console.log(`[포그라운드] /location 호출 — appointmentId:${this.target.appointmentId} (${lat.toFixed(5)}, ${lng.toFixed(5)}) interval:${this.intervalSec}s`);
+    dlog('FOREGROUND', `[포그라운드] /location 호출 — appointmentId:${this.target.appointmentId} (${lat.toFixed(5)}, ${lng.toFixed(5)}) interval:${this.intervalSec}s`);
     // 2026-08-14(버그3/8): pollPersonal과 동일 — 호출 시도 시점에 바로 기록(성공 여부 무관).
     setLastCallTime(key, Date.now()).catch(() => {});
     const token = getToken();
-    if (!token) { console.log(`[포그라운드] 토큰 없음 — appointmentId:${this.target.appointmentId} 호출 스킵`); this.scheduleNextPoll(); return; }
+    if (!token) { dlog('FOREGROUND', `[포그라운드] 토큰 없음 — appointmentId:${this.target.appointmentId} 호출 스킵`); this.scheduleNextPoll(); return; }
     try {
       // 2026-08-14(재검토 발견): pollPersonal과 동일 — fetch 기반 대신 네이티브 레벨 타임아웃을
       // 쓰는 patchLocation()으로 통일(위 pollPersonal의 상세 주석 참고).
       const res = await patchLocation(`/api/appointments/${this.target.appointmentId}/participants/location`, token, lat, lng);
-      if (!res.data) { console.log(`[포그라운드] /location 응답 data 없음 — appointmentId:${this.target.appointmentId}`); return; }
+      if (!res.data) { dlog('FOREGROUND', `[포그라운드] /location 응답 data 없음 — appointmentId:${this.target.appointmentId}`); return; }
       const { participant_status, appointment_status, estimated_arrival, preparation_time, interval, which_station, departure_alarm_time } = res.data;
-      console.log(`[포그라운드] /location 응답 — appointmentId:${this.target.appointmentId} participantStatus:${participant_status} appointmentStatus:${appointment_status} interval:${interval} which_station:${which_station} departure_alarm_time:${departure_alarm_time}`);
+      dlog('FOREGROUND', `[포그라운드] /location 응답 — appointmentId:${this.target.appointmentId} participantStatus:${participant_status} appointmentStatus:${appointment_status} interval:${interval} which_station:${which_station} departure_alarm_time:${departure_alarm_time}`);
       useAppointmentStatusStore.getState().setStatus(this.target.appointmentId, appointment_status);
       if (interval !== null) {
         const effectiveInterval = DEBUG_FORCE_INTERVAL_SEC ?? interval;
-        console.log(`[포그라운드] interval 갱신 — appointmentId:${this.target!.appointmentId} ${this.intervalSec}s → ${effectiveInterval}s${DEBUG_FORCE_INTERVAL_SEC != null ? `(서버값 ${interval}s 무시, 테스트 강제)` : ''}`);
+        dlog('FOREGROUND', `[포그라운드] interval 갱신 — appointmentId:${this.target!.appointmentId} ${this.intervalSec}s → ${effectiveInterval}s${DEBUG_FORCE_INTERVAL_SEC != null ? `(서버값 ${interval}s 무시, 테스트 강제)` : ''}`);
         this.intervalSec = effectiveInterval;
         const key = `a_${this.target!.appointmentId}`;
         setDesiredInterval(key, effectiveInterval).catch(() => {});
       }
       sendDebugNotification('GPS 호출 완료(포그라운드)', `appointmentId:${this.target!.appointmentId} status:${participant_status} interval: ${interval != null ? interval : '유지'} → ${this.intervalSec}초`).catch(() => {});
+      dlog('FOREGROUND', `appointmentId:${this.target!.appointmentId} /location 응답 status:${participant_status}`);
       if (!this.target) return;
-      if (participant_status === 'NEARDEST') {
+      if (participant_status === 'NEARDEST' && Platform.OS === 'android') {
         // NEARDEST 진입 — 폴링 타이머를 재예약하지 않고 지오펜스로 감시를 넘긴다.
         // 추적 자체는 isActive와 무관하게 계속하되(그룹 전체 상태 계산에 필요), 알림만 isActive를 따름
+        // 안드로이드 전용(iOS는 지오펜싱 불가라 기존 폴링 유지 — READY 분기와 동일 이유)
+        // READY 지오펜스 정리 이유는 pollPersonal의 동일 분기 주석 참고(departing_transition FCM으로
+        // 재개된 러너가 여기로 올 수 있음).
+        await exitReadyGeofenceMode(this.currentKey()!).catch(() => {});
         await enterNearDestGeofenceMode(this.currentKey()!, this.target.destLat, this.target.destLng, this.target.destination, this.isActive);
         // 더 이상 /location 폴링이 필요 없으므로 배경 위치추적 태스크의 추적 목록에서도 제거
         // await로 순서 보장 후 maybeSyncGpsPolling() 호출 — 앱이 계속 포그라운드에 머물면
         // 헤드리스 배경 틱이 안 돌아서 GPS 폴링 구독이 안 멈추는 구멍을 여기서 메운다.
         await removeActiveId(undefined, this.target.appointmentId);
         await maybeSyncGpsPolling();
-      } else if (participant_status === 'DEPARTING') {
+        dlog('NEARDEST', `key:${this.currentKey()} 포그라운드 폴링에서 지오펜스로 전환 완료`);
+      } else if (participant_status === 'DEPARTING' && Platform.OS === 'android') {
         // DEPARTING 진입 — 폴링 타이머를 재예약하지 않고 지오펜스로 감시를 넘긴다.
         // 추적 자체는 isActive와 무관하게 계속(그룹 전체 상태 계산에 필요).
+        // 안드로이드 전용(iOS는 지오펜싱 불가라 기존 폴링 유지 — READY 분기와 동일 이유)
+        await exitReadyGeofenceMode(this.currentKey()!).catch(() => {});
         await enterDepartingGeofenceMode(this.currentKey()!, lat, lng, this.target.destLat, this.target.destLng);
         await removeActiveId(undefined, this.target.appointmentId);
         await maybeSyncGpsPolling();
+        dlog('DEPARTING', `key:${this.currentKey()} 포그라운드 폴링에서 지오펜스로 전환 완료 — 앵커(${lat.toFixed(6)}, ${lng.toFixed(6)})`);
+      } else if (participant_status === 'READY' && Platform.OS === 'android') {
+        // READY — 지오펜싱으로 감시 이관(Phase 3, 안드로이드 전용). 추적 자체는 isActive와
+        // 무관하게 계속(그룹 전체 상태 계산에 필요).
+        await enterReadyGeofenceMode(this.currentKey()!, lat, lng, this.target.destLat, this.target.destLng);
+        await removeActiveId(undefined, this.target.appointmentId);
+        await maybeSyncGpsPolling();
+        dlog('READY', `key:${this.currentKey()} 포그라운드 폴링에서 지오펜스로 전환 완료 — 앵커(${lat.toFixed(6)}, ${lng.toFixed(6)})`);
+        // handleGroupStatus()의 READY 재poll 트리거를 건너뛰기 위함 — 위 handlePersonalStatus
+        // 분기의 동일한 주석 참고.
+        this.status = 'READY';
       } else {
         this.scheduleNextPoll();
       }
@@ -458,10 +519,10 @@ class AlarmRunner {
     } catch (e: any) {
       const msg = e?.message ?? String(e);
       if (msg.includes('"success":false') || msg.startsWith('HTTP 4')) {
-        console.log(`[포그라운드] /location 서버 오류 — appointmentId:${this.target?.appointmentId} 폴링 중단`);
+        dlog('FOREGROUND', `[포그라운드] /location 서버 오류 — appointmentId:${this.target?.appointmentId} 폴링 중단`);
         this.stop();
       } else {
-        console.log(`[포그라운드] /location 호출 실패 — appointmentId:${this.target?.appointmentId}`, e);
+        dlog('FOREGROUND', `[포그라운드] /location 호출 실패 — appointmentId:${this.target?.appointmentId} error:${e}`);
         this.scheduleNextPoll();
       }
     }
@@ -470,7 +531,7 @@ class AlarmRunner {
   private async handlePersonalStatus(newStatus: JourneyStatus, preparationTime: number, interval: number | null, whichStation?: string | null, departureAlarmTime?: string | null): Promise<void> {
     if (newStatus === 'READY') {
       if (this.status !== 'READY') {
-        console.log(`[alarmService] 상태전이 ${this.status} → READY — journeyId:${this.target?.journeyId}`);
+        dlog('FOREGROUND', `[alarmService] 상태전이 ${this.status} → READY — journeyId:${this.target?.journeyId}`);
         this.status = newStatus;
         this.poll();
       }
@@ -482,7 +543,7 @@ class AlarmRunner {
     }
 
     if (newStatus === 'SCHEDULED' && this.status !== 'SCHEDULED') {
-      console.log(`[alarmService] 서버 응답 SCHEDULED — journeyId:${this.target?.journeyId} 폴링 중단`);
+      dlog('FOREGROUND', `[alarmService] 서버 응답 SCHEDULED — journeyId:${this.target?.journeyId} 폴링 중단`);
       this.stop();
       return;
     }
@@ -501,12 +562,12 @@ class AlarmRunner {
     }
 
     if (newStatus !== this.status) {
-      console.log(`[alarmService] 상태전이 ${this.status} → ${newStatus} — journeyId:${this.target?.journeyId}`);
+      dlog('FOREGROUND', `[alarmService] 상태전이 ${this.status} → ${newStatus} — journeyId:${this.target?.journeyId}`);
       this.status = newStatus;
 
       if (newStatus === 'MOVING') {
         this.cancelRemainingStages();
-        console.log(`[alarmService] MOVING — 단계별 알람 취소 journeyId:${this.target?.journeyId}`);
+        dlog('FOREGROUND', `[alarmService] MOVING — 단계별 알람 취소 journeyId:${this.target?.journeyId}`);
         // 목적지 100m ENTER 보조 지오펜스 등록(Phase 2) — 폴링(실시간 ETA용)은 그대로 유지.
         const key = this.currentKey();
         if (key) enterMovingGeofenceMode(key, this.target?.destLat, this.target?.destLng).catch(() => {});
@@ -517,7 +578,7 @@ class AlarmRunner {
 
       if (newStatus === 'ARRIVED') {
         this.cancelRemainingStages();
-        console.log(`[alarmService] ARRIVED → 폴링 종료 — journeyId:${this.target?.journeyId}`);
+        dlog('FOREGROUND', `[alarmService] ARRIVED → 폴링 종료 — journeyId:${this.target?.journeyId}`);
         this.stop();
       }
     }
@@ -526,7 +587,7 @@ class AlarmRunner {
   private async handleGroupStatus(newStatus: JourneyStatus, preparationTime: number, estimatedArrival: string, interval: number | null, whichStation?: string | null, departureAlarmTime?: string | null): Promise<void> {
     if (newStatus === 'READY') {
       if (this.status !== 'READY') {
-        console.log(`[alarmService] 상태전이 ${this.status} → READY — appointmentId:${this.target?.appointmentId}`);
+        dlog('FOREGROUND', `[alarmService] 상태전이 ${this.status} → READY — appointmentId:${this.target?.appointmentId}`);
         this.status = newStatus;
         this.poll();
       }
@@ -538,7 +599,7 @@ class AlarmRunner {
     }
 
     if (newStatus === 'SCHEDULED' && this.status !== 'SCHEDULED') {
-      console.log(`[alarmService] 서버 응답 SCHEDULED — appointmentId:${this.target?.appointmentId} 폴링 중단`);
+      dlog('FOREGROUND', `[alarmService] 서버 응답 SCHEDULED — appointmentId:${this.target?.appointmentId} 폴링 중단`);
       this.stop();
       return;
     }
@@ -558,7 +619,7 @@ class AlarmRunner {
     }
 
     if (newStatus !== this.status) {
-      console.log(`[alarmService] 상태전이 ${this.status} → ${newStatus} — appointmentId:${this.target?.appointmentId}`);
+      dlog('FOREGROUND', `[alarmService] 상태전이 ${this.status} → ${newStatus} — appointmentId:${this.target?.appointmentId}`);
       this.status = newStatus;
 
       if (newStatus === 'MOVING' && !this.movingSent) {
@@ -566,7 +627,7 @@ class AlarmRunner {
         this.cancelRemainingStages();
         if (this.isActive) {
           const arrivalTime = formatEstimatedArrival(estimatedArrival);
-          console.log(`[alarmService] MOVING — 단계별 알람 취소 appointmentId:${this.target?.appointmentId} ETA:${arrivalTime}`);
+          dlog('FOREGROUND', `[alarmService] MOVING — 단계별 알람 취소 appointmentId:${this.target?.appointmentId} ETA:${arrivalTime}`);
           // sendArrivalAlarm('나', arrivalTime, this.target!.destination); // FCM으로 대체
         }
         // 목적지 100m ENTER 보조 지오펜스 등록(Phase 2) — isActive와 무관하게 추적은 계속(그룹 전체
@@ -583,7 +644,7 @@ class AlarmRunner {
         this.cancelRemainingStages();
         if (this.isActive) {
           const arrivalTime = formatEstimatedArrival(estimatedArrival);
-          console.log(`[alarmService] ARRIVED — 도착완료 appointmentId:${this.target?.appointmentId} time:${arrivalTime}`);
+          dlog('FOREGROUND', `[alarmService] ARRIVED — 도착완료 appointmentId:${this.target?.appointmentId} time:${arrivalTime}`);
           // sendArrivalConfirmAlarm('나', arrivalTime, this.target!.destination); // FCM으로 대체
         }
         this.stop();
@@ -596,6 +657,11 @@ class AlarmRunner {
 class AlarmManager {
   private runners = new Map<string, AlarmRunner>();
   private starting = new Set<string>();
+  // stop() 직후 짧은 시간 안에 _layout.tsx의 startReadyAlarms()(포그라운드 복귀 시 서버 재조회 →
+  // "안 돌고 있는데 아직 활성 상태면 재시작") 재조정 로직과 경쟁하는 문제 방지용(2026-08-17
+  // 실기기로 발견 — 도착확인 시 /arrive가 서버에 반영되기 전에 getAlarms()가 옛 상태(NEARDEST)를
+  // 그대로 읽어와서 방금 끝낸 알람을 도로 살려버림). key별 마지막 stop() 시각만 기록.
+  private recentlyStoppedAt = new Map<string, number>();
 
   private key(journeyId?: number, appointmentId?: number): string {
     return journeyId != null ? `j_${journeyId}` : `a_${appointmentId}`;
@@ -603,16 +669,16 @@ class AlarmManager {
 
   async start(target: AlarmTarget): Promise<void> {
     const k = this.key(target.journeyId, target.appointmentId);
-    console.log(`[AlarmManager.start] 진입 — key:${k} type:${target.alarmType}`);
+    dlog('FOREGROUND', `[AlarmManager.start] 진입 — key:${k} type:${target.alarmType}`);
     if (this.starting.has(k)) {
-      console.log(`[AlarmManager.start] 이미 시작 중 — key:${k} skip`);
+      dlog('FOREGROUND', `[AlarmManager.start] 이미 시작 중 — key:${k} skip`);
       return;
     }
     this.starting.add(k);
     try {
       let effectiveTarget = target;
       if (this.runners.has(k)) {
-        console.log(`[AlarmManager.start] 기존 runner 교체 — key:${k}`);
+        dlog('FOREGROUND', `[AlarmManager.start] 기존 runner 교체 — key:${k}`);
         const old = this.runners.get(k)!;
         // isActive를 명시하지 않은 호출(방장 수정 FCM 등)이 이미 돌고 있는 runner를 갈아치울 땐
         // 기존 isActive(참가자 개인 알람 스위치)를 그대로 이어받음 — 안 그러면 꺼둔 알람이 재시작 때마다 강제로 켜짐
@@ -626,7 +692,7 @@ class AlarmManager {
       const runner = new AlarmRunner();
       runner.setOnFinish(() => {
         this.runners.delete(k);
-        console.log(`[AlarmManager] runner 제거 — key:${k} 남은 runners:${this.runners.size}`);
+        dlog('FOREGROUND', `[AlarmManager] runner 제거 — key:${k} 남은 runners:${this.runners.size}`);
         // removeActiveId()가 AsyncStorage에 반영된 뒤에 폴링 필요 여부를 재판단해야 하므로
         // await로 순서를 보장한다(2026-08-13 발견 — 예전엔 fire-and-forget이라, 남은 runner가
         // 있어도 그게 전부 NEARDEST(지오펜스 감시)뿐이면 GPS 폴링은 필요 없는 경우를 놓쳐서
@@ -636,11 +702,13 @@ class AlarmManager {
           if (!this.hasActivePolling()) {
             // 남은 알람이 하나도 없을 때만 FGS까지 끈다(hasActivePolling()이 지금은
             // runners.size > 0과 동일하지만, 판단 기준을 한 곳에 모아두기 위해 그대로 재사용)
-            console.log('[AlarmManager] 남은 알람 없음 → stopBackgroundLocationUpdates');
+            dlog('FOREGROUND', '[AlarmManager] 남은 알람 없음 → stopBackgroundLocationUpdates');
+            dlog('FOREGROUND', `key:${k} onFinish — runners:0(남은 알람 없음) → FGS 종료 시도`);
             await stopBackgroundLocationUpdates();
           } else {
             // 남은 runner가 있어도 전부 NEARDEST뿐이면 GPS 폴링은 이제 필요 없을 수 있음 —
             // ACTIVE_JOURNEYS_KEY/ACTIVE_APPOINTMENTS_KEY 기준으로 다시 확인(FGS는 안 건드림)
+            dlog('FOREGROUND', `key:${k} onFinish — runners:${this.runners.size}(남은 알람 있음) → FGS 유지, GPS 폴링만 재확인`);
             await maybeSyncGpsPolling();
           }
         })().catch(() => {});
@@ -660,11 +728,11 @@ class AlarmManager {
       // skipActiveCheck 인자 참고)에서 다른 방식으로 막는다 — 최초 poll() 호출 자체가 이
       // 체크를 건너뛰므로 addActiveId()가 끝나길 기다릴 필요가 없어졌다.
       addActiveId(effectiveTarget.journeyId, effectiveTarget.appointmentId)
-        .then(() => console.log(`[AlarmManager.start] addActiveId 완료 — key:${k}`))
-        .catch((e) => console.log(`[AlarmManager.start] addActiveId 실패 — key:${k}`, e));
-      console.log(`[AlarmManager.start] runners 등록 — key:${k} 총:${this.runners.size}개`);
+        .then(() => dlog('FOREGROUND', `[AlarmManager.start] addActiveId 완료 — key:${k}`))
+        .catch((e) => dlog('FOREGROUND', `[AlarmManager.start] addActiveId 실패 — key:${k} error:${e}`));
+      dlog('FOREGROUND', `[AlarmManager.start] runners 등록 — key:${k} 총:${this.runners.size}개`);
       await runner.start(effectiveTarget);
-      console.log(`[AlarmManager.start] runner.start() 완료 — key:${k}`);
+      dlog('FOREGROUND', `[AlarmManager.start] runner.start() 완료 — key:${k}`);
       // 2026-08-14(버그3/8, 재발 수정): PersonalAlarmSheet 등 대부분의 호출부가 start() 이후
       // syncForegroundService()를 따로 부르지 않는다 — 그래서 이전 세션에서 남아있던 네이티브
       // 백그라운드 GPS 구독(기본 30초)이 있으면, 방금 포그라운드에서 새로 생성한 알람의
@@ -679,13 +747,38 @@ class AlarmManager {
 
   stop(journeyId?: number, appointmentId?: number): void {
     const k = this.key(journeyId, appointmentId);
-    console.log(`[AlarmManager.stop] 요청 — key:${k} 현재runners:${this.runners.size}`);
+    dlog('FOREGROUND', `[AlarmManager.stop] 요청 — key:${k} 현재runners:${this.runners.size}`);
     // runner.stop()이 내부적으로 onFinish를 호출하고, 거기서 이미 hasActivePolling() 기준으로
     // FGS 필요 여부를 재점검한다 — 여기서 같은 체크를 또 하면 stopBackgroundLocationUpdates가
     // 중복 호출된다(실기기에서 실제로 관측됨). runner가 없는 키면 onFinish 자체가 안 불리니
     // 애초에 재점검할 것도 없다.
     this.runners.get(k)?.stop();
     this.runners.delete(k);
+    this.recentlyStoppedAt.set(k, Date.now());
+    setTimeout(() => this.recentlyStoppedAt.delete(k), RECENTLY_STOPPED_WINDOW_MS);
+  }
+
+  // _layout.tsx의 startReadyAlarms()가 재시작 여부를 판단하기 직전에 호출 — 방금(수 초 이내)
+  // stop()된 key라면, 서버가 아직 옛 상태(NEARDEST 등)를 돌려주고 있을 뿐이라고 보고 재시작을
+  // 건너뛰게 한다.
+  wasRecentlyStopped(journeyId?: number, appointmentId?: number): boolean {
+    const k = this.key(journeyId, appointmentId);
+    return this.recentlyStoppedAt.has(k);
+  }
+
+  // 백그라운드 도착확인(notifications.ts)이 alarmService.stop()을 안 부르는 대신(헤드리스
+  // 컨텍스트 안전성 때문, 해당 파일 주석 참고) — 프로세스가 살아있어서(스와이프만 한 경우 등)
+  // 러너가 메모리에 좀비로 남을 수 있다. FGS/서버 상태는 이미 그쪽에서 별도로 정리했으므로,
+  // 여기서는 onFinish(FGS 재확인 등) 콜백을 억제하고 순수하게 메모리에서만 지운다 — 진짜
+  // 헤드리스(프로세스 자체가 없음)에서 호출되면 runners가 애초에 비어있어 조용히 no-op.
+  forgetIfExists(journeyId?: number, appointmentId?: number): void {
+    const k = this.key(journeyId, appointmentId);
+    const runner = this.runners.get(k);
+    if (!runner) return;
+    runner.setOnFinish(() => {});
+    runner.stop();
+    this.runners.delete(k);
+    dlog('FOREGROUND', `[AlarmManager.forgetIfExists] 좀비 러너 정리 — key:${k}`);
   }
 
   // NEARDEST 지오펜스 EXIT 처리(nearDestGeofenceTask.ts) 후 READY로 복귀했을 때, 살아있는
@@ -694,8 +787,9 @@ class AlarmManager {
   resumeFromGeofence(journeyId?: number, appointmentId?: number): void {
     const k = this.key(journeyId, appointmentId);
     const runner = this.runners.get(k);
+    dlog('FOREGROUND', `resumeFromGeofence 호출 — key:${k} runner:${runner ? '있음' : '없음(polling 재개 불가)'}`);
     if (!runner) {
-      console.log(`[AlarmManager.resumeFromGeofence] runner 없음 — key:${k}`);
+      dlog('FOREGROUND', `[AlarmManager.resumeFromGeofence] runner 없음 — key:${k}`);
       return;
     }
     runner.resumePolling();
@@ -707,7 +801,7 @@ class AlarmManager {
   // 종료 상황에선 "남은 알람이 있는지" 재확인 자체가 무의미하므로, onFinish를 개별적으로 태우지
   // 않고 여기서 한 번만 정리한다.
   async stopAll(): Promise<void> {
-    console.log(`[AlarmManager.stopAll] 전체 종료 — runners:${this.runners.size}개`);
+    dlog('FOREGROUND', `[AlarmManager.stopAll] 전체 종료 — runners:${this.runners.size}개`);
     this.runners.forEach((r) => {
       r.setOnFinish(() => {});
       r.stop();
@@ -724,14 +818,14 @@ class AlarmManager {
   // runner에 resumeIfDue()(경과 시간 기준 재확인 — 무조건 즉시 poll하는 resumePolling()과
   // 다름, 위 AlarmRunner.resumeIfDue() 주석 참고)를 호출해 최신 상태/interval을 이어받는다.
   resumeAll(): void {
-    console.log(`[AlarmManager.resumeAll] 포그라운드 복귀 — runners:${this.runners.size}개 재확인`);
+    dlog('FOREGROUND', `[AlarmManager.resumeAll] 포그라운드 복귀 — runners:${this.runners.size}개 재확인`);
     this.runners.forEach((r) => r.resumeIfDue().catch(() => {}));
   }
 
   // 2026-08-14(버그3/8, 재발 수정): 백그라운드 전환 시점에 _layout.tsx가 호출 — 모든 runner의
   // pollTimer를 능동적으로 정리한다(AlarmRunner.pauseTimer() 주석 참고). resumeAll()과 대칭.
   pauseAll(): void {
-    console.log(`[AlarmManager.pauseAll] 백그라운드 전환 — runners:${this.runners.size}개 타이머 정리`);
+    dlog('FOREGROUND', `[AlarmManager.pauseAll] 백그라운드 전환 — runners:${this.runners.size}개 타이머 정리`);
     this.runners.forEach((r) => r.pauseTimer());
   }
 

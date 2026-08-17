@@ -39,6 +39,22 @@ function withRegionLock(fn: () => Promise<void>): Promise<void> {
   return run;
 }
 
+// departingGeofenceTask.ts에서 실기기로 확인된 동시성 버그(OS가 같은 EXIT 이벤트를 중복 전달하면
+// 각자 독립적으로 GPS+서버 호출) 방지 패턴을 여기도 적용(2026-08-17) — withRegionLock은
+// AsyncStorage 쓰기만 직렬화할 뿐 GPS/서버 호출까지는 못 막으므로, key 단위로 별도 락을 둬서
+// 같은 key의 두 번째 이후 호출은 GPS/서버 호출 자체를 아예 안 하게 막는다.
+const keyLockQueues: Record<string, Promise<void>> = {};
+function withKeyLock(key: string, fn: () => Promise<void>): Promise<void> {
+  const prior = keyLockQueues[key] ?? Promise.resolve();
+  const run = prior.then(fn, fn);
+  const settled = run.catch(() => {});
+  keyLockQueues[key] = settled;
+  settled.then(() => {
+    if (keyLockQueues[key] === settled) delete keyLockQueues[key];
+  });
+  return run;
+}
+
 async function loadRegions(): Promise<Record<string, { latitude: number; longitude: number }>> {
   try {
     const raw = await AsyncStorage.getItem(NEARDEST_GEOFENCE_REGIONS_KEY);
@@ -87,12 +103,12 @@ export function enterNearDestGeofenceMode(
 ): Promise<void> {
   return withRegionLock(async () => {
     if (destLat == null || destLng == null) {
-      console.log(`[NEARDEST 지오펜스] key:${key} 목적지 좌표 없음 — 등록 스킵`);
+      dlog('NEARDEST', `[NEARDEST 지오펜스] key:${key} 목적지 좌표 없음 — 등록 스킵`);
       return;
     }
     const regions = await loadRegions();
     if (regions[key]) {
-      console.log(`[NEARDEST 지오펜스] key:${key} 이미 등록됨 — skip`);
+      dlog('NEARDEST', `[NEARDEST 지오펜스] key:${key} 이미 등록됨 — skip`);
       return;
     }
     regions[key] = { latitude: destLat, longitude: destLng };
@@ -114,7 +130,7 @@ export function exitNearDestGeofenceMode(key: string): Promise<void> {
     if (!(key in regions)) return;
     delete regions[key];
     await saveRegionsAndSync(regions);
-    console.log(`[NEARDEST 지오펜스] key:${key} 해제 완료`);
+    dlog('NEARDEST', `[NEARDEST 지오펜스] key:${key} 해제 완료`);
   });
 }
 
@@ -127,7 +143,7 @@ export async function reconcileNearDestGeofences(activeKeys: string[]): Promise<
   const activeSet = new Set(activeKeys);
   const orphanKeys = Object.keys(regions).filter((k) => !activeSet.has(k));
   if (orphanKeys.length === 0) return;
-  console.log(`[NEARDEST 지오펜스] 정합화 — orphan 제거: ${orphanKeys}`);
+  dlog('NEARDEST', `[NEARDEST 지오펜스] 정합화 — orphan 제거: ${orphanKeys}`);
   await withRegionLock(async () => {
     const current = await loadRegions();
     for (const k of orphanKeys) delete current[k];
@@ -157,7 +173,7 @@ async function fallbackToPolling(journeyId?: number, appointmentId?: number): Pr
     // 2026-08-14: 화면에 뜨는 알림은 EXIT 처리 완료 알림(AppState 필드 포함, 위 TaskManager.defineTask
     // 안)에 이미 나가므로 여기서 별도 알림을 또 보내면 사실상 같은 정보가 알림 두 개로 쪼개져
     // 나오는 것 — adb로 상세 추적할 때만 필요한 로그로 남긴다.
-    console.log(`[NEARDEST 지오펜스] fallbackToPolling — 포그라운드 경로(resumeFromGeofence) 선택 — j:${journeyId ?? '-'} a:${appointmentId ?? '-'}`);
+    dlog('NEARDEST', `[NEARDEST 지오펜스] fallbackToPolling — 포그라운드 경로(resumeFromGeofence) 선택 — j:${journeyId ?? '-'} a:${appointmentId ?? '-'}`);
     try {
       // 순환 import 회피 — notifications.ts의 onBackgroundEvent와 동일한 동적 import 패턴
       const { alarmService } = await import('@/src/services/alarmService');
@@ -172,7 +188,7 @@ async function fallbackToPolling(journeyId?: number, appointmentId?: number): Pr
       // 여기서 그냥 던지면 addActiveId()까지는 이미 반영됐는데도 폴링이 전혀 재개 안 된 채
       // 다음 포그라운드 전환까지 방치되므로, 실패 시 아래 백그라운드 폴링 경로로 폴백시켜
       // 최소한의 복구 수단을 보장한다.
-      console.log('[NEARDEST 지오펜스] alarmService 동적 import 실패 — 백그라운드 폴링으로 폴백:', e?.message);
+      dlog('NEARDEST', `[NEARDEST 지오펜스] alarmService 동적 import 실패 — 백그라운드 폴링으로 폴백: ${e?.message}`);
     }
   }
 
@@ -182,9 +198,9 @@ async function fallbackToPolling(journeyId?: number, appointmentId?: number): Pr
   // interval로 시작한다 — 방금 위에서 addActiveId()로 이 key를 추가했으니 그 값이 이미
   // 최솟값 계산에 반영된다. 이미 실행 중이면 내부에서 interval 변경 여부만 확인하고 필요
   // 시에만 재시작하므로 매번 호출해도 안전.
-  console.log(`[NEARDEST 지오펜스] fallbackToPolling — 백그라운드 경로(startGpsPolling) 선택 — j:${journeyId ?? '-'} a:${appointmentId ?? '-'}`);
+  dlog('NEARDEST', `[NEARDEST 지오펜스] fallbackToPolling — 백그라운드 경로(startGpsPolling) 선택 — j:${journeyId ?? '-'} a:${appointmentId ?? '-'}`);
   await startGpsPolling().catch((e) => {
-    console.log('[NEARDEST 지오펜스] 폴백 위치추적 시작 실패:', e?.message);
+    dlog('NEARDEST', `[NEARDEST 지오펜스] 폴백 위치추적 시작 실패: ${e?.message}`);
   });
 }
 
@@ -225,7 +241,7 @@ TaskManager.defineTask(NEARDEST_GEOFENCE_TASK, async ({ data, error }) => {
     // 경쟁"(stop→start race)을 이 복구 코드 스스로 다시 만들게 된다 — 한 번에 통째로 비운다.
     await withRegionLock(async () => {
       await saveRegionsAndSync({});
-      console.log(`[NEARDEST 지오펜스] 등록 실패로 전체 해제 완료 — 대상:${affectedKeys}`);
+      dlog('NEARDEST', `[NEARDEST 지오펜스] 등록 실패로 전체 해제 완료 — 대상:${affectedKeys}`);
     });
     for (const affectedKey of affectedKeys) {
       const parsed = parseKey(affectedKey);
@@ -246,64 +262,74 @@ TaskManager.defineTask(NEARDEST_GEOFENCE_TASK, async ({ data, error }) => {
     return;
   }
 
-  const token = await AsyncStorage.getItem(TOKEN_KEY);
-  if (!token) {
-    dlog('NEARDEST', '토큰 없음 — skip');
-    return;
-  }
+  await withKeyLock(key, async () => {
+    // OS가 같은 EXIT 이벤트를 중복 전달했다면, 먼저 처리된 호출이 이미 지오펜스를 해제했을 수
+    // 있다 — 그러면 이 호출은 더 할 일이 없으므로 GPS/서버 호출 없이 조용히 스킵한다.
+    const stillRegistered = key in (await loadRegions());
+    if (!stillRegistered) {
+      dlog('NEARDEST', `key:${key} 이미 처리됨(중복 발화) — skip`);
+      return;
+    }
 
-  // 좌표 확보 — 원래는 캐시를 먼저 시도했으나(Doze 콜드스타트로 신규 GPS가 멈추면 복구 불가라는
-  // 우려 때문), 2026-08-13 실측 테스트 목적상 정확도가 더 중요해서 순서를 뒤집었다: 신규 GPS를
-  // 먼저 시도하고, 실패해야 캐시로 폴백한다. 그래도 "재시도 없는 단발 이벤트"라는 특성은
-  // 그대로라 캐시 폴백 + fallbackToPolling()으로 이어지는 안전망은 유지한다.
-  let coords: { latitude: number; longitude: number } | null = null;
-  // EXIT 처리에 쓰인 좌표가 캐시(getLastKnownPositionAsync)에서 왔는지 신규 GPS 호출
-  // (getCurrentPositionAsync)에서 왔는지 로그/디버그 알림에 남겨두기 위한 진단값 — 계속 유지.
-  let coordSource: 'cache' | 'fresh' = 'fresh';
-  try {
-    const fresh = await withTimeout(Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }), 15000);
-    coords = fresh.coords;
-  } catch {}
-  if (!coords) {
-    coordSource = 'cache';
+    const token = await AsyncStorage.getItem(TOKEN_KEY);
+    if (!token) {
+      dlog('NEARDEST', '토큰 없음 — skip');
+      return;
+    }
+
+    // 좌표 확보 — 원래는 캐시를 먼저 시도했으나(Doze 콜드스타트로 신규 GPS가 멈추면 복구 불가라는
+    // 우려 때문), 2026-08-13 실측 테스트 목적상 정확도가 더 중요해서 순서를 뒤집었다: 신규 GPS를
+    // 먼저 시도하고, 실패해야 캐시로 폴백한다. 그래도 "재시도 없는 단발 이벤트"라는 특성은
+    // 그대로라 캐시 폴백 + fallbackToPolling()으로 이어지는 안전망은 유지한다.
+    let coords: { latitude: number; longitude: number } | null = null;
+    // EXIT 처리에 쓰인 좌표가 캐시(getLastKnownPositionAsync)에서 왔는지 신규 GPS 호출
+    // (getCurrentPositionAsync)에서 왔는지 로그/디버그 알림에 남겨두기 위한 진단값 — 계속 유지.
+    let coordSource: 'cache' | 'fresh' = 'fresh';
     try {
-      const last = await withTimeout(Location.getLastKnownPositionAsync({ maxAge: 60000 }), 5000);
-      if (last) coords = last.coords;
+      const fresh = await withTimeout(Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }), 15000);
+      coords = fresh.coords;
     } catch {}
-  }
-  if (!coords) {
-    dlog('NEARDEST', `key:${key} +${Date.now() - t0}ms 좌표 획득 실패 — 폴백`);
-    await sendDebugNotification('좌표 획득 실패 → 폴백', `key:${key}`);
-    await exitNearDestGeofenceMode(key);
-    await fallbackToPolling(journeyId, appointmentId);
-    return;
-  }
+    if (!coords) {
+      coordSource = 'cache';
+      try {
+        const last = await withTimeout(Location.getLastKnownPositionAsync({ maxAge: 60000 }), 5000);
+        if (last) coords = last.coords;
+      } catch {}
+    }
+    if (!coords) {
+      dlog('NEARDEST', `key:${key} +${Date.now() - t0}ms 좌표 획득 실패 — 폴백`);
+      await sendDebugNotification('좌표 획득 실패 → 폴백', `key:${key}`);
+      await exitNearDestGeofenceMode(key);
+      await fallbackToPolling(journeyId, appointmentId);
+      return;
+    }
 
-  try {
-    const response = journeyId != null
-      ? await patchLocation(`/api/journeys/${journeyId}/location`, token, coords.latitude, coords.longitude)
-      : await patchLocation(`/api/appointments/${appointmentId}/participants/location`, token, coords.latitude, coords.longitude);
+    try {
+      const response = journeyId != null
+        ? await patchLocation(`/api/journeys/${journeyId}/location`, token, coords.latitude, coords.longitude)
+        : await patchLocation(`/api/appointments/${appointmentId}/participants/location`, token, coords.latitude, coords.longitude);
 
-    const status = journeyId != null ? response?.data?.journey_status : response?.data?.participant_status;
-    const elapsed = Date.now() - t0;
-    // 2026-08-14(사용자 요청): 알림에서 "AppState:background" 같은 raw 값 대신, 화면에서 바로
-    // 읽히는 "(포그라운드)"/"(백그라운드)" 표기로 제목 옆에 붙인다.
-    const appStateLabel = AppState.currentState === 'active' ? '포그라운드' : '백그라운드';
-    dlog('NEARDEST', `key:${key} +${elapsed}ms /location 응답 status:${status} (${appStateLabel}, 좌표출처:${coordSource})`);
-    await sendDebugNotification(`EXIT 처리 완료 (${appStateLabel})`, `+${elapsed}ms key:${key} status:${status} 좌표출처:${coordSource === 'cache' ? '캐시' : '신규GPS'}`);
+      const status = journeyId != null ? response?.data?.journey_status : response?.data?.participant_status;
+      const elapsed = Date.now() - t0;
+      // 2026-08-14(사용자 요청): 알림에서 "AppState:background" 같은 raw 값 대신, 화면에서 바로
+      // 읽히는 "(포그라운드)"/"(백그라운드)" 표기로 제목 옆에 붙인다.
+      const appStateLabel = AppState.currentState === 'active' ? '포그라운드' : '백그라운드';
+      dlog('NEARDEST', `key:${key} +${elapsed}ms /location 응답 status:${status} (${appStateLabel}, 좌표출처:${coordSource})`);
+      await sendDebugNotification(`목적지 EXIT[->READY] (${appStateLabel})`, `+${elapsed}ms key:${key} status:${status} 좌표출처:${coordSource === 'cache' ? '캐시' : '신규GPS'}`);
 
-    await exitNearDestGeofenceMode(key);
+      await exitNearDestGeofenceMode(key);
 
-    if (status === 'READY') {
-      dlog('NEARDEST', `key:${key} → READY 복귀, 폴링 재개`);
+      if (status === 'READY') {
+        dlog('NEARDEST', `key:${key} → READY 복귀, 폴링 재개`);
+        await fallbackToPolling(journeyId, appointmentId);
+      }
+      // NEARDEST(고정, P>=Q)면 아무것도 안 함 — 더 이상 위치로 할 수 있는 일이 없음
+      // (/arrive 수동 확인이나 서버 스케줄러의 자동 ARRIVED만 남음)
+    } catch (e) {
+      dlog('NEARDEST', `key:${key} /location 호출 실패 — 폴백. 에러:${String(e)}`);
+      await sendDebugNotification('/location 호출 실패 → 폴백', `key:${key} 좌표출처:${coordSource === 'cache' ? '캐시' : '신규GPS'} 에러:${String(e)}`);
+      await exitNearDestGeofenceMode(key);
       await fallbackToPolling(journeyId, appointmentId);
     }
-    // NEARDEST(고정, P>=Q)면 아무것도 안 함 — 더 이상 위치로 할 수 있는 일이 없음
-    // (/arrive 수동 확인이나 서버 스케줄러의 자동 ARRIVED만 남음)
-  } catch (e) {
-    dlog('NEARDEST', `key:${key} /location 호출 실패 — 폴백. 에러:${String(e)}`);
-    await sendDebugNotification('/location 호출 실패 → 폴백', `key:${key} 좌표출처:${coordSource === 'cache' ? '캐시' : '신규GPS'} 에러:${String(e)}`);
-    await exitNearDestGeofenceMode(key);
-    await fallbackToPolling(journeyId, appointmentId);
-  }
+  });
 });

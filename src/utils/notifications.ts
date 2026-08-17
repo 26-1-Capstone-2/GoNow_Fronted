@@ -12,6 +12,7 @@ import { Linking, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import type { KakaoMapTransportMode } from '@/src/utils/kakaoMapDeeplink';
+import { dlog } from '@/src/utils/deviceLogger';
 
 export type AlarmStage = 1 | 2 | 3 | 4;
 // 도착 관련 알림 3종 — 출발 단계별 채널과 완전히 분리(성격이 다른 알림이라 서로 영향 안 주도록).
@@ -83,7 +84,7 @@ async function saveTriggerIds(key: string, ids: string[]): Promise<void> {
     const map: Record<string, string[]> = raw ? JSON.parse(raw) : {};
     map[key] = [...(map[key] ?? []), ...ids];
     await AsyncStorage.setItem(TRIGGER_IDS_KEY, JSON.stringify(map));
-    console.log(`[trigger] 저장 완료 — key:${key} ids:${ids}`);
+    dlog('NEARDEST', `[trigger] 저장 완료 — key:${key} ids:${ids}`);
   } catch {}
 }
 
@@ -97,13 +98,13 @@ async function cancelAndRemoveTriggerIds(key: string): Promise<void> {
     if (raw) {
       const map: Record<string, string[]> = JSON.parse(raw);
       const ids = map[key] ?? [];
-      console.log(`[trigger] 취소 시도 — key:${key} ids:${ids}`);
+      dlog('NEARDEST', `[trigger] 취소 시도 — key:${key} ids:${ids}`);
       await Promise.all(ids.map(id => notifee.cancelTriggerNotification(id).catch(() => {})));
       delete map[key];
       await AsyncStorage.setItem(TRIGGER_IDS_KEY, JSON.stringify(map));
-      console.log(`[trigger] 취소 완료 — key:${key}`);
+      dlog('NEARDEST', `[trigger] 취소 완료 — key:${key}`);
     } else {
-      console.log(`[trigger] 취소 시도 — key:${key} AsyncStorage 없음`);
+      dlog('NEARDEST', `[trigger] 취소 시도 — key:${key} AsyncStorage 없음`);
     }
   } catch {}
   // 트리거를 취소하는 시점엔 그 지문(fingerprint)도 항상 무효화 — syncStagedAlarms()가
@@ -165,6 +166,7 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
     }
 
     if (actionId === 'arrival-yes') {
+      dlog('NEARDEST', `도착확인 YES버튼(백그라운드) — key:${storageKey}`);
       if (storageKey) {
         await cancelAndRemoveTriggerIds(storageKey);
         // 아직 EXIT 콜백이 안 뜬 상태(100m 안)로 도착 확인을 누른 경우, 지오펜스 region이
@@ -179,6 +181,27 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
       if (data?.appointmentId) {
         const { createAppointmentsApi } = await import('@/src/api/appointments');
         await createAppointmentsApi().arriveParticipant(Number(data.appointmentId));
+      }
+      // 포그라운드 경로(alarmService.stop())와 달리 여기는 alarmService의 인메모리 러너 목록에
+      // 기대면 안 된다 — 앱이 완전 종료된 헤드리스 컨텍스트에서는 그 목록이 항상 비어있는
+      // 새 인스턴스라, "다른 알람 없음"으로 잘못 판단해 FGS를 오판할 위험이 있다. 대신
+      // backgroundLocationTask.ts가 이미 쓰는 영속 저장소(ALARM_NAV_INFO_KEY) 기준 판단을
+      // 그대로 재사용한다 — 이 알람을 지우고, 남은 알람이 없을 때만 FGS를 끈다.
+      if (storageKey) {
+        // 프로세스가 살아있는 경우(스와이프만 하고 완전 종료는 아니었던 경우 — 2026-08-17
+        // 실기기로 확인된 대로 흔한 케이스) alarmService의 러너가 좀비로 메모리에 남는 것을
+        // 방지 — FGS는 위에서 이미 별도로 정리하므로 onFinish(중복 재확인) 없이 순수하게
+        // 메모리에서만 지운다. 진짜 헤드리스면 러너가 애초에 없어 조용히 no-op.
+        const { alarmService } = await import('@/src/services/alarmService');
+        alarmService.forgetIfExists(journeyId, appointmentId);
+        const { removeAlarmNavInfo, hasAnyTrackedAlarm, stopAlarmForegroundService } = await import('@/src/tasks/backgroundLocationTask');
+        await removeAlarmNavInfo(storageKey);
+        if (await hasAnyTrackedAlarm()) {
+          dlog('NEARDEST', `key:${storageKey} 도착 처리 완료 — 남은 알람 있어 FGS 유지`);
+        } else {
+          await stopAlarmForegroundService();
+          dlog('NEARDEST', `key:${storageKey} 도착 처리 완료 — 남은 알람 없어 FGS 종료`);
+        }
       }
     }
 
@@ -758,7 +781,7 @@ export async function syncStagedAlarms(
     // 재발송)을 반복하지 않음 — 이게 "한참 지난 후 4단계가 다시 울리는" 버그의 진짜 원인이었음.
     const normalizedStation = whichStation ?? prev?.whichStation ?? null;
     if (prev && prev.departureAlarmTime === departureAlarmTime && prev.whichStation === normalizedStation) {
-      console.log(`[알람] syncStagedAlarms — key:${key} 지문 동일, 재등록 스킵`);
+      dlog('NEARDEST', `[알람] syncStagedAlarms — key:${key} 지문 동일, 재등록 스킵`);
       return;
     }
 
@@ -782,7 +805,7 @@ export async function syncStagedAlarms(
     const foundIdx = stepTimes.findIndex((t) => now < t);
     const startIdx = foundIdx === -1 ? 3 : foundIdx;
 
-    console.log(`[알람] key:${key} ${startIdx + 1}단계부터 예약 — 1단계:${new Date(stepTimes[0]).toLocaleTimeString('ko-KR', { hour12: false })} 2단계:${new Date(stepTimes[1]).toLocaleTimeString('ko-KR', { hour12: false })} 3단계:${new Date(stepTimes[2]).toLocaleTimeString('ko-KR', { hour12: false })} 4단계:${new Date(stepTimes[3]).toLocaleTimeString('ko-KR', { hour12: false })} whichStation:${normalizedStation}`);
+    dlog('NEARDEST', `[알람] key:${key} ${startIdx + 1}단계부터 예약 — 1단계:${new Date(stepTimes[0]).toLocaleTimeString('ko-KR', { hour12: false })} 2단계:${new Date(stepTimes[1]).toLocaleTimeString('ko-KR', { hour12: false })} 3단계:${new Date(stepTimes[2]).toLocaleTimeString('ko-KR', { hour12: false })} 4단계:${new Date(stepTimes[3]).toLocaleTimeString('ko-KR', { hour12: false })} whichStation:${normalizedStation}`);
 
     try {
       const allIds: string[] = [];
@@ -793,9 +816,9 @@ export async function syncStagedAlarms(
         const ids = await scheduleFutureAlarm(type, stage, destination, stepTimes[i], journeyId, appointmentId, normalizedStation, minutesRemaining, destLat, destLng, transportMode, isLastMode);
         allIds.push(...ids);
       }
-      console.log(`[알람] syncStagedAlarms 등록 완료 — key:${key} ids:${allIds}`);
+      dlog('NEARDEST', `[알람] syncStagedAlarms 등록 완료 — key:${key} ids:${allIds}`);
     } catch (e) {
-      console.log('[알람] syncStagedAlarms 등록 실패', e);
+      dlog('NEARDEST', `[알람] syncStagedAlarms 등록 실패 ${e}`);
     }
   });
 }

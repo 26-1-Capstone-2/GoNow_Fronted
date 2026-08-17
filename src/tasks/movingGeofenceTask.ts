@@ -38,7 +38,13 @@ const keyLockQueues: Record<string, Promise<void>> = {};
 function withKeyLock(key: string, fn: () => Promise<void>): Promise<void> {
   const prior = keyLockQueues[key] ?? Promise.resolve();
   const run = prior.then(fn, fn);
-  keyLockQueues[key] = run.catch(() => {});
+  const settled = run.catch(() => {});
+  keyLockQueues[key] = settled;
+  // 아직 자신이 최신 체인이면(그사이 같은 key로 새 호출이 안 들어왔으면) 정리 —
+  // 안 지우면 앱 수명 내내 한번 등장한 key마다 엔트리가 영구히 쌓인다.
+  settled.then(() => {
+    if (keyLockQueues[key] === settled) delete keyLockQueues[key];
+  });
   return run;
 }
 
@@ -207,7 +213,7 @@ TaskManager.defineTask(MOVING_GEOFENCE_TASK, async ({ data, error }) => {
       const elapsed = Date.now() - t0;
       const appStateLabel = AppState.currentState === 'active' ? '포그라운드' : '백그라운드';
       dlog('MOVING', `key:${key} +${elapsed}ms /location 응답 status:${status} (${appStateLabel}, 좌표출처:${coordSource})`);
-      await sendDebugNotification(`MOVING ENTER 처리 완료 (${appStateLabel})`, `+${elapsed}ms key:${key} status:${status} 좌표출처:${coordSource === 'cache' ? '캐시' : '신규GPS'}`);
+      await sendDebugNotification(`목적지 ENTER[->ARRIVED] (${appStateLabel})`, `+${elapsed}ms key:${key} status:${status} 좌표출처:${coordSource === 'cache' ? '캐시' : '신규GPS'}`);
 
       await exitMovingGeofenceMode(key);
 

@@ -5,9 +5,14 @@ import {
   addActiveId,
   removeActiveId,
   startGpsPolling,
+  ALARM_NAV_INFO_KEY,
 } from '@/src/tasks/backgroundLocationTask';
 import { exitNearDestGeofenceMode } from '@/src/tasks/nearDestGeofenceTask';
+import { getReadyAnchor, exitReadyGeofenceMode } from '@/src/tasks/readyGeofenceTask';
+import { enterDepartingGeofenceMode } from '@/src/tasks/departingGeofenceTask';
 import { cancelStagedAlarms } from '@/src/utils/notifications';
+import { dlog } from '@/src/utils/deviceLogger';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const BACKGROUND_ALARM_TASK = 'BACKGROUND-ALARM-TASK';
 
@@ -75,6 +80,49 @@ TaskManager.defineTask(BACKGROUND_ALARM_TASK, async ({ data, error }) => {
     ]);
     return;
   }
+
+  // READY→DEPARTING 시간 트리거(서버 DepartingTransitionScheduler, P>=Q — 위치와 무관한 순수
+  // 시간 조건이라 지오펜스로 못 잡음) → READY 지오펜스를 내리고 DEPARTING 지오펜스로 전환.
+  // 서버가 좌표를 새로 안 보내줘도 됨 — READY 진입 시 이 클라이언트가 직접 찍었던 앵커를
+  // readyGeofenceTask.ts의 저장소에서 그대로 읽어간다(geofencing-migration-plan.md
+  // "READY→DEPARTING 시간 트리거" 참고).
+  if (fcmData.sync_event === 'departing_transition' && (fcmData.journey_ids != null || fcmData.appointment_ids != null)) {
+    const departingJourneyIds: number[] = fcmData.journey_ids
+      ? String(fcmData.journey_ids).split(',').map(Number).filter(n => !isNaN(n))
+      : [];
+    const departingAppointmentIds: number[] = fcmData.appointment_ids
+      ? String(fcmData.appointment_ids).split(',').map(Number).filter(n => !isNaN(n))
+      : [];
+    console.log(`[BACKGROUND_ALARM_TASK] departing_transition — journeyIds:${departingJourneyIds} appointmentIds:${departingAppointmentIds}`);
+
+    const handOffToDeparting = async (key: string, journeyId?: number, appointmentId?: number) => {
+      const anchor = await getReadyAnchor(key);
+      if (!anchor) {
+        // READY 지오펜스가 등록 안 돼 있던 경우(iOS, 또는 등록 실패 등) — 기존 폴링 경로로
+        // 폴백하면 backgroundLocationTask.ts의 기존 READY/DEPARTING 처리가 이어받는다.
+        dlog('READY', `key:${key} 캐시된 앵커 없음 — 폴링으로 폴백`);
+        await addActiveId(journeyId, appointmentId);
+        await startGpsPolling().catch(() => {});
+        return;
+      }
+      const navRaw = await AsyncStorage.getItem(ALARM_NAV_INFO_KEY);
+      const nav = navRaw ? JSON.parse(navRaw)[key] : undefined;
+      dlog('READY', `key:${key} departing_transition — 캐시된 앵커(${anchor.latitude.toFixed(6)}, ${anchor.longitude.toFixed(6)})로 DEPARTING 지오펜스 전환`);
+      await exitReadyGeofenceMode(key).catch(() => {});
+      await enterDepartingGeofenceMode(key, anchor.latitude, anchor.longitude, nav?.destLat, nav?.destLng);
+    };
+
+    await Promise.all([
+      ...departingJourneyIds.map((id) => handOffToDeparting(`j_${id}`, id, undefined)),
+      ...departingAppointmentIds.map((id) => handOffToDeparting(`a_${id}`, undefined, id)),
+    ]);
+    return;
+  }
+
+  // sync_event가 없는 경우도 READY로 간주 — 서버가 sync_event:'ready_transition' 태깅 전에
+  // 배포된 구버전과의 하위호환용. sync_event가 다른 값이면(예: 미처리 이벤트) 여기로 안 떨어짐.
+  const isReadyTransition = !fcmData?.sync_event || fcmData?.sync_event === 'ready_transition';
+  if (!isReadyTransition) return;
 
   const journeyIds: number[] = fcmData?.journey_ids
     ? String(fcmData.journey_ids).split(',').map(Number).filter(n => !isNaN(n))

@@ -53,7 +53,13 @@ const keyLockQueues: Record<string, Promise<void>> = {};
 function withKeyLock(key: string, fn: () => Promise<void>): Promise<void> {
   const prior = keyLockQueues[key] ?? Promise.resolve();
   const run = prior.then(fn, fn);
-  keyLockQueues[key] = run.catch(() => {});
+  const settled = run.catch(() => {});
+  keyLockQueues[key] = settled;
+  // 아직 자신이 최신 체인이면(그사이 같은 key로 새 호출이 안 들어왔으면) 정리 —
+  // 안 지우면 앱 수명 내내 한번 등장한 key마다 엔트리가 영구히 쌓인다.
+  settled.then(() => {
+    if (keyLockQueues[key] === settled) delete keyLockQueues[key];
+  });
   return run;
 }
 
@@ -129,12 +135,12 @@ export function enterDepartingGeofenceMode(
 ): Promise<void> {
   return withRegionLock(async () => {
     if (destLat == null || destLng == null) {
-      console.log(`[DEPARTING 지오펜스] key:${key} 목적지 좌표 없음 — 등록 스킵`);
+      dlog('DEPARTING', `[DEPARTING 지오펜스] key:${key} 목적지 좌표 없음 — 등록 스킵`);
       return;
     }
     const regions = await loadRegions();
     if (regions[key]) {
-      console.log(`[DEPARTING 지오펜스] key:${key} 이미 등록됨 — skip`);
+      dlog('DEPARTING', `[DEPARTING 지오펜스] key:${key} 이미 등록됨 — skip`);
       return;
     }
     regions[key] = {
@@ -153,7 +159,7 @@ export function exitDepartingGeofenceMode(key: string): Promise<void> {
     if (!(key in regions)) return;
     delete regions[key];
     await saveRegionsAndSync(regions);
-    console.log(`[DEPARTING 지오펜스] key:${key} 해제 완료`);
+    dlog('DEPARTING', `[DEPARTING 지오펜스] key:${key} 해제 완료`);
   });
 }
 
@@ -163,7 +169,7 @@ export async function reconcileDepartingGeofences(activeKeys: string[]): Promise
   const activeSet = new Set(activeKeys);
   const orphanKeys = Object.keys(regions).filter((k) => !activeSet.has(k));
   if (orphanKeys.length === 0) return;
-  console.log(`[DEPARTING 지오펜스] 정합화 — orphan 제거: ${orphanKeys}`);
+  dlog('DEPARTING', `[DEPARTING 지오펜스] 정합화 — orphan 제거: ${orphanKeys}`);
   await withRegionLock(async () => {
     const current = await loadRegions();
     for (const k of orphanKeys) delete current[k];
@@ -184,11 +190,11 @@ async function resumeAsPolling(journeyId?: number, appointmentId?: number): Prom
       alarmService.resumeFromGeofence(journeyId, appointmentId);
       return;
     } catch (e: any) {
-      console.log('[DEPARTING 지오펜스] alarmService 동적 import 실패 — 백그라운드 폴링으로 폴백:', e?.message);
+      dlog('DEPARTING', `[DEPARTING 지오펜스] alarmService 동적 import 실패 — 백그라운드 폴링으로 폴백: ${e?.message}`);
     }
   }
   await startGpsPolling().catch((e) => {
-    console.log('[DEPARTING 지오펜스] 폴백 위치추적 시작 실패:', e?.message);
+    dlog('DEPARTING', `[DEPARTING 지오펜스] 폴백 위치추적 시작 실패: ${e?.message}`);
   });
 }
 
@@ -209,7 +215,7 @@ export async function finishAsArrived(key: string, journeyId?: number, appointme
         return;
       }
     } catch (e: any) {
-      console.log('[DEPARTING 지오펜스] alarmService 동적 import 실패 — 직접 정리로 폴백:', e?.message);
+      dlog('DEPARTING', `[DEPARTING 지오펜스] alarmService 동적 import 실패 — 직접 정리로 폴백: ${e?.message}`);
     }
   }
   await cancelStagedAlarms(key).catch(() => {});
@@ -243,7 +249,7 @@ TaskManager.defineTask(DEPARTING_GEOFENCE_TASK, async ({ data, error }) => {
     const affectedKeys = Object.keys(affected);
     await withRegionLock(async () => {
       await saveRegionsAndSync({});
-      console.log(`[DEPARTING 지오펜스] 등록 실패로 전체 해제 완료 — 대상:${affectedKeys}`);
+      dlog('DEPARTING', `[DEPARTING 지오펜스] 등록 실패로 전체 해제 완료 — 대상:${affectedKeys}`);
     });
     for (const affectedKey of affectedKeys) {
       const parsed = parseKey(affectedKey);
@@ -322,7 +328,7 @@ TaskManager.defineTask(DEPARTING_GEOFENCE_TASK, async ({ data, error }) => {
       const elapsed = Date.now() - t0;
       const appStateLabel = AppState.currentState === 'active' ? '포그라운드' : '백그라운드';
       dlog('DEPARTING', `key:${key} kind:${kind} +${elapsed}ms /location 응답 status:${status} (${appStateLabel}, 좌표출처:${coordSource})`);
-      await sendDebugNotification(`DEPARTING ${kind === 'anchor' ? 'EXIT' : 'ENTER'} 처리 완료 (${appStateLabel})`, `+${elapsed}ms key:${key} status:${status} 좌표출처:${coordSource === 'cache' ? '캐시' : '신규GPS'}`);
+      await sendDebugNotification(`${kind === 'anchor' ? '출발지 EXIT[->MOVING]' : '목적지 ENTER[->ARRIVED]'} (${appStateLabel})`, `+${elapsed}ms key:${key} status:${status} 좌표출처:${coordSource === 'cache' ? '캐시' : '신규GPS'}`);
 
       await exitDepartingGeofenceMode(key);
 
