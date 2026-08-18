@@ -68,6 +68,19 @@ class ForegroundAlarmService : Service() {
       .setSmallIcon(applicationInfo.icon)
       .setColorized(true)
       .setColor(Color.parseColor(NOTIFICATION_COLOR))
+      // 안드로이드 13(API 33)부터는 FGS 알림도 기본적으로 스와이프로 지울 수 있게 정책이
+      // 바뀌었다 — setOngoing(true)로 12 이하와 동일하게 스와이프 불가 상태를 명시적으로
+      // 복원한다. 서비스 자체는 알림을 지워도 안 죽지만(13+부터 알림/서비스 생명주기가
+      // 분리됨), "알람이 존재하면 FGS가 항상 보인다"는 이 앱의 설계 의도(CLAUDE.md FGS
+      // 정책)와 제조사 배터리 최적화가 상시 알림 없는 백그라운드 프로세스를 더 적극적으로
+      // 정리하는 경향을 감안해 명시적으로 켜둔다.
+      // 주의: 안드로이드 14(API 34)부터는 구글이 정책을 한 번 더 바꿔서 setOngoing(true)를
+      // 걸어도 사용자가 여전히 스와이프로 지울 수 있다(실기기 Android 15/API 35로 검증
+      // 완료 — 재설치해도 그대로 지워짐, 앱/OS 버그 아니라 의도된 플랫폼 동작). 12
+      // 이하에서만 유효한 방어 코드이고 14+에서는 사실상 no-op이지만, 하위 버전엔 여전히
+      // 의미가 있고 14+에서 해가 되지도 않으므로 그대로 둔다 — 14+ 스와이프까지 막는 방법은
+      // 현재 안드로이드 표준 알림 API로는 존재하지 않는다.
+      .setOngoing(true)
 
     packageManager.getLaunchIntentForPackage(packageName)?.let {
       it.flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
