@@ -14,7 +14,26 @@ interface Coordinate {
   lng: number;
 }
 
-function buildKakaoMapRouteUrls(origin: Coordinate, dest: Coordinate, mode: KakaoMapTransportMode) {
+// 대중교통 딥링크인데 출발지-목적지가 도보나 다름없는 거리면 대중교통 대신 도보(foot)로
+// 연다 — 700m는 새로 정한 값이 아니라 플라스크 walk_fallback()(gps_api/core/transit_route.py의
+// SHORT_DISTANCE_THRESHOLD_M)과 동일한 기준을 그대로 재사용한 것: 그 거리 이하면 ODsay
+// 대중교통 검색 자체가 무의미하다고 이미 백엔드가 판단하고 있는 값이라 프론트도 같은
+// 기준으로 판단하는 게 일관적이다. DRIVING(car)은 자차가 있는데 도보를 권할 이유가 없어
+// 대상에서 제외.
+const TRANSIT_WALK_FALLBACK_THRESHOLD_M = 700;
+
+function haversineMeters(a: Coordinate, b: Coordinate): number {
+  const R = 6_371_000;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const sinLat = Math.sin(dLat / 2);
+  const sinLng = Math.sin(dLng / 2);
+  const h = sinLat * sinLat + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * sinLng * sinLng;
+  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+function buildKakaoMapRouteUrls(origin: Coordinate, dest: Coordinate, mode: KakaoMapTransportMode | 'foot') {
   const params = `sp=${origin.lat},${origin.lng}&ep=${dest.lat},${dest.lng}&by=${mode}`;
   return {
     appUrl: `kakaomap://route?${params}`,
@@ -78,7 +97,11 @@ export async function openKakaoMapRoute(
     return false;
   }
 
-  const { appUrl, webFallbackUrl } = buildKakaoMapRouteUrls(origin, dest, mode);
+  const effectiveMode =
+    mode === 'publictransit' && haversineMeters(origin, dest) < TRANSIT_WALK_FALLBACK_THRESHOLD_M
+      ? 'foot'
+      : mode;
+  const { appUrl, webFallbackUrl } = buildKakaoMapRouteUrls(origin, dest, effectiveMode);
   try {
     await Linking.openURL(appUrl);
     return true;
