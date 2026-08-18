@@ -10,6 +10,7 @@ import { Feather, FontAwesome5, FontAwesome6, MaterialCommunityIcons } from '@ex
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Platform,
   ScrollView,
@@ -134,8 +135,17 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
   // (docs/reference/kakao-map-deeplink-spec.md §2.2~2.4 참고)
   const canNavigate = (alarm: AlarmCard) => canNavigateAlarm(alarm.myStatus);
 
-  const handleNavigate = (alarm: AlarmCard) =>
-    handleNavigateAlarm(alarm.destLat, alarm.destLng, alarm.myStatus, alarm.transport === 'car');
+  // 매번 새로 GPS를 잡아 열기까지 1~2초 걸릴 수 있어(kakaoMapDeeplink.ts 참고),
+  // 버튼이 멈춘 건지 헷갈리지 않도록 눌린 카드의 id만 로딩 표시한다.
+  const [navigatingId, setNavigatingId] = useState<string | null>(null);
+  const handleNavigate = async (alarm: AlarmCard) => {
+    setNavigatingId(alarm.id);
+    try {
+      await handleNavigateAlarm(alarm.destLat, alarm.destLng, alarm.transport === 'car');
+    } finally {
+      setNavigatingId(null);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -196,11 +206,15 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   </View>
                 </View>
                 <View style={styles.cardRight}>
-                  {canNavigate(alarm) && (
-                    <TouchableOpacity style={styles.navigateBtn} onPress={() => handleNavigate(alarm)}>
-                      <Feather name="navigation" size={14} color="#4A90D9" />
-                    </TouchableOpacity>
-                  )}
+                  <TouchableOpacity
+                    style={[styles.navigateBtn, !canNavigate(alarm) && styles.navigateBtnDisabled]}
+                    onPress={() => handleNavigate(alarm)}
+                    disabled={!canNavigate(alarm) || navigatingId === alarm.id}
+                  >
+                    {navigatingId === alarm.id
+                      ? <ActivityIndicator size="small" color="#4A90D9" />
+                      : <Feather name="map" size={14} color={canNavigate(alarm) ? '#4A90D9' : '#CCCCCC'} />}
+                  </TouchableOpacity>
                   <Switch
                     value={alarm.enabled}
                     onValueChange={() => toggleAlarm(setPersonal, alarm, 'personal')}
@@ -281,11 +295,15 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   >
                     <FontAwesome6 name="person-walking" size={14} color={isGroupActive ? '#FFFFFF' : '#CCCCCC'} />
                   </TouchableOpacity>
-                  {canNavigate(alarm) && (
-                    <TouchableOpacity style={styles.navigateBtn} onPress={() => handleNavigate(alarm)}>
-                      <Feather name="navigation" size={14} color="#4A90D9" />
-                    </TouchableOpacity>
-                  )}
+                  <TouchableOpacity
+                    style={[styles.navigateBtn, !canNavigate(alarm) && styles.navigateBtnDisabled]}
+                    onPress={() => handleNavigate(alarm)}
+                    disabled={!canNavigate(alarm) || navigatingId === alarm.id}
+                  >
+                    {navigatingId === alarm.id
+                      ? <ActivityIndicator size="small" color="#4A90D9" />
+                      : <Feather name="map" size={14} color={canNavigate(alarm) ? '#4A90D9' : '#CCCCCC'} />}
+                  </TouchableOpacity>
                   <Switch
                     value={alarm.enabled}
                     onValueChange={() => toggleAlarm(setGroup, alarm)}
@@ -341,11 +359,15 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   </View>
                 </View>
                 <View style={styles.cardRight}>
-                  {canNavigate(alarm) && (
-                    <TouchableOpacity style={styles.navigateBtn} onPress={() => handleNavigate(alarm)}>
-                      <Feather name="navigation" size={14} color="#4A90D9" />
-                    </TouchableOpacity>
-                  )}
+                  <TouchableOpacity
+                    style={[styles.navigateBtn, !canNavigate(alarm) && styles.navigateBtnDisabled]}
+                    onPress={() => handleNavigate(alarm)}
+                    disabled={!canNavigate(alarm) || navigatingId === alarm.id}
+                  >
+                    {navigatingId === alarm.id
+                      ? <ActivityIndicator size="small" color="#4A90D9" />
+                      : <Feather name="map" size={14} color={canNavigate(alarm) ? '#4A90D9' : '#CCCCCC'} />}
+                  </TouchableOpacity>
                   <Switch
                     value={alarm.enabled}
                     onValueChange={() => toggleAlarm(setHome, alarm, 'home')}
@@ -454,5 +476,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#EAF2FB',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  navigateBtnDisabled: {
+    backgroundColor: '#EEEEEE',
   },
 });

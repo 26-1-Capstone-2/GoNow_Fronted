@@ -210,12 +210,10 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
     }
 
     if (actionId === 'navigate' && data?.destLat && data?.destLng && data?.transportMode) {
-      // 단계별 출발 알람(1~4단계)은 전부 DEPARTING 구간에서만 발생 — 캐시 유효기간도 그에 맞춤
-      const { openKakaoMapRoute, NAVIGATE_CACHE_MAX_AGE_MS } = await import('@/src/utils/kakaoMapDeeplink');
+      const { openKakaoMapRoute } = await import('@/src/utils/kakaoMapDeeplink');
       await openKakaoMapRoute(
         { lat: Number(data.destLat), lng: Number(data.destLng) },
         data.transportMode as KakaoMapTransportMode,
-        NAVIGATE_CACHE_MAX_AGE_MS.DEPARTING,
       );
     }
   }

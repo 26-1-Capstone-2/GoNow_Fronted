@@ -269,8 +269,17 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
   // DRIVING/TRANSIT 공통 카카오맵 딥링크 — 단일 딥링크 설계 (docs/reference/kakao-map-deeplink-spec.md §2.2~2.4 참고)
   const canNavigate = (alarm: HomeAlarm) => canNavigateAlarm(alarm.myStatus);
 
-  const handleNavigate = (alarm: HomeAlarm) =>
-    handleNavigateAlarm(alarm.home_lat, alarm.home_lng, alarm.myStatus, alarm.transport === 'car');
+  // 매번 새로 GPS를 잡아 열기까지 1~2초 걸릴 수 있어(kakaoMapDeeplink.ts 참고),
+  // 버튼이 멈춘 건지 헷갈리지 않도록 눌린 카드의 id만 로딩 표시한다.
+  const [navigatingId, setNavigatingId] = useState<string | null>(null);
+  const handleNavigate = async (alarm: HomeAlarm) => {
+    setNavigatingId(alarm.id);
+    try {
+      await handleNavigateAlarm(alarm.home_lat, alarm.home_lng, alarm.transport === 'car');
+    } finally {
+      setNavigatingId(null);
+    }
+  };
 
   const toggleRepeat = (day: string) => {
     setEditAlarm((prev) => {
@@ -341,11 +350,15 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
                     </View>
                   </View>
                   <View style={styles.cardRight}>
-                    {canNavigate(alarm) && (
-                      <TouchableOpacity style={styles.navigateBtn} onPress={() => handleNavigate(alarm)}>
-                        <Feather name="navigation" size={14} color="#4A90D9" />
-                      </TouchableOpacity>
-                    )}
+                    <TouchableOpacity
+                      style={[styles.navigateBtn, !canNavigate(alarm) && styles.navigateBtnDisabled]}
+                      onPress={() => handleNavigate(alarm)}
+                      disabled={!canNavigate(alarm) || navigatingId === alarm.id}
+                    >
+                      {navigatingId === alarm.id
+                        ? <ActivityIndicator size="small" color="#4A90D9" />
+                        : <Feather name="map" size={14} color={canNavigate(alarm) ? '#4A90D9' : '#CCCCCC'} />}
+                    </TouchableOpacity>
                     <Switch value={alarm.enabled} onValueChange={() => toggleAlarm(alarm)}
                       trackColor={{ false: '#E0E0E0', true: '#4CAF50' }} thumbColor="#FFFFFF" />
                   </View>
@@ -555,6 +568,7 @@ const styles = StyleSheet.create({
   alarmInfo: { flex: 1, marginRight: 8, justifyContent: 'center' },
   cardRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   navigateBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#EAF2FB', alignItems: 'center', justifyContent: 'center' },
+  navigateBtnDisabled: { backgroundColor: '#EEEEEE' },
   alarmDate: { fontSize: 11, fontWeight: '500', color: '#FF3B30', marginBottom: 3 },
   alarmPlace: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 5 },
   alarmMeta: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },

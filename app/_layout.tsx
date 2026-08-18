@@ -1,5 +1,5 @@
 import { setupNotificationCategories, AlarmType, getChannelId, sendDebugNotification } from '@/src/utils/notifications';
-import { openKakaoMapRoute, NAVIGATE_CACHE_MAX_AGE_MS, toTransportMode, type KakaoMapTransportMode } from '@/src/utils/kakaoMapDeeplink';
+import { openKakaoMapRoute, toTransportMode, type KakaoMapTransportMode } from '@/src/utils/kakaoMapDeeplink';
 import { createJourneysApi } from '@/src/api/journeys';
 import { createAppointmentsApi } from '@/src/api/appointments';
 import { createAlarmsApi } from '@/src/api/alarms';
@@ -521,11 +521,9 @@ export default function RootLayout() {
       }
 
       if (actionId === 'navigate' && data?.destLat && data?.destLng && data?.transportMode) {
-        // 단계별 출발 알람(1~4단계)은 전부 DEPARTING 구간에서만 발생 — 캐시 유효기간도 그에 맞춤
         openKakaoMapRoute(
           { lat: Number(data.destLat), lng: Number(data.destLng) },
           data.transportMode as KakaoMapTransportMode,
-          NAVIGATE_CACHE_MAX_AGE_MS.DEPARTING,
         );
       }
     };

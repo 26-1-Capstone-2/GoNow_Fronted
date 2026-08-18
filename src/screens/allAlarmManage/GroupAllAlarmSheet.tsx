@@ -16,6 +16,7 @@ import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Platform,
   Share,
@@ -465,8 +466,17 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
   // DRIVING/TRANSIT 공통 카카오맵 딥링크 — 단일 딥링크 설계 (docs/reference/kakao-map-deeplink-spec.md §2.2~2.4 참고)
   const canNavigate = (alarm: GroupAlarm) => canNavigateAlarm(alarm.myStatus);
 
-  const handleNavigate = (alarm: GroupAlarm) =>
-    handleNavigateAlarm(alarm.place_lat, alarm.place_lng, alarm.myStatus, alarm.transport === 'car');
+  // 매번 새로 GPS를 잡아 열기까지 1~2초 걸릴 수 있어(kakaoMapDeeplink.ts 참고),
+  // 버튼이 멈춘 건지 헷갈리지 않도록 눌린 카드의 id만 로딩 표시한다.
+  const [navigatingId, setNavigatingId] = useState<string | null>(null);
+  const handleNavigate = async (alarm: GroupAlarm) => {
+    setNavigatingId(alarm.id);
+    try {
+      await handleNavigateAlarm(alarm.place_lat, alarm.place_lng, alarm.transport === 'car');
+    } finally {
+      setNavigatingId(null);
+    }
+  };
 
   const copyInviteCode = async () => {
     try {
@@ -574,11 +584,15 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
                         color={alarm.isArrivalActive ? '#FFFFFF' : '#CCCCCC'}
                       />
                     </TouchableOpacity>
-                    {canNavigate(alarm) && (
-                      <TouchableOpacity style={styles.navigateBtn} onPress={() => handleNavigate(alarm)}>
-                        <Feather name="navigation" size={14} color="#4A90D9" />
-                      </TouchableOpacity>
-                    )}
+                    <TouchableOpacity
+                      style={[styles.navigateBtn, !canNavigate(alarm) && styles.navigateBtnDisabled]}
+                      onPress={() => handleNavigate(alarm)}
+                      disabled={!canNavigate(alarm) || navigatingId === alarm.id}
+                    >
+                      {navigatingId === alarm.id
+                        ? <ActivityIndicator size="small" color="#4A90D9" />
+                        : <Feather name="map" size={14} color={canNavigate(alarm) ? '#4A90D9' : '#CCCCCC'} />}
+                    </TouchableOpacity>
                     <Switch
                       value={alarm.enabled}
                       onValueChange={() => toggleAlarm(alarm.id)}
@@ -954,6 +968,7 @@ const styles = StyleSheet.create({
   dashboardBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center' },
   dashboardBtnActive: { backgroundColor: '#92DEFE' },
   navigateBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#EAF2FB', alignItems: 'center', justifyContent: 'center' },
+  navigateBtnDisabled: { backgroundColor: '#EEEEEE' },
   pickerContainer: {
     flexDirection: 'row',
     backgroundColor: '#F5F5F5', borderRadius: 14,
