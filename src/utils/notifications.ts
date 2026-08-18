@@ -194,9 +194,13 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
         // 메모리에서만 지운다. 진짜 헤드리스면 러너가 애초에 없어 조용히 no-op.
         const { alarmService } = await import('@/src/services/alarmService');
         alarmService.forgetIfExists(journeyId, appointmentId);
-        const { removeAlarmNavInfo, hasAnyTrackedAlarm, stopAlarmForegroundService } = await import('@/src/tasks/backgroundLocationTask');
-        await removeAlarmNavInfo(storageKey);
-        if (await hasAnyTrackedAlarm()) {
+        const { removeOrParkAlarmNavInfo, hasAnyTrackedAlarm, stopAlarmForegroundService } = await import('@/src/tasks/backgroundLocationTask');
+        // 반복 여정이면 nav info를 지우지 않고 다음 회차까지 파킹한다(버그45) — 삭제가 아니라
+        // ARRIVED 의미이므로 항상 지우던 기존 동작은 반복 알람의 FGS를 여기서도 꺼뜨렸었다.
+        const parked = await removeOrParkAlarmNavInfo(storageKey);
+        if (parked) {
+          dlog('NEARDEST', `key:${storageKey} 도착 처리 완료 — 반복 여정, 다음 회차까지 nav info 파킹(버그45) → FGS 유지`);
+        } else if (await hasAnyTrackedAlarm()) {
           dlog('NEARDEST', `key:${storageKey} 도착 처리 완료 — 남은 알람 있어 FGS 유지`);
         } else {
           await stopAlarmForegroundService();

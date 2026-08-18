@@ -2,6 +2,7 @@ import * as TaskManager from 'expo-task-manager';
 import { AppState } from 'react-native';
 import {
   removeAlarmNavInfo,
+  removeOrParkAlarmNavInfo,
   addActiveId,
   removeActiveId,
   startGpsPolling,
@@ -62,11 +63,28 @@ TaskManager.defineTask(BACKGROUND_ALARM_TASK, async ({ data, error }) => {
       : [];
     console.log(`[BACKGROUND_ALARM_TASK] auto_arrived — journeyIds:${arrivedJourneyIds} appointmentIds:${arrivedAppointmentIds}`);
 
+    // 이 태스크는 AppState가 'active'가 아닐 때만 실행되지만(파일 상단 가드), 프로세스 자체는
+    // 살아있을 수 있다(스와이프만 한 흔한 케이스) — 그러면 AlarmManager.runners에 좀비 러너가
+    // 남아, 다음 회차 진입 시 isRunning()이 잘못 true를 반환해서 새 러너 시작이 스킵될 수 있다
+    // (notifications.ts의 백그라운드 도착확인 경로는 forgetIfExists()로 이미 방어 중이었는데
+    // 이 핸들러는 빠져 있었음 — 2026-08-18 코드 리뷰 중 발견). 진짜 헤드리스면 동적 import 실패
+    // 또는 러너 자체가 없어 조용히 no-op.
+    try {
+      const { alarmService } = await import('@/src/services/alarmService');
+      [...arrivedJourneyIds.map((id) => ({ id, isAppointment: false })), ...arrivedAppointmentIds.map((id) => ({ id, isAppointment: true }))]
+        .forEach(({ id, isAppointment }) => alarmService.forgetIfExists(isAppointment ? undefined : id, isAppointment ? id : undefined));
+    } catch (e: any) {
+      console.log(`[BACKGROUND_ALARM_TASK] forgetIfExists 동적 import 실패(헤드리스로 추정, 무해): ${e?.message}`);
+    }
+
     await Promise.all([
       ...arrivedJourneyIds.map(async (id) => {
         const key = `j_${id}`;
         await cancelStagedAlarms(key).catch(() => {});
-        await removeAlarmNavInfo(key).catch(() => {});
+        // 반복 여정이면 nav info를 지우지 않고 다음 회차까지 파킹한다(버그45) — 서버가 강제로
+        // ARRIVED 전환시킨 것도 "이번 회차만 끝남"이지 "완전히 끝남"이 아니므로 삭제와 다르다.
+        const parked = await removeOrParkAlarmNavInfo(key).catch(() => false);
+        console.log(`[BACKGROUND_ALARM_TASK] auto_arrived journeyId:${id} ${parked ? '반복 여정 — nav info 파킹(버그45)' : 'nav info 제거'}`);
         await exitNearDestGeofenceMode(key).catch(() => {});
         await removeActiveId(id, undefined).catch(() => {});
       }),

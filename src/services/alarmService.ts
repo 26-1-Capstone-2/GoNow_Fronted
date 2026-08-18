@@ -14,8 +14,13 @@ import {
 import {
   startAlarmForegroundService,
   stopBackgroundLocationUpdates,
+  stopGpsPolling,
   saveAlarmNavInfo,
   removeAlarmNavInfo,
+  clearAlarmNavInfo,
+  hasAnyTrackedAlarm,
+  hasAlarmNavInfo,
+  isRepeatingJourney,
   addActiveId,
   removeActiveId,
   clearActiveIds,
@@ -62,6 +67,9 @@ interface AlarmTarget {
   transportMode?: KakaoMapTransportMode;
   // home 타입 전용 — 막차 모드 여부(3·4단계 알람 문구 분기용, 버그30)
   isLastMode?: boolean;
+  // 개인/귀가(Journey) 전용 — 반복 요일 비트마스크(0/undefined면 반복 없음). 그룹은 항상
+  // undefined. ARRIVED 도달 시 nav info를 파킹할지 판단하는 근거(버그45).
+  repeatDays?: number;
 }
 
 class AlarmRunner {
@@ -84,7 +92,7 @@ class AlarmRunner {
 
   async start(target: AlarmTarget): Promise<void> {
     const id = target.journeyId ?? `apt${target.appointmentId}`;
-    dlog('FOREGROUND', `[alarmService.start] 시작 — type:${target.alarmType} id:${id} dest:${target.destination}`);
+    dlog('FOREGROUND', `[alarmService.start] 시작 — type:${target.alarmType} id:${id} dest:${target.destination} repeatDays:${target.repeatDays ?? 0}`);
     this.target = target;
     // 헤드리스(백그라운드) 경로는 /location 응답만으론 목적지 좌표를 알 수 없어서(응답에 안 실림),
     // 카카오맵 딥링크 버튼을 계속 붙이려면 여기서 미리 캐싱해둬야 함 (backgroundLocationTask.ts가 읽어감)
@@ -97,6 +105,7 @@ class AlarmRunner {
         destination: target.destination,
         transportMode: target.transportMode,
         isLastMode: target.isLastMode,
+        repeatDays: target.repeatDays,
       });
       // 같은 key로 여정이 재시작될 때 이전 세션의 미처리 NEARDEST/DEPARTING 지오펜스가 남아있을 수 있어 방어적으로 정리
       await exitNearDestGeofenceMode(navKey).catch(() => {});
@@ -127,10 +136,14 @@ class AlarmRunner {
     await this.poll(true);
   }
 
-  stop(): void {
+  // preserveNavInfo=true면 ALARM_NAV_INFO_KEY 엔트리를 지우지 않는다 — 반복 여정이 ARRIVED에
+  // 도달했을 때 "이번 회차 정리"는 그대로 하되 "존재 자체"의 흔적만 다음 회차까지 남겨서
+  // FGS가 계속 켜져 있게 하는 용도(파킹, 버그45). 나머지 정리(타이머/단계별 알람/지오펜스)는
+  // 파킹 여부와 무관하게 항상 수행한다.
+  stop(preserveNavInfo = false): void {
     if (this.target) {
       const id = this.target.journeyId ?? `apt${this.target.appointmentId}`;
-      dlog('FOREGROUND', `[alarmService.stop] 종료 — type:${this.target.alarmType} id:${id} 마지막상태:${this.status}`);
+      dlog('FOREGROUND', `[alarmService.stop] 종료 — type:${this.target.alarmType} id:${id} 마지막상태:${this.status} preserveNavInfo:${preserveNavInfo}`);
     }
     if (this.pollTimer) {
       clearTimeout(this.pollTimer);
@@ -139,9 +152,18 @@ class AlarmRunner {
     this.cancelRemainingStages();
     const navKey = this.currentKey();
     if (navKey) {
-      removeAlarmNavInfo(navKey).catch(() => {});
+      if (preserveNavInfo) {
+        // preserveNavInfo=true는 "실제로 반복 여정이라 파킹함"(AlarmManager.stop()의 계산 결과)과
+        // "forgetIfExists()가 무조건 안 건드림"(호출부가 별도로 판단) 두 경우 모두에서 온다 —
+        // 이 지점만 봐서는 어느 쪽인지 단정할 수 없으므로 "반복 여정" 대신 중립적으로 표현한다
+        // (실기기 테스트 중 이 로그가 비반복 알람에도 찍혀서 혼란을 준 적이 있음, 2026-08-18).
+        dlog('FOREGROUND', `[alarmService.stop] nav info 유지(preserveNavInfo=true) key:${navKey}`);
+      } else {
+        removeAlarmNavInfo(navKey).catch(() => {});
+      }
       // stop()이 불리는 모든 경로(도착확인 버튼, ARRIVED 감지, FCM auto_arrived 등)에서
-      // 공통으로 지오펜스까지 정리 — 호출부마다 따로 기억할 필요 없게 여기로 통합
+      // 공통으로 지오펜스까지 정리 — 호출부마다 따로 기억할 필요 없게 여기로 통합. 파킹
+      // 여부와 무관하게 "이번 회차" 지오펜스는 항상 해제한다.
       exitNearDestGeofenceMode(navKey).catch(() => {});
       exitDepartingGeofenceMode(navKey).catch(() => {});
       exitMovingGeofenceMode(navKey).catch(() => {});
@@ -157,6 +179,12 @@ class AlarmRunner {
     const journeyId = this.target?.journeyId;
     const appointmentId = this.target?.appointmentId;
     return journeyId != null ? `j_${journeyId}` : appointmentId != null ? `a_${appointmentId}` : null;
+  }
+
+  // AlarmManager.stop()이 "도착확인/자동 ARRIVED" 의도로 불렸을 때 이 runner가 반복 여정인지
+  // 판단하기 위한 조회용(버그45) — target이 private이라 외부에서 직접 못 읽는다.
+  getRepeatDays(): number | undefined {
+    return this.target?.repeatDays;
   }
 
   cancelRemainingStages(): void {
@@ -225,21 +253,22 @@ class AlarmRunner {
   // poll하고, 안 지났으면 남은 시간만큼만 다시 예약한다.
   async resumeIfDue(): Promise<void> {
     if (!this.target) return;
-    // 2026-08-14(재검토, 실기기로 발견): NEARDEST에 진입한 러너는 stop()이 안 불려서(ARRIVED/삭제
-    // 때만 stop) AlarmManager.runners에 계속 남아있다 — 그래서 이 러너도 resumeAll()에 계속
-    // 휩쓸리는데, 그대로 두면 시간이 충분히 지난 뒤 포그라운드 복귀 시 여기서 또 실제 poll()을
-    // 만들어버린다("NEARDEST니까 더 이상 폴링 안 한다"는 설계 의도와 어긋남 — 사용자가 NEARDEST
-    // 상태에서 포그라운드 복귀 직후 실제 호출이 나가는 걸 실기기로 확인). NEARDEST 진입/복귀는
-    // 전적으로 지오펜스 이벤트(nearDestGeofenceTask.ts)가 담당하므로 여기서는 조용히 스킵한다.
-    // this.status는 값싼 사전 필터일 뿐 — NEARDEST를 백그라운드 헤드리스 틱이 먼저 감지한
-    // 경우(걸어서 이동 중이면 흔함) 포그라운드 러너 인스턴스엔 전혀 반영이 안 돼 이 체크만으론
-    // 못 걸러진다는 게 재검토 중 드러났다. 최종 판단은 어디서나 이미 쓰는 단일 진실 공급원인
-    // ACTIVE_JOURNEYS_KEY/ACTIVE_APPOINTMENTS_KEY 멤버십으로 한다 — NEARDEST 진입 시
-    // removeActiveId()가 감지 주체와 무관하게 항상 일관되게 이 목록에서 빼주기 때문이다.
-    // 2026-08-17: READY/DEPARTING도 Phase 3로 지오펜싱 전환되면서 같은 이유로 추가 —
-    // 안 넣으면 지오펜스로 넘어간 뒤에도 포그라운드 복귀 때마다 불필요한 재폴링이 발생한다
-    // (실기기 테스트로 확인됨 — READY 지오펜스가 30초 간격으로 계속 재등록되는 증상).
-    if (['NEARDEST', 'READY', 'DEPARTING'].includes(this.status)) return;
+    // NEARDEST/READY/DEPARTING(지오펜스 전담 구간)로 넘어간 러너는 stop()이 안 불려서
+    // AlarmManager.runners에 계속 남아있다 — resumeAll()에 계속 휩쓸리므로, 포그라운드
+    // 복귀 시 여기서 불필요한 재폴링을 만들지 않도록 걸러야 한다.
+    //
+    // 2026-08-18(실기기로 발견, 사용자 제보): 예전엔 이 판단을 this.status(러너가 마지막으로
+    // "스스로" 관찰한 상태) 기준의 값싼 사전 필터로 먼저 걸렀었다 — `if (['NEARDEST','READY',
+    // 'DEPARTING'].includes(this.status)) return;`. 근데 READY→DEPARTING→MOVING 전환은
+    // 전부 지오펜스(백그라운드/헤드리스)가 감지하므로, 포그라운드 러너 인스턴스는 이 전환들을
+    // 하나도 못 보고 this.status가 옛 값(예: "READY")에 계속 묶여있을 수 있다. 그 상태로
+    // 실제로는 MOVING(폴링이 꼭 필요)인데도 이 필터가 "지오펜스 전담 구간"으로 오판해 조용히
+    // (로그도 없이) 재폴링을 스킵해버렸다 — READY 진입 이후 한 번도 포그라운드에서 직접 poll()
+    // 안 한 러너가, 그 뒤로 앱을 아무리 포그라운드로 돌려도 계속 재폴링이 안 되는 걸 실기기
+    // 테스트로 확인. this.status는 신뢰할 수 없으므로 완전히 제거하고, 바로 아래
+    // isKeyActivelyTracked()(ACTIVE_JOURNEYS_KEY/ACTIVE_APPOINTMENTS_KEY 멤버십 — 감지
+    // 주체와 무관하게 NEARDEST/READY/DEPARTING 진입 시 removeActiveId()가 항상 일관되게
+    // 이 목록에서 빼주므로 신뢰 가능한 단일 진실 공급원)만으로 판단한다.
     const key = this.currentKey();
     if (key && !(await isKeyActivelyTracked(key))) {
       dlog('FOREGROUND', `[alarmService] 포그라운드 복귀 — key:${key} 활성 추적 대상 아님(NEARDEST 등) — 재폴링 스킵`);
@@ -578,8 +607,9 @@ class AlarmRunner {
 
       if (newStatus === 'ARRIVED') {
         this.cancelRemainingStages();
-        dlog('FOREGROUND', `[alarmService] ARRIVED → 폴링 종료 — journeyId:${this.target?.journeyId}`);
-        this.stop();
+        const preserve = isRepeatingJourney(this.target?.repeatDays);
+        dlog('FOREGROUND', `[alarmService] ARRIVED → 폴링 종료 — journeyId:${this.target?.journeyId} repeatDays:${this.target?.repeatDays ?? 0} 파킹:${preserve}`);
+        this.stop(preserve);
       }
     }
   }
@@ -647,7 +677,10 @@ class AlarmRunner {
           dlog('FOREGROUND', `[alarmService] ARRIVED — 도착완료 appointmentId:${this.target?.appointmentId} time:${arrivalTime}`);
           // sendArrivalConfirmAlarm('나', arrivalTime, this.target!.destination); // FCM으로 대체
         }
-        this.stop();
+        // 그룹(Appointment)은 repeatDays 개념이 없어 target.repeatDays가 항상 undefined다 —
+        // isRepeatingJourney()가 false를 반환해 실질적으로 기존과 동일하게 동작(no-op 통일,
+        // 버그45는 개인/귀가 전용).
+        this.stop(isRepeatingJourney(this.target?.repeatDays));
       }
     }
   }
@@ -699,18 +732,7 @@ class AlarmManager {
         // 알람 삭제 후에도 GPS 폴링이 계속 도는 버그가 있었음. 실기기 실측으로 확인됨).
         (async () => {
           await removeActiveId(target.journeyId, target.appointmentId);
-          if (!this.hasActivePolling()) {
-            // 남은 알람이 하나도 없을 때만 FGS까지 끈다(hasActivePolling()이 지금은
-            // runners.size > 0과 동일하지만, 판단 기준을 한 곳에 모아두기 위해 그대로 재사용)
-            dlog('FOREGROUND', '[AlarmManager] 남은 알람 없음 → stopBackgroundLocationUpdates');
-            dlog('FOREGROUND', `key:${k} onFinish — runners:0(남은 알람 없음) → FGS 종료 시도`);
-            await stopBackgroundLocationUpdates();
-          } else {
-            // 남은 runner가 있어도 전부 NEARDEST뿐이면 GPS 폴링은 이제 필요 없을 수 있음 —
-            // ACTIVE_JOURNEYS_KEY/ACTIVE_APPOINTMENTS_KEY 기준으로 다시 확인(FGS는 안 건드림)
-            dlog('FOREGROUND', `key:${k} onFinish — runners:${this.runners.size}(남은 알람 있음) → FGS 유지, GPS 폴링만 재확인`);
-            await maybeSyncGpsPolling();
-          }
+          await this.reconcileGpsAfterRunnerGone(`key:${k} onFinish`);
         })().catch(() => {});
       });
       this.runners.set(k, runner);
@@ -745,17 +767,75 @@ class AlarmManager {
     }
   }
 
-  stop(journeyId?: number, appointmentId?: number): void {
+  // preserveIfRepeating: "도착확인 버튼"/"auto_arrived FCM"처럼 ARRIVED 의미로 stop()이 불릴 때만
+  // true로 넘긴다 — 삭제/비활성화/SCHEDULED 복귀 등 "진짜 중단" 의도의 기존 호출부는 전부 기본값
+  // (false)이라 동작이 그대로다. true여도 반복 여정이 아니면(repeatDays 없음) 그냥 평소처럼
+  // 완전히 정리된다 — 실제로 파킹되는 건 "반복 여정 + ARRIVED 의미" 교집합일 때뿐이다(버그45).
+  stop(journeyId?: number, appointmentId?: number, preserveIfRepeating = false): void {
     const k = this.key(journeyId, appointmentId);
-    dlog('FOREGROUND', `[AlarmManager.stop] 요청 — key:${k} 현재runners:${this.runners.size}`);
-    // runner.stop()이 내부적으로 onFinish를 호출하고, 거기서 이미 hasActivePolling() 기준으로
-    // FGS 필요 여부를 재점검한다 — 여기서 같은 체크를 또 하면 stopBackgroundLocationUpdates가
-    // 중복 호출된다(실기기에서 실제로 관측됨). runner가 없는 키면 onFinish 자체가 안 불리니
-    // 애초에 재점검할 것도 없다.
-    this.runners.get(k)?.stop();
-    this.runners.delete(k);
+    dlog('FOREGROUND', `[AlarmManager.stop] 요청 — key:${k} 현재runners:${this.runners.size} preserveIfRepeating:${preserveIfRepeating}`);
+    const runner = this.runners.get(k);
+    if (runner) {
+      // runner.stop()이 내부적으로 onFinish를 호출하고, 거기서 이미 hasActivePolling() 기준으로
+      // FGS 필요 여부를 재점검한다 — 여기서 같은 체크를 또 하면 stopBackgroundLocationUpdates가
+      // 중복 호출된다(실기기에서 실제로 관측됨).
+      const preserve = preserveIfRepeating && isRepeatingJourney(runner.getRepeatDays());
+      dlog('FOREGROUND', `[AlarmManager.stop] key:${k} repeatDays:${runner.getRepeatDays() ?? 0} 파킹:${preserve}`);
+      runner.stop(preserve);
+      this.runners.delete(k);
+    } else if (preserveIfRepeating) {
+      // 러너가 이미 없는데 ARRIVED 의미로 stop()이 불림 — 이미 파킹돼 있거나(중복 이벤트) 애초에
+      // 추적 대상이 아니었던 key다. "삭제/비활성화" 의도가 아니므로 nav info를 건드리지 않는다 —
+      // 잘못 지우면 방금 파킹된 엔트리를 다른 경로(예: 폴링 ARRIVED)가 막 파킹해둔 걸 여기서
+      // 도로 지워버리는 경쟁이 생길 수 있다.
+      dlog('FOREGROUND', `[AlarmManager.stop] 러너 없음, preserveIfRepeating 요청 — key:${k} nav info 그대로 둠(이미 파킹됐거나 대상 아님)`);
+    } else {
+      // 러너가 이미 없는 key — 반복 여정이 ARRIVED로 파킹돼 다음 회차를 기다리는 중일 수
+      // 있다(버그45). 이 상태에서 명시적으로(삭제/비활성화 의도로) stop()이 호출됐다는 건
+      // "파킹 취소" 의도이므로, onFinish가 못 하는 nav info/지오펜스 정리를 여기서 직접 해준다 —
+      // 안 하면 nav info가 영구히 안 지워져 FGS가 계속 켜진 채 남는다.
+      (async () => {
+        // 애초에 이 key가 한 번도 시작된 적 없으면(예: SCHEDULED 상태에서 토글 OFF) 지울 것도
+        // 없다 — 지오펜스 해제 4종/cancelStagedAlarms/FGS·GPS 재확인을 매번 도는 낭비를 막는다.
+        if (!(await hasAlarmNavInfo(k))) {
+          dlog('FOREGROUND', `[AlarmManager.stop] 러너 없음, 추적된 적도 없는 key — key:${k} 정리 생략`);
+          return;
+        }
+        dlog('FOREGROUND', `[AlarmManager.stop] 러너 없음(파킹 상태로 추정) — key:${k} nav info/지오펜스 방어적 정리`);
+        removeAlarmNavInfo(k).catch(() => {});
+        exitNearDestGeofenceMode(k).catch(() => {});
+        exitDepartingGeofenceMode(k).catch(() => {});
+        exitMovingGeofenceMode(k).catch(() => {});
+        exitReadyGeofenceMode(k).catch(() => {});
+        cancelStagedAlarms(k).catch(() => {});
+        await removeActiveId(journeyId, appointmentId);
+        await this.reconcileGpsAfterRunnerGone(`[AlarmManager.stop] 파킹 정리 후 — key:${k}`);
+      })().catch(() => {});
+    }
     this.recentlyStoppedAt.set(k, Date.now());
     setTimeout(() => this.recentlyStoppedAt.delete(k), RECENTLY_STOPPED_WINDOW_MS);
+  }
+
+  // runner가 방금 사라진(onFinish) 또는 애초에 없었던(stop()의 파킹 방어 분기) 시점에 공통으로
+  // 쓰는 GPS/FGS 재확인 로직 — 두 호출부가 독립적으로 이 3단계 판단을 복제해 관리하면 정책이
+  // 바뀔 때(버그45가 정확히 이 케이스였다) 한쪽만 고치고 다른 쪽을 놓칠 위험이 있어 한 곳으로
+  // 모았다.
+  private async reconcileGpsAfterRunnerGone(logPrefix: string): Promise<void> {
+    if (this.hasActivePolling()) {
+      // 남은 runner가 있어도 전부 NEARDEST뿐이면 GPS 폴링은 이제 필요 없을 수 있음 —
+      // ACTIVE_JOURNEYS_KEY/ACTIVE_APPOINTMENTS_KEY 기준으로 다시 확인(FGS는 안 건드림)
+      dlog('FOREGROUND', `${logPrefix} — runners:${this.runners.size}(남은 알람 있음) → FGS 유지, GPS 폴링만 재확인`);
+      await maybeSyncGpsPolling();
+    } else if (await hasAnyTrackedAlarm()) {
+      // runners는 0이지만 ALARM_NAV_INFO_KEY엔 엔트리가 남아있음 — 반복 여정이 ARRIVED로
+      // 파킹돼 다음 회차를 기다리는 중(버그45). GPS만 끄고 FGS는 유지 — 백그라운드 상태로
+      // 다음 회차 진입 시점을 맞으면 FGS를 다시 못 켜기 때문에 여기서 미리 지켜야 한다.
+      dlog('FOREGROUND', `${logPrefix} — runners:0이지만 파킹된 알람 존재(버그45) → FGS 유지, GPS만 중단`);
+      await stopGpsPolling();
+    } else {
+      dlog('FOREGROUND', `${logPrefix} — runners:0(남은 알람 없음) → FGS 종료 시도`);
+      await stopBackgroundLocationUpdates();
+    }
   }
 
   // _layout.tsx의 startReadyAlarms()가 재시작 여부를 판단하기 직전에 호출 — 방금(수 초 이내)
@@ -776,9 +856,15 @@ class AlarmManager {
     const runner = this.runners.get(k);
     if (!runner) return;
     runner.setOnFinish(() => {});
-    runner.stop();
+    // preserveNavInfo=true — 이 함수의 설계 의도는 "메모리에서만 지운다"이지만, runner.stop()을
+    // 인자 없이(기본값 false) 부르면 nav info를 여기서 먼저 지워버려서, 뒤이어 호출부
+    // (notifications.ts)가 removeOrParkAlarmNavInfo()로 반복 여부를 판단하려 할 때 이미 지워진
+    // 뒤라 항상 "반복 아님"으로 오판하는 경쟁이 있었다(버그45 실기기 테스트로 발견, 2026-08-18 —
+    // 귀가 알람을 백그라운드에서 도착확인했을 때 파킹이 무산됨). true로 넘겨 nav info는 절대
+    // 건드리지 않고 호출부의 판단에 완전히 맡긴다.
+    runner.stop(true);
     this.runners.delete(k);
-    dlog('FOREGROUND', `[AlarmManager.forgetIfExists] 좀비 러너 정리 — key:${k}`);
+    dlog('FOREGROUND', `[AlarmManager.forgetIfExists] 좀비 러너 정리(nav info는 호출부가 처리) — key:${k}`);
   }
 
   // NEARDEST 지오펜스 EXIT 처리(nearDestGeofenceTask.ts) 후 READY로 복귀했을 때, 살아있는
@@ -808,6 +894,12 @@ class AlarmManager {
     });
     this.runners.clear();
     await clearActiveIds();
+    // runners.forEach는 "지금 실행 중인" 러너만 정리한다 — 반복 여정이 ARRIVED로 파킹돼
+    // runners에서 이미 빠진 상태였다면(버그45) 위 루프로는 안 닦인다. 로그아웃은 "전부 한 번에"
+    // 정리하는 지점이라 파킹 엔트리까지 통째로 비워야, 다른 계정으로 로그인해도 이전 계정의
+    // 파킹 엔트리가 새 FGS 판단에 섞여 들어가지 않는다.
+    dlog('FOREGROUND', '[AlarmManager.stopAll] 파킹된 nav info까지 포함해 전체 초기화(버그45)');
+    await clearAlarmNavInfo();
     await stopBackgroundLocationUpdates();
   }
 
@@ -853,6 +945,10 @@ class AlarmManager {
     if (this.hasActivePolling()) {
       await startAlarmForegroundService().catch(() => {});
       await maybeSyncGpsPolling().catch(() => {});
+    } else if (await hasAnyTrackedAlarm()) {
+      // 실행 중인 runner는 없지만 파킹된 반복 알람이 남아있음(버그45) — FGS는 유지, GPS만 정리.
+      dlog('FOREGROUND', '[AlarmManager.syncForegroundService] runners:0이지만 파킹된 알람 존재(버그45) → FGS 유지, GPS만 중단');
+      await stopGpsPolling().catch(() => {});
     } else {
       await stopBackgroundLocationUpdates().catch(() => {});
     }

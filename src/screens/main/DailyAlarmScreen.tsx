@@ -43,6 +43,8 @@ type AlarmCard = {
   participantCount?: number;
   myStatus?: string;
   appointmentStatus?: string;
+  // 개인/귀가 전용 — 반복 요일 비트마스크(버그45, ARRIVED 파킹 판단용)
+  repeatDays?: number;
 };
 
 function toAlarmCard(item: AlarmItem): AlarmCard {
@@ -62,6 +64,7 @@ function toAlarmCard(item: AlarmItem): AlarmCard {
     participantCount: item.participant_count ?? undefined,
     myStatus: item.my_status,
     appointmentStatus: item.appointment_status ?? undefined,
+    repeatDays: item.repeat_days ?? undefined,
   };
 }
 
@@ -104,18 +107,20 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
     loadAlarms();
   }, [loadAlarms]);
 
-  const toggleAlarm = (setter: React.Dispatch<React.SetStateAction<AlarmCard[]>>, alarm: AlarmCard) => {
+  // alarmType은 isLastMode(막차 모드 여부)로 유추하면 안 된다 — HOME 여정도 데드라인 모드
+  // (is_last_mode=false)면 PERSONAL로 잘못 판정된다. 호출부가 이미 personal/home 중 어느
+  // 목록(setPersonal/setHome)에서 토글했는지 알고 있으므로 명시적으로 받는다.
+  const toggleAlarm = (setter: React.Dispatch<React.SetStateAction<AlarmCard[]>>, alarm: AlarmCard, alarmType: 'personal' | 'home' = 'personal') => {
     const newEnabled = !alarm.enabled;
     setter((prev) => prev.map((a) => a.id === alarm.id ? { ...a, enabled: newEnabled } : a));
     if (alarm.journeyId) {
-      const alarmType = alarm.isLastMode ? 'home' : 'personal';
       journeysApi.toggleActive(alarm.journeyId, newEnabled).catch(() => {
         setter((prev) => prev.map((a) => a.id === alarm.id ? { ...a, enabled: !newEnabled } : a));
       });
       if (!newEnabled) {
         alarmService.stop(alarm.journeyId);
       } else if (!!alarm.myStatus && ['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
-        alarmService.start({ alarmType, destination: alarm.place, journeyId: alarm.journeyId, destLat: alarm.destLat, destLng: alarm.destLng, transportMode: toTransportMode(alarm.transport === 'car'), isLastMode: alarm.isLastMode });
+        alarmService.start({ alarmType, destination: alarm.place, journeyId: alarm.journeyId, destLat: alarm.destLat, destLng: alarm.destLng, transportMode: toTransportMode(alarm.transport === 'car'), isLastMode: alarm.isLastMode, repeatDays: alarm.repeatDays });
       }
     } else if (alarm.appointmentId) {
       appointmentsApi.toggleParticipantAlarm(alarm.appointmentId, newEnabled).catch(() => {
@@ -198,7 +203,7 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   )}
                   <Switch
                     value={alarm.enabled}
-                    onValueChange={() => toggleAlarm(setPersonal, alarm)}
+                    onValueChange={() => toggleAlarm(setPersonal, alarm, 'personal')}
                     trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
                     thumbColor="#FFFFFF"
                   />
@@ -343,7 +348,7 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   )}
                   <Switch
                     value={alarm.enabled}
-                    onValueChange={() => toggleAlarm(setHome, alarm)}
+                    onValueChange={() => toggleAlarm(setHome, alarm, 'home')}
                     trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
                     thumbColor="#FFFFFF"
                   />

@@ -169,7 +169,7 @@ export default function RootLayout() {
                 return;
               }
               dlog('FOREGROUND', `[startReadyAlarms] journeyId:${a.journey_id}(HOME) start() 호출`);
-              alarmService.start({ alarmType: 'home', destination: a.dest_name, journeyId: a.journey_id, destLat: a.dest_lat, destLng: a.dest_lng, transportMode: toTransportMode(a.transport_type === 'DRIVING'), isLastMode: a.is_last_mode });
+              alarmService.start({ alarmType: 'home', destination: a.dest_name, journeyId: a.journey_id, destLat: a.dest_lat, destLng: a.dest_lng, transportMode: toTransportMode(a.transport_type === 'DRIVING'), isLastMode: a.is_last_mode, repeatDays: a.repeat_days ?? undefined });
             } else if (a.alarm_type === 'PERSONAL' && a.journey_id != null) {
               if (alarmService.isRunning(a.journey_id)) {
                 dlog('FOREGROUND', `[startReadyAlarms] journeyId:${a.journey_id}(PERSONAL) 이미 실행 중 — start() 스킵`);
@@ -180,7 +180,7 @@ export default function RootLayout() {
                 return;
               }
               dlog('FOREGROUND', `[startReadyAlarms] journeyId:${a.journey_id}(PERSONAL) start() 호출`);
-              alarmService.start({ alarmType: 'personal', destination: a.dest_name, journeyId: a.journey_id, destLat: a.dest_lat, destLng: a.dest_lng, transportMode: toTransportMode(a.transport_type === 'DRIVING') });
+              alarmService.start({ alarmType: 'personal', destination: a.dest_name, journeyId: a.journey_id, destLat: a.dest_lat, destLng: a.dest_lng, transportMode: toTransportMode(a.transport_type === 'DRIVING'), repeatDays: a.repeat_days ?? undefined });
             }
           });
           // alarmService.start()는 runner를 map에 동기적으로 등록하므로(내부 await 이전), 위 forEach
@@ -392,8 +392,8 @@ export default function RootLayout() {
           ? String(data.appointment_ids).split(',').map(Number).filter(n => !isNaN(n))
           : [];
         dlog('FOREGROUND', `[FCM] NEARDEST 자동 ARRIVED — journeyIds:${journeyIds} appointmentIds:${appointmentIds}`);
-        journeyIds.forEach((id) => alarmService.stop(id));
-        appointmentIds.forEach((id) => alarmService.stop(undefined, id));
+        journeyIds.forEach((id) => alarmService.stop(id, undefined, true));
+        appointmentIds.forEach((id) => alarmService.stop(undefined, id, true));
         useCalendarStore.getState().bumpAlarmVersion();
         return;
       }
@@ -446,7 +446,7 @@ export default function RootLayout() {
                 return;
               }
               const type: AlarmType = res.data.journey_type === 'HOME' ? 'home' : 'personal';
-              await alarmService.start({ alarmType: type, destination: res.data.dest_name, journeyId: id, destLat: res.data.dest_lat, destLng: res.data.dest_lng, transportMode: toTransportMode(res.data.transport_type === 'DRIVING'), isLastMode: res.data.is_last_mode });
+              await alarmService.start({ alarmType: type, destination: res.data.dest_name, journeyId: id, destLat: res.data.dest_lat, destLng: res.data.dest_lng, transportMode: toTransportMode(res.data.transport_type === 'DRIVING'), isLastMode: res.data.is_last_mode, repeatDays: res.data.repeat_days ?? undefined });
             } catch (e) {
               dlog('FOREGROUND', `[FCM] journeyId:${id} start 실패 error:${e}`);
             }
@@ -512,7 +512,8 @@ export default function RootLayout() {
         if (journeyId != null) journeysApi.arrive(journeyId);
         if (appointmentId != null) appointmentsApi.arriveParticipant(appointmentId);
         // alarmService.stop()이 지오펜스 해제까지 내부에서 처리(아직 EXIT 전에 확인해도 안전)
-        alarmService.stop(journeyId, appointmentId);
+        // preserveIfRepeating=true — 도착확인 버튼은 ARRIVED 의미이므로 반복 여정이면 파킹된다(버그45)
+        alarmService.stop(journeyId, appointmentId, true);
       }
 
       if (actionId === 'arrival-no' && notifId) {

@@ -17,9 +17,11 @@ import { createMembersApi } from '@/src/api/members';
 import { createAlarmsApi } from '@/src/api/alarms';
 import { alarmService } from '@/src/services/alarmService';
 import { reconcileNearDestGeofences } from '@/src/tasks/nearDestGeofenceTask';
+import { saveAlarmNavInfo, startAlarmForegroundService, isRepeatingJourney } from '@/src/tasks/backgroundLocationTask';
 import { toTransportMode } from '@/src/utils/kakaoMapDeeplink';
 import { useAppNavigation } from '@/src/navigation';
 import { useAuthStore } from '@/src/store/authStore';
+import { dlog } from '@/src/utils/deviceLogger';
 import * as Notifications from 'expo-notifications';
 
 const authApi = createAuthApi();
@@ -73,15 +75,41 @@ export default function LoginScreen() {
             alarmService.start({ alarmType: 'group', destination: a.dest_name, appointmentId: a.appointment_id, isActive: a.is_active, destLat: a.dest_lat, destLng: a.dest_lng, transportMode: toTransportMode(a.transport_type === 'DRIVING') });
           } else if (a.alarm_type === 'HOME' && a.journey_id != null) {
             if (alarmService.isRunning(a.journey_id)) return;
-            alarmService.start({ alarmType: 'home', destination: a.dest_name, journeyId: a.journey_id, destLat: a.dest_lat, destLng: a.dest_lng, transportMode: toTransportMode(a.transport_type === 'DRIVING'), isLastMode: a.is_last_mode });
+            alarmService.start({ alarmType: 'home', destination: a.dest_name, journeyId: a.journey_id, destLat: a.dest_lat, destLng: a.dest_lng, transportMode: toTransportMode(a.transport_type === 'DRIVING'), isLastMode: a.is_last_mode, repeatDays: a.repeat_days ?? undefined });
           } else if (a.alarm_type === 'PERSONAL' && a.journey_id != null) {
             if (alarmService.isRunning(a.journey_id)) return;
-            alarmService.start({ alarmType: 'personal', destination: a.dest_name, journeyId: a.journey_id, destLat: a.dest_lat, destLng: a.dest_lng, transportMode: toTransportMode(a.transport_type === 'DRIVING') });
+            alarmService.start({ alarmType: 'personal', destination: a.dest_name, journeyId: a.journey_id, destLat: a.dest_lat, destLng: a.dest_lng, transportMode: toTransportMode(a.transport_type === 'DRIVING'), repeatDays: a.repeat_days ?? undefined });
           }
         });
+        // 반복 여정 중 ARRIVED(=파킹 대상)인 것들 — 위 readyItems 필터에는 안 걸리지만, 이 계정에
+        // "다음 회차를 기다리는 알람"이 있다는 뜻이므로 nav info를 다시 채워 파킹 상태로 복원해야
+        // 한다. 로그아웃(AlarmManager.stopAll())이 파킹 엔트리를 포함해 전부 지우기 때문에,
+        // 로그아웃→재로그인을 거치면 이 정보가 통째로 사라진다 — 복원 안 하면 다음 회차가
+        // 백그라운드/종료 상태로 도래할 때 FGS를 새로 못 켜는 문제가 재발한다(버그45 재발 경로,
+        // 2026-08-18 실기기 테스트 중 발견).
+        const parkedRepeatItems = (alarmsRes.data ?? []).filter((a) => a.my_status === 'ARRIVED' && a.is_active && isRepeatingJourney(a.repeat_days));
+        for (const a of parkedRepeatItems) {
+          const key = a.alarm_type === 'GROUP' ? `a_${a.appointment_id}` : `j_${a.journey_id}`;
+          await saveAlarmNavInfo(key, {
+            destLat: a.dest_lat,
+            destLng: a.dest_lng,
+            destination: a.dest_name,
+            transportMode: toTransportMode(a.transport_type === 'DRIVING'),
+            isLastMode: a.is_last_mode,
+            repeatDays: a.repeat_days ?? undefined,
+          });
+          dlog('FOREGROUND', `[LoginScreen] 반복 여정 파킹 복원 — key:${key} repeatDays:${a.repeat_days}`);
+        }
         // alarmService.start()는 runner를 map에 동기적으로 등록하므로, 위 forEach 직후 시점에
         // 이미 반영돼있음 — 로그인 직후 FGS가 필요한 알람이 있으면 여기서 바로 켜줘야 함
-        // (다음 AppState active 전환까지 기다리면 그 사이 백그라운드 전환 시 추적이 아예 안 됨)
+        // (다음 AppState active 전환까지 기다리면 그 사이 백그라운드 전환 시 추적이 아예 안 됨).
+        // 파킹만 복원되고(runner는 없음) 다른 활성 알람도 없는 경우 syncForegroundService()의
+        // "runners:0이지만 파킹된 알람 존재" 분기는 GPS만 정리할 뿐 FGS를 새로 켜지는 않으므로
+        // (그 분기는 "이미 켜진 FGS를 유지"하는 용도라 이미 꺼진 FGS를 새로 켜주진 않음), 파킹
+        // 복원이 하나라도 있었다면 여기서 직접 켜준다.
+        if (parkedRepeatItems.length > 0) {
+          await startAlarmForegroundService().catch(() => {});
+        }
         alarmService.syncForegroundService().catch(() => {});
       } catch (e) {
         console.log('[LoginScreen] READY 알람 복구 실패:', e);

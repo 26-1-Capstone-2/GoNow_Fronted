@@ -218,14 +218,14 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
       if (isEditMode && editAlarm.journeyId) {
         const res = await journeysApi.updateHome(editAlarm.journeyId, payload);
         if (res.data.journey_status === 'READY') {
-          alarmService.start({ alarmType: 'home', destination: editAlarm.home_name, journeyId: editAlarm.journeyId, destLat: editAlarm.home_lat, destLng: editAlarm.home_lng, transportMode: toTransportMode(editAlarm.transport === 'car'), isLastMode: editAlarm.mode === 'lastTrain' });
+          alarmService.start({ alarmType: 'home', destination: editAlarm.home_name, journeyId: editAlarm.journeyId, destLat: editAlarm.home_lat, destLng: editAlarm.home_lng, transportMode: toTransportMode(editAlarm.transport === 'car'), isLastMode: editAlarm.mode === 'lastTrain', repeatDays: payload.repeat_days });
         } else if (res.data.journey_status === 'SCHEDULED') {
           alarmService.stop(editAlarm.journeyId);
         }
       } else {
         const res = await journeysApi.createHome(payload);
         if (res.data.journey_status === 'READY') {
-          alarmService.start({ alarmType: 'home', destination: editAlarm.home_name, journeyId: res.data.journey_id, destLat: editAlarm.home_lat, destLng: editAlarm.home_lng, transportMode: toTransportMode(editAlarm.transport === 'car'), isLastMode: editAlarm.mode === 'lastTrain' });
+          alarmService.start({ alarmType: 'home', destination: editAlarm.home_name, journeyId: res.data.journey_id, destLat: editAlarm.home_lat, destLng: editAlarm.home_lng, transportMode: toTransportMode(editAlarm.transport === 'car'), isLastMode: editAlarm.mode === 'lastTrain', repeatDays: payload.repeat_days });
         }
       }
       await loadAlarms();
@@ -261,7 +261,7 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
       if (!newEnabled) {
         alarmService.stop(alarm.journeyId);
       } else if (!!alarm.myStatus && ['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
-        alarmService.start({ alarmType: 'home', destination: alarm.home_name, journeyId: alarm.journeyId, destLat: alarm.home_lat, destLng: alarm.home_lng, transportMode: toTransportMode(alarm.transport === 'car'), isLastMode: alarm.mode === 'lastTrain' });
+        alarmService.start({ alarmType: 'home', destination: alarm.home_name, journeyId: alarm.journeyId, destLat: alarm.home_lat, destLng: alarm.home_lng, transportMode: toTransportMode(alarm.transport === 'car'), isLastMode: alarm.mode === 'lastTrain', repeatDays: repeatDaysToMask(alarm.repeat) });
       }
     }
   };

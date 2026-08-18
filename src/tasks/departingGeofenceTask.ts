@@ -11,7 +11,7 @@ import {
   patchLocation,
   addActiveId,
   removeActiveId,
-  removeAlarmNavInfo,
+  removeOrParkAlarmNavInfo,
   startGpsPolling,
 } from '@/src/tasks/backgroundLocationTask';
 
@@ -218,8 +218,24 @@ export async function finishAsArrived(key: string, journeyId?: number, appointme
       dlog('DEPARTING', `[DEPARTING 지오펜스] alarmService 동적 import 실패 — 직접 정리로 폴백: ${e?.message}`);
     }
   }
+  // 프로세스가 살아있는데(스와이프만 하고 완전 종료는 아닌 흔한 케이스) 백그라운드라 위 분기를
+  // 못 탄 경우, AlarmManager.runners에 좀비 러너가 남을 수 있다 — 지우지 않으면 다음 회차
+  // 진입 시 isRunning()이 잘못 true를 반환해서 새 러너 시작 자체가 스킵된다(notifications.ts의
+  // 백그라운드 도착확인 경로는 이미 forgetIfExists()로 이걸 방어하고 있었는데, 이 함수는 빠져
+  // 있었음 — 2026-08-18 코드 리뷰 중 발견). 진짜 헤드리스면 alarmService 동적 import 자체가
+  // 실패하거나 러너가 애초에 없어 조용히 no-op.
+  try {
+    const { alarmService } = await import('@/src/services/alarmService');
+    alarmService.forgetIfExists(journeyId, appointmentId);
+  } catch (e: any) {
+    dlog('DEPARTING', `[DEPARTING 지오펜스] forgetIfExists 동적 import 실패(헤드리스로 추정, 무해): ${e?.message}`);
+  }
   await cancelStagedAlarms(key).catch(() => {});
-  await removeAlarmNavInfo(key).catch(() => {});
+  // 반복 여정이면 nav info를 지우지 않고 다음 회차까지 파킹한다(버그45) — readyGeofenceTask.ts/
+  // departingGeofenceTask.ts/movingGeofenceTask.ts 전부 이 함수를 공유하므로 세 지오펜스
+  // 경로(READY/DEPARTING/MOVING 어디서 100m 진입이 감지되든) 전부 한 번에 적용된다.
+  const parked = await removeOrParkAlarmNavInfo(key).catch(() => false);
+  dlog('DEPARTING', `key:${key} ARRIVED 정리 — ${parked ? '반복 여정, nav info 파킹(버그45)' : 'nav info 제거'}`);
   await removeActiveId(journeyId, appointmentId).catch(() => {});
 }
 

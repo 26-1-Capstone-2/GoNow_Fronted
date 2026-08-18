@@ -60,6 +60,9 @@ export type AlarmNavInfo = {
   destination?: string; // NEARDEST 지오펜스 진입 시 도착 확인 알림 문구용(nearDestGeofenceTask.ts)
   transportMode?: KakaoMapTransportMode;
   isLastMode?: boolean;
+  // 개인/귀가(Journey) 전용 — 반복 요일 비트마스크(0/undefined면 반복 없음). 그룹(Appointment)은
+  // 항상 undefined. ARRIVED 도달 시 nav info를 "파킹"(다음 회차까지 유지)할지 판단하는 근거(버그45).
+  repeatDays?: number;
 };
 
 // 읽고→고치고→쓰는 구조라, alarmService.start()가 여러 개 동시에 불리면(예: 새벽 4시
@@ -67,9 +70,11 @@ export type AlarmNavInfo = {
 // 먼저 쓴 쪽을 덮어써서 좌표가 사라질 수 있음 — 같은 프로세스 안에서는 순서대로만 처리되게
 // 직렬화(notifications.ts의 withStagingLock과 동일한 패턴)
 let navInfoQueue: Promise<void> = Promise.resolve();
-function withNavInfoLock(fn: () => Promise<void>): Promise<void> {
+// removeOrParkAlarmNavInfo()가 "파킹했는지" 결과값을 돌려줘야 해서 제네릭으로 뺐다(버그45) —
+// 큐 자체(navInfoQueue)는 순서 보장 목적일 뿐이라 여전히 Promise<void>로 둔다.
+function withNavInfoLock<T>(fn: () => Promise<T>): Promise<T> {
   const run = navInfoQueue.then(fn, fn); // 이전 호출이 실패했어도 다음 호출은 정상 진행
-  navInfoQueue = run.catch(() => {});
+  navInfoQueue = run.then(() => {}, () => {});
   return run;
 }
 
@@ -94,6 +99,65 @@ export function removeAlarmNavInfo(key: string): Promise<void> {
       await AsyncStorage.setItem(ALARM_NAV_INFO_KEY, JSON.stringify(map));
     } catch {}
   });
+}
+
+// 로그아웃 등 "전부 한 번에" 초기화하는 지점 전용(clearActiveIds()와 동일한 목적·패턴) —
+// 파킹된(ARRIVED, 반복 여정이라 다음 회차까지 nav info를 남겨둔) 엔트리까지 포함해 통째로
+// 비운다. 이게 없으면 로그아웃 후 다른 계정으로 로그인해도 이전 계정의 파킹 엔트리가
+// hasAnyTrackedAlarm()을 계속 true로 만들어 FGS가 잘못 켜진 채 남을 수 있다(버그45).
+export function clearAlarmNavInfo(): Promise<void> {
+  return withNavInfoLock(async () => {
+    await AsyncStorage.setItem(ALARM_NAV_INFO_KEY, JSON.stringify({})).catch(() => {});
+  });
+}
+
+// ARRIVED류 이벤트(수동 도착확인 버튼, 서버 강제 auto_arrived FCM)를 처리하는 헤드리스 경로
+// (notifications.ts의 백그라운드 도착확인, backgroundAlarmTask.ts의 auto_arrived) 전용 —
+// 이 경로들은 AlarmManager를 거치지 않고 nav info를 직접 지웠었는데, 반복 여정이면 지우지 않고
+// 파킹해야 한다(버그45). 읽기→반복여부 판단→(필요시)삭제를 한 락 안에서 원자적으로 처리해서
+// 그 사이 다른 컨텍스트가 같은 key를 갱신하는 경쟁을 피한다. 반환값: true면 파킹(유지),
+// false면 실제로 지움(반복 아님, 또는 원래 없던 key).
+export function removeOrParkAlarmNavInfo(key: string): Promise<boolean> {
+  return withNavInfoLock(async () => {
+    try {
+      const raw = await AsyncStorage.getItem(ALARM_NAV_INFO_KEY);
+      if (!raw) {
+        dlog('POLLING', `[removeOrParkAlarmNavInfo] key:${key} — ALARM_NAV_INFO_KEY 자체가 비어있음`);
+        return false;
+      }
+      const map: Record<string, AlarmNavInfo> = JSON.parse(raw);
+      dlog('POLLING', `[removeOrParkAlarmNavInfo] key:${key} — 엔트리:${map[key] ? '있음' : '없음'} repeatDays:${map[key]?.repeatDays ?? 0}`);
+      const parking = isRepeatingJourney(map[key]?.repeatDays);
+      if (!parking) {
+        delete map[key];
+        await AsyncStorage.setItem(ALARM_NAV_INFO_KEY, JSON.stringify(map));
+      }
+      return parking;
+    } catch {
+      return false;
+    }
+  });
+}
+
+// 특정 key가 지금 nav info에 등록돼 있는지만 가볍게 확인 — AlarmManager.stop()이 "애초에
+// 추적된 적 없는 key"(예: SCHEDULED 상태에서 한 번도 시작 안 한 알람을 토글 OFF)까지 지오펜스
+// 해제 4종 + cancelStagedAlarms + FGS/GPS 재확인을 매번 도는 걸 막기 위한 조회용(버그45 리뷰
+// 중 발견된 효율 이슈).
+export async function hasAlarmNavInfo(key: string): Promise<boolean> {
+  const raw = await AsyncStorage.getItem(ALARM_NAV_INFO_KEY).catch(() => null);
+  if (!raw) return false;
+  try {
+    return key in JSON.parse(raw);
+  } catch {
+    return false;
+  }
+}
+
+// repeatDays 비트마스크가 "반복"을 의미하는지 판단하는 단일 기준 — alarmService.ts(포그라운드
+// ARRIVED 처리)와 이 파일의 헤드리스 틱(백그라운드 ARRIVED 처리) 양쪽에서 재사용해서 "무엇을
+// 반복으로 볼지" 판단이 어긋나지 않게 한다(버그45).
+export function isRepeatingJourney(repeatDays?: number | null): boolean {
+  return !!repeatDays;
 }
 
 // ALARM_NAV_INFO_KEY는 NEARDEST로 폴링이 멈춘 알람도 계속 남아있다(ARRIVED/삭제 때만 지움) —
@@ -710,7 +774,17 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
         }
 
         if (journey_status === 'ARRIVED') {
-          dlog('POLLING', `ARRIVED — journeyId:${id} ID 제거 (폴링이 확정)`);
+          const parking = isRepeatingJourney(navInfo[key]?.repeatDays);
+          dlog('POLLING', `ARRIVED — journeyId:${id} ${parking ? '반복 여정 — 다음 회차까지 nav info 유지(파킹, 버그45)' : 'ID 제거 (폴링이 확정)'}`);
+          // 이 태스크는 AppState가 active면 최상단에서 이미 return하지만(위 참고), 프로세스
+          // 자체는 살아있을 수 있다(스와이프만 한 흔한 케이스) — 그러면 AlarmManager.runners에
+          // 좀비 러너가 남아 다음 회차 진입 시 isRunning()이 잘못 true를 반환해서 새 러너
+          // 시작이 스킵될 수 있다(notifications.ts/departingGeofenceTask.ts/backgroundAlarmTask.ts
+          // 는 이미 forgetIfExists()로 방어 중이었는데 정작 최초로 파킹을 구현한 이 지점이
+          // 빠져 있었음 — 2026-08-18 코드 리뷰 중 발견). 진짜 헤드리스면 조용히 no-op.
+          import('@/src/services/alarmService')
+            .then(({ alarmService }) => alarmService.forgetIfExists(id, undefined))
+            .catch(() => {});
           // 2026-08-14(재검토): 지금 상태머신상 SCHEDULED에서 생성 직후 첫 폴링만으로 바로
           // ARRIVED에 도달하는 경로는 없어서(반드시 NEARDEST를 거침) 지금은 안전하지만, NEARDEST
           // 분기와 같은 이유로 lastCallTimes는 여기서도 안 지운다 — 나중에 상태머신이 바뀌어
@@ -719,7 +793,9 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
           delete desiredIntervals[key];
           intervalDeletes.add(key);
           delete intervalSets[key];
-          removeAlarmNavInfo(key).catch(() => {});
+          if (!parking) {
+            removeAlarmNavInfo(key).catch(() => {});
+          }
           removeActiveId(id, undefined).catch(() => {});
           // MOVING 보조 지오펜스가 등록돼 있었을 수 있다 — 폴링이 지오펜스보다 먼저 ARRIVED를
           // 확정한 경합 상황(2026-08-17 실기기 테스트로 지적됨)에서, 폴링만 정리하고 지오펜스
@@ -840,6 +916,10 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
 
         if (participant_status === 'ARRIVED') {
           dlog('POLLING', `ARRIVED — appointmentId:${id} ID 제거 (폴링이 확정)`);
+          // journey_status ARRIVED 분기와 동일 이유 — 좀비 러너 방지(2026-08-18 코드 리뷰 발견).
+          import('@/src/services/alarmService')
+            .then(({ alarmService }) => alarmService.forgetIfExists(undefined, id))
+            .catch(() => {});
           // lastCallTimes는 여기서 안 지운다 — 이유는 위 journey_status ARRIVED 분기 주석 참고.
           delete desiredIntervals[key];
           intervalDeletes.add(key);
