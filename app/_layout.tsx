@@ -492,7 +492,7 @@ export default function RootLayout() {
     });
 
     // 포그라운드 알림 버튼 처리 — 아래 콜드부팅 처리(getInitialNotification)와 로직 공유
-    const handleNotificationActionPress = (actionId: string | undefined, notifId: string | undefined, data: Record<string, any> | undefined) => {
+    const handleNotificationActionPress = async (actionId: string | undefined, notifId: string | undefined, data: Record<string, any> | undefined) => {
       const journeyId = data?.journeyId ? Number(data.journeyId) : undefined;
       const appointmentId = data?.appointmentId ? Number(data.appointmentId) : undefined;
 
@@ -509,11 +509,14 @@ export default function RootLayout() {
         dlog('FOREGROUND', `[알람] 도착확인 YES버튼 눌림 — journeyId:${journeyId} appointmentId:${appointmentId} → /arrive 호출`);
         dlog('NEARDEST', `도착확인 YES버튼(포그라운드) — journeyId:${journeyId} appointmentId:${appointmentId}`);
         notifee.cancelNotification(notifId);
-        if (journeyId != null) journeysApi.arrive(journeyId);
-        if (appointmentId != null) appointmentsApi.arriveParticipant(appointmentId);
+        if (journeyId != null) await journeysApi.arrive(journeyId);
+        if (appointmentId != null) await appointmentsApi.arriveParticipant(appointmentId);
         // alarmService.stop()이 지오펜스 해제까지 내부에서 처리(아직 EXIT 전에 확인해도 안전)
         // preserveIfRepeating=true — 도착확인 버튼은 ARRIVED 의미이므로 반복 여정이면 파킹된다(버그45)
         alarmService.stop(journeyId, appointmentId, true);
+        // 서버 반영 완료 후 목록 화면(카드의 myStatus 등)을 갱신 — 안 하면 화면을 벗어났다
+        // 다시 들어와야만 지도 딥링크 버튼 등이 최신 상태(ARRIVED→비활성)로 반영됐었음.
+        useCalendarStore.getState().bumpAlarmVersion();
       }
 
       if (actionId === 'arrival-no' && notifId) {
