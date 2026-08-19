@@ -425,11 +425,6 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
       setAlarms((prev) => prev.map((a) => a.id === id ? { ...a, enabled: alarm.enabled } : a));
     }
   };
-  const copyInviteCode = async () => {
-    try {
-      await Share.share({ message: editAlarm.inviteCode });
-    } catch {}
-  };
   const shareInviteCode = async () => {
     try {
       await Share.share({
@@ -637,7 +632,6 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
                     <Text style={styles.optionLabel}>초대코드</Text>
                     <View style={styles.rowRight}>
                       <Text style={styles.inviteCode}>{editAlarm.inviteCode}</Text>
-                      <TouchableOpacity onPress={copyInviteCode} style={{ marginLeft: 8 }}><Feather name="copy" size={16} color="#AAAAAA" /></TouchableOpacity>
                       <TouchableOpacity onPress={shareInviteCode} style={{ marginLeft: 8 }}><Feather name="share" size={16} color="#AAAAAA" /></TouchableOpacity>
                     </View>
                   </View>
