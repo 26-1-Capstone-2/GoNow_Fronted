@@ -1,5 +1,6 @@
 import { setupNotificationCategories, AlarmType, getChannelId, sendDebugNotification } from '@/src/utils/notifications';
 import { openKakaoMapRoute, toTransportMode, type KakaoMapTransportMode } from '@/src/utils/kakaoMapDeeplink';
+import { extractInviteCodeFromUrl, setPendingInviteCode } from '@/src/utils/inviteDeepLink';
 import { createJourneysApi } from '@/src/api/journeys';
 import { createAppointmentsApi } from '@/src/api/appointments';
 import { createAlarmsApi } from '@/src/api/alarms';
@@ -17,12 +18,12 @@ import { useAppointmentStatusStore } from '@/src/store/appointmentStatusStore';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { createMembersApi } from '@/src/api/members';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
+import { router, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import * as Location from 'expo-location';
 import * as Updates from 'expo-updates';
-import { AppState, Platform, ToastAndroid } from 'react-native';
+import { AppState, Linking, Platform, ToastAndroid } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import 'react-native-reanimated';
@@ -563,6 +564,26 @@ export default function RootLayout() {
       dlog('FOREGROUND', `[_layout] useEffect 언마운트 — instanceId:${instanceId}`);
       cleanup();
     };
+  }, []);
+
+  // 그룹 초대 유니버설 링크(https://gonow-api.uk/join?code=...) 처리 — 콜드스타트(앱 종료 상태에서
+  // 링크 탭)와 웜스타트(백그라운드에서 링크 탭) 양쪽 다 커버해야 해서 getInitialURL + 'url' 이벤트
+  // 둘 다 등록한다. 로그인 전에 링크를 탔을 수도 있어 코드는 일단 AsyncStorage에 저장해두고,
+  // /daily-alarm 화면이 마운트될 때 소비한다(consumePendingInviteCode) — 그래야 로그인 흐름과
+  // 경쟁하지 않는다.
+  useEffect(() => {
+    const handleUrl = (url: string | null) => {
+      const code = url ? extractInviteCodeFromUrl(url) : null;
+      if (!code) return;
+      dlog('FOREGROUND', `[inviteDeepLink] 초대코드 감지: ${code}`);
+      setPendingInviteCode(code).finally(() => {
+        router.push('/daily-alarm');
+      });
+    };
+
+    Linking.getInitialURL().then(handleUrl).catch(() => {});
+    const sub = Linking.addEventListener('url', ({ url }) => handleUrl(url));
+    return () => sub.remove();
   }, []);
 
   return (

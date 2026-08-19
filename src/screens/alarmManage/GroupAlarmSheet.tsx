@@ -40,9 +40,10 @@ interface GroupAlarm {
 interface Props {
   onClose: () => void;
   onArrivalPress?: (alarm: GroupAlarm) => void;
-  initialMode?: 'add' | 'create' | 'edit';
+  initialMode?: 'add' | 'create' | 'edit' | 'join';
   editAppointmentId?: number;
   initialAlarm?: any;
+  initialInviteCode?: string;
 }
 
 const alarmsApi = createAlarmsApi();
@@ -85,7 +86,7 @@ const DEFAULT_ALARM: GroupAlarm = {
 
 type ViewType = 'list' | 'edit' | 'place' | 'addChoice' | 'join' | 'transport';
 
-export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, editAppointmentId, initialAlarm }: Props) {
+export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, editAppointmentId, initialAlarm, initialInviteCode }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['85%'], []);
   const { selectedDate, alarmVersion, bumpAlarmVersion } = useCalendarStore();
@@ -94,7 +95,9 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
   const { places, searchKey, loadPlaces, savePlace, deletePlace } = usePlaces('DEST');
 
   const [view, setView] = useState<ViewType>(
-    initialMode === 'add' ? 'addChoice' : (initialMode === 'create' || initialMode === 'edit') ? 'edit' : 'list'
+    initialMode === 'join' ? 'join'
+      : initialMode === 'add' ? 'addChoice'
+      : (initialMode === 'create' || initialMode === 'edit') ? 'edit' : 'list'
   );
   const [alarms, setAlarms] = useState<GroupAlarm[]>([]);
   const [editAlarm, setEditAlarm] = useState<GroupAlarm>(() => {
@@ -104,7 +107,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
     return DEFAULT_ALARM;
   });
   const [tempPlace, setTempPlace] = useState<SearchResult | null>(null);
-  const [inviteCode, setInviteCode] = useState('');
+  const [inviteCode, setInviteCode] = useState(initialInviteCode ?? '');
   const [inviteError, setInviteError] = useState('');
   const [joinTransport, setJoinTransport] = useState<Transport>('public');
   const isEditMode = !!editAlarm.id;
@@ -430,7 +433,12 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
   const shareInviteCode = async () => {
     try {
       await Share.share({
-        message: '[GoNow] 그룹 초대코드: ' + editAlarm.inviteCode + ' | 초대코드를 앱에 입력해 그룹에 참여하세요!',
+        // https 유니버설 링크 — 앱이 설치돼 있으면 탭 한 번에 앱이 열리고 초대코드가 자동 입력된다
+        // (app.json의 Android App Links + app/_layout.tsx의 딥링크 리스너 참고).
+        message:
+          '[GoNow] 모임에 초대되었습니다!\n' +
+          '아래 링크를 누르면 그룹에 바로 참여할 수 있어요.\n' +
+          `https://gonow-api.uk/join?code=${editAlarm.inviteCode}`,
       });
     } catch {}
   };

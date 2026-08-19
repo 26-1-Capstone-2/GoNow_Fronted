@@ -486,7 +486,12 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
   const shareInviteCode = async () => {
     try {
       await Share.share({
-        message: '[GoNow] 그룹 초대코드: ' + editAlarm.inviteCode + ' | 초대코드를 앱에 입력해 그룹에 참여하세요!',
+        // https 유니버설 링크 — 앱이 설치돼 있으면 탭 한 번에 앱이 열리고 초대코드가 자동 입력된다
+        // (app.json의 Android App Links + app/_layout.tsx의 딥링크 리스너 참고).
+        message:
+          '[GoNow] 모임에 초대되었습니다!\n' +
+          '아래 링크를 누르면 그룹에 바로 참여할 수 있어요.\n' +
+          `https://gonow-api.uk/join?code=${editAlarm.inviteCode}`,
       });
     } catch {}
   };
