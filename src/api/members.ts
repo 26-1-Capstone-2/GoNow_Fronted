@@ -18,6 +18,14 @@ export type UpdateSettingPayload = {
   transit_type: TransitType;
 };
 
+export type AlarmSoundMode = 'SOUND' | 'VIBRATE' | 'SILENT';
+
+// 부분 업데이트 — 바뀐 필드만 보내면 됨(둘 다 필수 아님, 스프링도 null인 필드는 유지)
+export type UpdateArrivalSoundPayload = {
+  arrival_expected_sound_mode?: AlarmSoundMode;
+  arrival_complete_sound_mode?: AlarmSoundMode;
+};
+
 export type MyProfile = {
   member_id: number;
   email: string;
@@ -29,6 +37,8 @@ export type MyProfile = {
   transit_type: TransitType;
   priority_type: PriorityType;
   preparation_time: number;
+  arrival_expected_sound_mode: AlarmSoundMode;
+  arrival_complete_sound_mode: AlarmSoundMode;
 };
 
 type MemberApiResponse = {
@@ -55,6 +65,12 @@ export function createMembersApi(clientOptions?: ApiClientOptions) {
 
     updateSetting: (body: UpdateSettingPayload) =>
       request<MemberApiResponse>('/api/members/me/setting', {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }),
+
+    updateArrivalSound: (body: UpdateArrivalSoundPayload) =>
+      request<MemberApiResponse>('/api/members/me/arrival-sound', {
         method: 'PATCH',
         body: JSON.stringify(body),
       }),

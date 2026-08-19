@@ -101,7 +101,8 @@
             "./assets/sounds/stage1.wav",
             "./assets/sounds/stage2.wav",
             "./assets/sounds/stage3.mp3",
-            "./assets/sounds/stage4.mp3"
+            "./assets/sounds/stage4.mp3",
+            "./assets/sounds/arrived.wav"
           ],
           "mode": "production"
         }
