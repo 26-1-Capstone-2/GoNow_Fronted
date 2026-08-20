@@ -381,8 +381,8 @@ export default function MainCalendarScreen() {
           <Text style={styles.yearText}>{selectedYear}년</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.alarmTestBtn} onPress={() => router.push('/alarm-test' as any)}>
-          <Feather name="bell" size={14} color="#888888" />
-          <Text style={styles.alarmTestBtnText}>알람테스트</Text>
+          <Feather name="tool" size={14} color="#888888" />
+          <Text style={styles.alarmTestBtnText}>개발자 도구</Text>
         </TouchableOpacity>
         <View style={styles.headerIconPill}>
           <TouchableOpacity style={styles.headerIconBtn} onPress={() => router.push('/home-address')}>

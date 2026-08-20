@@ -1,0 +1,24 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.unusedappstatus'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.unusedappstatus"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+}
+
+dependencies {
+  // PackageManagerCompat / IntentCompat / UnusedAppRestrictionsConstants — AndroidX Compat API
+  implementation "androidx.core:core-ktx:1.13.1"
+  // PackageManagerCompat.getUnusedAppRestrictionsStatus()가 ListenableFuture<Int>를 반환하는데,
+  // androidx.core가 이 타입을 전이 의존성으로만 노출해서 컴파일 시점엔 명시적으로 필요함
+  // (guava 전체 대신 ListenableFuture 인터페이스만 담은 경량 스텁 아티팩트)
+  implementation "com.google.guava:listenablefuture:1.0"
+}

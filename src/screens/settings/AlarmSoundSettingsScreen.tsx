@@ -1,121 +1,67 @@
-import React from 'react';
-import { Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
-import { openChannelSettings } from '@/src/utils/permissions';
+import { createMembersApi, AlarmSoundMode as ApiAlarmSoundMode } from '@/src/api/members';
 import {
-  ChannelKey,
-  getChannelId,
+  AlarmStage,
+  ArrivalCheckSoundMode,
+  DepartureSoundMode,
+  getArrivalCheckSoundMode,
+  getDepartureSoundMode,
   requestNotificationPermission,
-  resetAlarmChannel,
   sendAlarm,
   sendArrivalAlarm,
   sendArrivalCheckAlarm,
   sendArrivalConfirmAlarm,
+  setArrivalCheckSoundMode,
+  setDepartureSoundMode,
 } from '@/src/utils/notifications';
 
-type CardDef = {
-  key: ChannelKey;
+// 프론트 로컬 모드('sound'|'vibrate'|'silent')와 스프링 AlarmSoundMode('SOUND'|'VIBRATE'|'SILENT') 간 변환
+const toApiMode = (m: ArrivalCheckSoundMode): ApiAlarmSoundMode => m.toUpperCase() as ApiAlarmSoundMode;
+const fromApiMode = (m: ApiAlarmSoundMode): ArrivalCheckSoundMode => m.toLowerCase() as ArrivalCheckSoundMode;
+
+type ToggleMode = 'sound' | 'vibrate' | 'silent';
+const MODE_LABELS: Record<ToggleMode, string> = { sound: '소리', vibrate: '진동', silent: '무음' };
+
+// 모든 알람 카드 공용 — OS 채널 설정 화면 대신 앱 자체 소리/진동/무음 토글로 제어(도착
+// 예정/완료는 서버 동기화, 나머지는 로컬 저장이라는 차이만 있고 UI는 동일). 토글 선택
+// 자체가 미리듣기 — 고른 모드로 바로 테스트 알림을 하나 띄워서 소리/진동을 즉시 들려줌
+// (무음을 고르면 그 무음 상태 그대로가 피드백). 별도 "미리듣기" 버튼 불필요.
+function ToggleAlarmCard({
+  title,
+  desc,
+  mode,
+  loaded,
+  onSelect,
+}: {
   title: string;
   desc: string;
-  color: string;
-  canReset: boolean;
-  onPreview: () => Promise<unknown>;
-};
-
-const DEPARTURE_CARDS: CardDef[] = [
-  { key: 1, title: '🟢 1단계 — 여유 구간', desc: '기본: 잔잔한 벨 소리 · 진동 없음', color: '#2ECC71', canReset: true, onPreview: () => sendAlarm('personal', 1) },
-  { key: 2, title: '🟡 2단계 — 주의 구간', desc: '기본: 가벼운 알림음 · 진동 있음', color: '#F39C12', canReset: true, onPreview: () => sendAlarm('personal', 2) },
-  { key: 3, title: '🟠 3단계 — 위험 구간', desc: '기본: 강한 경고음 · 진동 있음', color: '#E67E22', canReset: true, onPreview: () => sendAlarm('personal', 3) },
-  { key: 4, title: '🔴 4단계 — 임계 구간', desc: '기본: 가장 강한 경고음 3번 연속 발송 · 진동 있음', color: '#E74C3C', canReset: true, onPreview: () => sendAlarm('personal', 4) },
-];
-
-// 도착 3종 전부 canReset: false. 도착 예정/완료는 스프링이 채널ID를 고정값으로 알고 있어서
-// (FCM 발송용) 초기화 버튼을 줄 수 없음(기술적 제약). 도착 여부 확인은 기술적으로는
-// 초기화가 안전하지만(100% 로컬), 커스텀 사운드 없이 시스템 기본음만 쓰는 상태라 지킬 값이
-// 없어 통일성을 위해 뺌 — 나중에 커스텀 사운드를 넣게 되면 이 카드만 다시 true로 바꾸면 됨.
-const ARRIVAL_CARDS: CardDef[] = [
-  {
-    key: 'arrival-check',
-    title: '📍 도착 여부 확인',
-    desc: '기본: 시스템 기본음 · 진동 있음',
-    color: '#4A90D9',
-    canReset: false,
-    onPreview: () => sendArrivalCheckAlarm('나', '테스트 목적지'),
-  },
-  {
-    key: 'arrival-expected',
-    title: '🏃 도착 예정 알림',
-    desc: '기본: 시스템 기본음 · 진동 있음 (그룹원에게 FCM으로 발송)',
-    color: '#9B59B6',
-    canReset: false,
-    onPreview: () => sendArrivalAlarm('나', '오후 3시 20분', '테스트 목적지'),
-  },
-  {
-    key: 'arrival-complete',
-    title: '✅ 도착 완료 알림',
-    desc: '기본: 시스템 기본음 · 진동 있음 (그룹원에게 FCM으로 발송)',
-    color: '#27AE60',
-    canReset: false,
-    onPreview: () => sendArrivalConfirmAlarm('나', '오후 3시 20분', '테스트 목적지'),
-  },
-];
-
-export default function AlarmSoundSettingsScreen() {
-  const router = useRouter();
-
-  const handlePreview = async (card: CardDef) => {
-    const { granted } = await requestNotificationPermission();
-    if (!granted) return; // 미리듣기라 별도 안내 없이 조용히 무시(허용 안 함이면 그냥 재생만 안 됨)
-    await card.onPreview();
-  };
-
-  const handleOpenSettings = async (key: ChannelKey) => {
-    const channelId = await getChannelId(key);
-    openChannelSettings(channelId);
-  };
-
-  const handleReset = (key: ChannelKey, title: string) => {
-    Alert.alert(
-      '기본값으로 초기화',
-      `${title}의 소리/진동을 앱 기본값으로 되돌릴까요? 직접 설정한 내용은 사라져요.`,
-      [
-        { text: '취소', style: 'cancel' },
-        {
-          text: '초기화',
-          style: 'destructive',
-          onPress: () => resetAlarmChannel(key).catch(() => {}),
-        },
-      ],
-    );
-  };
-
-  const renderCard = (card: CardDef) => (
-    <View key={card.key} style={styles.card}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.cardTitle}>{card.title}</Text>
-        <TouchableOpacity
-          style={[styles.previewButton, { backgroundColor: card.color }]}
-          onPress={() => handlePreview(card)}
-          hitSlop={8}
-        >
-          <Feather name="play" size={13} color="#FFFFFF" />
-          <Text style={styles.previewButtonText}>미리듣기</Text>
-        </TouchableOpacity>
-      </View>
-      <Text style={styles.cardDesc}>{card.desc}</Text>
+  mode: ToggleMode;
+  loaded: boolean;
+  onSelect: (mode: ToggleMode) => void;
+}) {
+  return (
+    <View style={styles.card}>
+      <Text style={styles.cardTitle}>{title}</Text>
+      <Text style={styles.cardDesc}>{desc}</Text>
       {Platform.OS === 'android' && Number(Platform.Version) >= 26 && (
-        <View style={styles.buttonRow}>
-          <TouchableOpacity style={styles.actionButton} onPress={() => handleOpenSettings(card.key)}>
-            <Text style={styles.actionButtonText}>소리/진동 변경</Text>
-          </TouchableOpacity>
-          {card.canReset && (
-            <TouchableOpacity style={styles.resetButton} onPress={() => handleReset(card.key, card.title)}>
-              <Text style={styles.resetButtonText}>기본값으로 초기화</Text>
+        <View style={styles.toggleRow}>
+          {(Object.keys(MODE_LABELS) as ToggleMode[]).map((m) => (
+            <TouchableOpacity
+              key={m}
+              disabled={!loaded}
+              style={[styles.toggleButton, mode === m && styles.toggleButtonActive]}
+              onPress={() => onSelect(m)}
+            >
+              <Text style={[styles.toggleButtonText, mode === m && styles.toggleButtonTextActive]}>
+                {MODE_LABELS[m]}
+              </Text>
             </TouchableOpacity>
-          )}
+          ))}
         </View>
       )}
       {Platform.OS === 'android' && Number(Platform.Version) < 26 && (
@@ -123,6 +69,164 @@ export default function AlarmSoundSettingsScreen() {
       )}
     </View>
   );
+}
+
+function ArrivalCheckCard() {
+  const [mode, setMode] = useState<ArrivalCheckSoundMode>('sound');
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getArrivalCheckSoundMode().then((m) => {
+      if (!cancelled) {
+        setMode(m);
+        setLoaded(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleSelect = async (next: ArrivalCheckSoundMode) => {
+    setMode(next); // 낙관적 업데이트 — 실패해도 다음 발송 때 저장된 값 기준으로 다시 시도되므로 롤백 불필요
+    await setArrivalCheckSoundMode(next).catch(() => {});
+    const { granted } = await requestNotificationPermission();
+    if (!granted) return; // 피드백용이라 별도 안내 없이 조용히 무시
+    await sendArrivalCheckAlarm('나', '테스트 목적지').catch(() => {});
+  };
+
+  return (
+    <ToggleAlarmCard
+      title="📍 도착 여부 확인"
+      desc="도착했는지 확인하는 알림이에요. 버튼을 누르면 바로 그 느낌으로 알림이 와요."
+      mode={mode}
+      loaded={loaded}
+      onSelect={handleSelect}
+    />
+  );
+}
+
+const STAGE_TITLES: Record<AlarmStage, string> = {
+  1: '🟢 1단계 — 여유 구간',
+  2: '🟡 2단계 — 주의 구간',
+  3: '🟠 3단계 — 위험 구간',
+  4: '🔴 4단계 — 임계 구간',
+};
+const STAGE_DESCS: Record<AlarmStage, string> = {
+  1: '출발 준비를 시작하라는 알림이에요. 버튼을 누르면 바로 그 느낌으로 알림이 와요.',
+  2: '출발 시간이 다가온다는 알림이에요. 버튼을 누르면 바로 그 느낌으로 알림이 와요.',
+  3: '지금 바로 출발하라는 알림이에요. 버튼을 누르면 바로 그 느낌으로 알림이 와요.',
+  4: '가장 급한 마지막 알림이에요(3번 연속 발송). 버튼을 누르면 바로 그 느낌으로 알림이 와요.',
+};
+
+function DepartureStageCard({ stage }: { stage: AlarmStage }) {
+  const [mode, setMode] = useState<DepartureSoundMode>('sound');
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getDepartureSoundMode(stage).then((m) => {
+      if (!cancelled) {
+        setMode(m);
+        setLoaded(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [stage]);
+
+  const handleSelect = async (next: DepartureSoundMode) => {
+    setMode(next);
+    await setDepartureSoundMode(stage, next).catch(() => {});
+    const { granted } = await requestNotificationPermission();
+    if (!granted) return;
+    await sendAlarm('personal', stage).catch(() => {});
+  };
+
+  return (
+    <ToggleAlarmCard
+      title={STAGE_TITLES[stage]}
+      desc={STAGE_DESCS[stage]}
+      mode={mode}
+      loaded={loaded}
+      onSelect={handleSelect}
+    />
+  );
+}
+
+// 도착 예정/완료는 FCM이라 발송 시점에 스프링이 선호도를 알고 있어야 함 — 로컬 저장이 아니라
+// 서버(MemberSetting)에 저장한다. API가 부분 업데이트를 지원해서(PATCH /api/members/me/arrival-sound,
+// 바뀐 필드만 보내면 나머지는 서버에서 유지) 토글 하나 누를 때마다 그 필드만 딱 보내면 됨 —
+// 다른 쪽 값을 매번 같이 챙겨 보낼 필요가 없어서 두 토글이 서로 완전히 독립적으로 동작함.
+function ArrivalGroupCards() {
+  const [expectedMode, setExpectedMode] = useState<ArrivalCheckSoundMode>('sound');
+  const [completeMode, setCompleteMode] = useState<ArrivalCheckSoundMode>('sound');
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    createMembersApi()
+      .getMyProfile()
+      .then((res) => {
+        if (cancelled || !res.data) return;
+        setExpectedMode(fromApiMode(res.data.arrival_expected_sound_mode));
+        setCompleteMode(fromApiMode(res.data.arrival_complete_sound_mode));
+      })
+      .catch(() => {}) // 조회 실패 시 기본값(소리) 유지 — 아래 finally에서 어차피 토글은 활성화됨
+      .finally(() => {
+        if (!cancelled) setLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleSelect = async (field: 'expected' | 'complete', next: ArrivalCheckSoundMode) => {
+    if (field === 'expected') setExpectedMode(next);
+    else setCompleteMode(next);
+
+    // 부분 업데이트라 바뀐 필드만 보냄 — 다른 쪽 현재값을 알 필요 없음
+    createMembersApi()
+      .updateArrivalSound(
+        field === 'expected'
+          ? { arrival_expected_sound_mode: toApiMode(next) }
+          : { arrival_complete_sound_mode: toApiMode(next) },
+      )
+      .catch(() => {});
+
+    const { granted } = await requestNotificationPermission();
+    if (!granted) return; // 피드백용이라 별도 안내 없이 조용히 무시
+    if (field === 'expected') {
+      await sendArrivalAlarm('나', '오후 3시 20분', '테스트 목적지', next).catch(() => {});
+    } else {
+      await sendArrivalConfirmAlarm('나', '오후 3시 20분', '테스트 목적지', next).catch(() => {});
+    }
+  };
+
+  return (
+    <>
+      <ToggleAlarmCard
+        title="🏃 도착 예정 알림"
+        desc="그룹원에게 도착 예정 시각을 알려주는 알림이에요. 버튼을 누르면 바로 그 느낌으로 알림이 와요."
+        mode={expectedMode}
+        loaded={loaded}
+        onSelect={(m) => handleSelect('expected', m)}
+      />
+      <ToggleAlarmCard
+        title="✅ 도착 완료 알림"
+        desc="그룹원에게 도착 완료를 알려주는 알림이에요. 버튼을 누르면 바로 그 느낌으로 알림이 와요."
+        mode={completeMode}
+        loaded={loaded}
+        onSelect={(m) => handleSelect('complete', m)}
+      />
+    </>
+  );
+}
+
+export default function AlarmSoundSettingsScreen() {
+  const router = useRouter();
 
   return (
     <SafeAreaView style={styles.container}>
@@ -140,10 +244,14 @@ export default function AlarmSoundSettingsScreen() {
 
       <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
         <Text style={styles.sectionTitle}>출발</Text>
-        {DEPARTURE_CARDS.map(renderCard)}
+        <DepartureStageCard stage={1} />
+        <DepartureStageCard stage={2} />
+        <DepartureStageCard stage={3} />
+        <DepartureStageCard stage={4} />
 
         <Text style={styles.sectionTitle}>도착</Text>
-        {ARRIVAL_CARDS.map(renderCard)}
+        <ArrivalCheckCard />
+        <ArrivalGroupCards />
       </ScrollView>
     </SafeAreaView>
   );
@@ -180,33 +288,18 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
   },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
   cardTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: '#1A1A1A' },
-  previewButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    borderRadius: 14,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-  },
-  previewButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
   cardDesc: { fontSize: 13, color: '#666666', lineHeight: 19, marginTop: 6 },
-  buttonRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10, gap: 12 },
-  actionButton: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#1A1A1A',
+  unsupportedText: { marginTop: 10, fontSize: 12, color: '#AAAAAA' },
+  toggleRow: { flexDirection: 'row', marginTop: 10, gap: 8 },
+  toggleButton: {
+    flex: 1,
+    alignItems: 'center',
     borderRadius: 20,
     paddingVertical: 8,
-    paddingHorizontal: 18,
+    backgroundColor: '#EAEAEA',
   },
-  actionButtonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
-  resetButton: { alignSelf: 'flex-start', paddingVertical: 8 },
-  resetButtonText: { color: '#888888', fontSize: 12, fontWeight: '600', textDecorationLine: 'underline' },
-  unsupportedText: { marginTop: 10, fontSize: 12, color: '#AAAAAA' },
+  toggleButtonActive: { backgroundColor: '#4A90D9' },
+  toggleButtonText: { color: '#666666', fontSize: 13, fontWeight: '600' },
+  toggleButtonTextActive: { color: '#FFFFFF' },
 });

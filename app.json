@@ -46,7 +46,22 @@
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_BACKGROUND_LOCATION",
         "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_LOCATION"
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.ACCESS_WIFI_STATE"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "gonow-api.uk",
+              "pathPrefix": "/join"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
       ]
     },
     "web": {
@@ -55,6 +70,7 @@
     },
     "plugins": [
       "expo-router",
+      "./plugins/withNotifeeMavenRepo.js",
       [
         "expo-location",
         {
@@ -86,7 +102,8 @@
             "./assets/sounds/stage1.wav",
             "./assets/sounds/stage2.wav",
             "./assets/sounds/stage3.mp3",
-            "./assets/sounds/stage4.mp3"
+            "./assets/sounds/stage4.mp3",
+            "./assets/sounds/arrived.wav"
           ],
           "mode": "production"
         }
@@ -102,6 +119,15 @@
         "projectId": "f9e1a464-f427-4bb3-ba40-7d6e2382f3f0"
       }
     },
-    "owner": "gonow-team"
+    "owner": "gonow-team",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/f9e1a464-f427-4bb3-ba40-7d6e2382f3f0",
+      "requestHeaders": {
+        "expo-channel-name": "preview"
+      }
+    }
   }
 }

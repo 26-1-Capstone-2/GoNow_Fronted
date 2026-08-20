@@ -1,4 +1,7 @@
-import { AlarmStage, AlarmType, requestNotificationPermission, sendAlarm, sendAllArrivalAlarms, sendArrivalAlarm, sendArrivalCheckAlarm, sendArrivalConfirmAlarm } from '@/src/utils/notifications';
+import { AlarmStage, AlarmType, requestNotificationPermission, sendAlarm, sendArrivalAlarm, sendArrivalCheckAlarm, sendArrivalConfirmAlarm } from '@/src/utils/notifications';
+import ForegroundService from '@/modules/foreground-service';
+import { startGpsPolling, stopGpsPolling } from '@/src/tasks/backgroundLocationTask';
+import { readDeviceLog, clearDeviceLog } from '@/src/utils/deviceLogger';
 import { Feather, FontAwesome6 } from '@expo/vector-icons';
 import notifee from '@notifee/react-native';
 import { useRouter } from 'expo-router';
@@ -7,6 +10,7 @@ import {
     Alert,
     Linking,
     ScrollView,
+    Share,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -18,11 +22,6 @@ const ALARM_TYPES: { type: AlarmType; label: string; color: string; icon: string
   { type: 'personal', label: '개인', color: '#4A90D9', icon: 'user' },
   { type: 'group', label: '그룹', color: '#9B59B6', icon: 'users' },
   { type: 'home', label: '귀가', color: '#27AE60', icon: 'home' },
-];
-
-const SAMPLE_MEMBERS = [
-  { name: '나나나', arrivalTime: '오후 7시 3분' },
-  { name: '다다다', arrivalTime: '오후 6시 58분' },
 ];
 
 const STAGES: { stage: AlarmStage; label: string; desc: string; color: string }[] = [
@@ -38,6 +37,7 @@ export default function AlarmTestScreen() {
   const [selectedType, setSelectedType] = useState<AlarmType>('personal');
   const [lastSent, setLastSent] = useState<string>('');
   const [sentIds, setSentIds] = useState<Partial<Record<AlarmStage, string[]>>>({});
+  const [deviceLogText, setDeviceLogText] = useState<string>('');
 
   useEffect(() => {
     requestNotificationPermission().then(({ granted }) => setHasPermission(granted));
@@ -61,6 +61,25 @@ export default function AlarmTestScreen() {
     setLastSent(`${ALARM_TYPES.find(t => t.type === selectedType)?.label} ${stage}단계 알람 전송됨`);
   };
 
+  const handleRefreshDeviceLog = async () => {
+    setDeviceLogText(await readDeviceLog());
+  };
+
+  const handleClearDeviceLog = async () => {
+    await clearDeviceLog();
+    setDeviceLogText('(저장된 로그 없음)');
+  };
+
+  const handleShareDeviceLog = async () => {
+    if (!deviceLogText) return;
+    // expo-clipboard 등 클립보드 전용 패키지가 없어(신규 네이티브 모듈 추가는 OTA 업데이트를
+    // 못 쓰게 만듦) react-native 코어에 이미 포함된 Share API를 사용 — 안드로이드 공유 시트에
+    // "클립보드에 복사" 옵션이 보통 포함돼 있어 실질적으로 동일한 용도로 쓸 수 있다.
+    try {
+      await Share.share({ message: deviceLogText });
+    } catch {}
+  };
+
   const handleDismiss = async (stage: AlarmStage) => {
     const ids = sentIds[stage] ?? [];
     for (const id of ids) {
@@ -76,7 +95,7 @@ export default function AlarmTestScreen() {
         <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
           <Feather name="chevron-left" size={22} color="#1A1A1A" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>알람 테스트</Text>
+        <Text style={styles.headerTitle}>개발자 도구</Text>
         <View style={{ width: 36 }} />
       </View>
 
@@ -189,9 +208,10 @@ export default function AlarmTestScreen() {
           ))}
         </View>
 
-        {/* 도착예정 알람 */}
+        {/* 도착 관련 알람 — 실제 상태 흐름(MOVING→NEARDEST→ARRIVED) 순서로 배치 */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>도착예정 알람 (그룹)</Text>
+          <Text style={styles.sectionTitle}>도착 관련 알람</Text>
+
           <TouchableOpacity
             style={[styles.stageBtn, { borderLeftColor: '#92DEFE' }]}
             onPress={async () => {
@@ -204,34 +224,11 @@ export default function AlarmTestScreen() {
               <FontAwesome6 name="person-walking" size={16} color="#FFFFFF" />
             </View>
             <View style={styles.stageInfo}>
-              <Text style={styles.stageBtnLabel}>개별 도착예정 알람</Text>
+              <Text style={styles.stageBtnLabel}>도착예정 알람 (MOVING)</Text>
               <Text style={styles.stageBtnDesc}>나나나 · 오후 7시 3분 도착예정</Text>
             </View>
             <Feather name="bell" size={18} color="#92DEFE" />
           </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.stageBtn, { borderLeftColor: '#4A90D9' }]}
-            onPress={async () => {
-              await sendAllArrivalAlarms(SAMPLE_MEMBERS, '홍대역 2번 출구');
-              setLastSent('전체 멤버 도착예정 알람 전송됨 (3초 간격)');
-            }}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.stageBadge, { backgroundColor: '#4A90D9' }]}>
-              <FontAwesome6 name="person-walking" size={16} color="#FFFFFF" />
-            </View>
-            <View style={styles.stageInfo}>
-              <Text style={styles.stageBtnLabel}>전체 멤버 도착예정 알람</Text>
-              <Text style={styles.stageBtnDesc}>나나나, 다다다 · 3초 간격으로 순차 발송</Text>
-            </View>
-            <Feather name="bell" size={18} color="#4A90D9" />
-          </TouchableOpacity>
-        </View>
-
-        {/* 도착 확인/완료 알람 */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>도착 알람</Text>
 
           <TouchableOpacity
             style={[styles.stageBtn, { borderLeftColor: '#F39C12' }]}
@@ -245,7 +242,7 @@ export default function AlarmTestScreen() {
               <Feather name="help-circle" size={16} color="#FFFFFF" />
             </View>
             <View style={styles.stageInfo}>
-              <Text style={styles.stageBtnLabel}>도착 여부 확인</Text>
+              <Text style={styles.stageBtnLabel}>도착 여부 확인 (NEARDEST)</Text>
               <Text style={styles.stageBtnDesc}>나나나님 목적지에 도착하신건가요?</Text>
             </View>
             <Feather name="bell" size={18} color="#F39C12" />
@@ -263,10 +260,60 @@ export default function AlarmTestScreen() {
               <Feather name="check-circle" size={16} color="#FFFFFF" />
             </View>
             <View style={styles.stageInfo}>
-              <Text style={styles.stageBtnLabel}>도착 완료 알림</Text>
+              <Text style={styles.stageBtnLabel}>도착 완료 알림 (ARRIVED)</Text>
               <Text style={styles.stageBtnDesc}>나나나님이 오후 7시 3분에 도착하였습니다.</Text>
             </View>
             <Feather name="bell" size={18} color="#27AE60" />
+          </TouchableOpacity>
+        </View>
+
+        {/* FGS-GPS 분리 모듈 테스트 (임시 — Stage 1 격리 검증용, 검증 끝나면 이 섹션 삭제) */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>FGS 분리 모듈 테스트 (임시)</Text>
+          <Text style={styles.sectionDesc}>GPS 구독 없이 알림만 뜨는지 adb로 확인용</Text>
+          <TouchableOpacity
+            style={[styles.scenarioBtn, { backgroundColor: '#4CAF50' }]}
+            onPress={() => {
+              ForegroundService.start('GoNow 알람 실행 중', '출발 시간을 모니터링하고 있어요.');
+              setLastSent('ForegroundService.start() 호출됨');
+            }}
+            activeOpacity={0.7}
+          >
+            <Feather name="play-circle" size={20} color="#FFFFFF" />
+            <Text style={styles.scenarioBtnText}>FGS 시작</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.scenarioBtn, { marginTop: 10, backgroundColor: '#E74C3C' }]}
+            onPress={() => {
+              ForegroundService.stop();
+              setLastSent('ForegroundService.stop() 호출됨');
+            }}
+            activeOpacity={0.7}
+          >
+            <Feather name="stop-circle" size={20} color="#FFFFFF" />
+            <Text style={styles.scenarioBtnText}>FGS 중지</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.scenarioBtn, { marginTop: 10, backgroundColor: '#4A90D9' }]}
+            onPress={() => {
+              startGpsPolling();
+              setLastSent('startGpsPolling() 호출됨');
+            }}
+            activeOpacity={0.7}
+          >
+            <Feather name="navigation" size={20} color="#FFFFFF" />
+            <Text style={styles.scenarioBtnText}>GPS 폴링 시작</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.scenarioBtn, { marginTop: 10, backgroundColor: '#9B59B6' }]}
+            onPress={() => {
+              stopGpsPolling();
+              setLastSent('stopGpsPolling() 호출됨');
+            }}
+            activeOpacity={0.7}
+          >
+            <Feather name="navigation-2" size={20} color="#FFFFFF" />
+            <Text style={styles.scenarioBtnText}>GPS 폴링 중지</Text>
           </TouchableOpacity>
         </View>
 
@@ -293,6 +340,29 @@ export default function AlarmTestScreen() {
             <Feather name="sliders" size={20} color="#FFFFFF" />
             <Text style={styles.scenarioBtnText}>상세 테스트 (출발지/도착지 입력)</Text>
           </TouchableOpacity>
+        </View>
+
+        {/* 기기 저장 디버그 로그 — adb 없이 앱 화면에서 바로 확인용(야외 실기기 테스트 대비) */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>디버그 로그 (기기 저장)</Text>
+          <Text style={styles.sectionDesc}>지오펜스 등록/발화/서버응답 등 핵심 이벤트만 앱이 직접 저장 — adb 연결 없이도 확인 가능</Text>
+          <View style={styles.typeRow}>
+            <TouchableOpacity style={[styles.typeBtn, { backgroundColor: '#4A90D9' }]} onPress={handleRefreshDeviceLog}>
+              <Feather name="refresh-cw" size={16} color="#FFFFFF" />
+              <Text style={[styles.typeBtnLabel, { color: '#FFFFFF' }]}>새로고침</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.typeBtn, { backgroundColor: '#27AE60' }]} onPress={handleShareDeviceLog}>
+              <Feather name="share-2" size={16} color="#FFFFFF" />
+              <Text style={[styles.typeBtnLabel, { color: '#FFFFFF' }]}>복사/공유</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.typeBtn, { backgroundColor: '#E74C3C' }]} onPress={handleClearDeviceLog}>
+              <Feather name="trash-2" size={16} color="#FFFFFF" />
+              <Text style={[styles.typeBtnLabel, { color: '#FFFFFF' }]}>로그 지우기</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={styles.logBox} nestedScrollEnabled showsVerticalScrollIndicator>
+            <Text selectable style={styles.logText}>{deviceLogText || '(새로고침을 눌러 불러오세요)'}</Text>
+          </ScrollView>
         </View>
 
         {/* 마지막 전송 */}
@@ -361,6 +431,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center',
     marginLeft: 6,
   },
+  logBox: {
+    marginTop: 12, maxHeight: 300, backgroundColor: '#1A1A1A',
+    borderRadius: 10, padding: 10,
+  },
+  logText: { fontSize: 11, color: '#B0FFB0', fontFamily: 'monospace', lineHeight: 16 },
   lastSentBox: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: '#E8F5E9', borderRadius: 8,

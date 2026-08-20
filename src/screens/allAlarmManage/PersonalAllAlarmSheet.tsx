@@ -6,8 +6,6 @@ import { createJourneysApi, ensureFutureDateTime, JourneyDetail, maskToRepeatDay
 import { alarmService } from '@/src/services/alarmService';
 import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
 import { toTransportMode, canNavigateAlarm, handleNavigateAlarm } from '@/src/utils/kakaoMapDeeplink';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ACTIVE_JOURNEYS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { usePlaces } from '@/src/hooks/usePlaces';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -204,14 +202,14 @@ export default function PersonalAllAlarmSheet({ onClose }: Props) {
       if (isEditMode && editAlarm.journeyId) {
         const res = await journeysApi.updatePersonal(editAlarm.journeyId, payload);
         if (res.data.journey_status === 'READY') {
-          alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: editAlarm.journeyId, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, transportMode: toTransportMode(editAlarm.transport === 'car') });
+          alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: editAlarm.journeyId, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, transportMode: toTransportMode(editAlarm.transport === 'car'), repeatDays: payload.repeat_days });
         } else if (res.data.journey_status === 'SCHEDULED') {
           alarmService.stop(editAlarm.journeyId);
         }
       } else {
         const res = await journeysApi.createPersonal(payload);
         if (res.data.journey_status === 'READY') {
-          alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: res.data.journey_id, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, transportMode: toTransportMode(editAlarm.transport === 'car') });
+          alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: res.data.journey_id, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, transportMode: toTransportMode(editAlarm.transport === 'car'), repeatDays: payload.repeat_days });
         }
       }
       await loadAlarms();
@@ -228,10 +226,8 @@ export default function PersonalAllAlarmSheet({ onClose }: Props) {
     if (editAlarm.journeyId) {
       try {
         await journeysApi.deleteJourney(editAlarm.journeyId);
+        // alarmService.stop()이 내부적으로 ACTIVE_JOURNEYS_KEY 제거까지 안전하게(잠금 걸린 채) 처리함
         alarmService.stop(editAlarm.journeyId);
-        const raw = await AsyncStorage.getItem(ACTIVE_JOURNEYS_KEY);
-        const ids: number[] = raw ? JSON.parse(raw) : [];
-        await AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify(ids.filter(id => id !== editAlarm.journeyId)));
       } catch { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
     }
     setAlarms((prev) => prev.filter((a) => a.id !== editAlarm.id));
@@ -249,7 +245,7 @@ export default function PersonalAllAlarmSheet({ onClose }: Props) {
       if (!newEnabled) {
         alarmService.stop(alarm.journeyId);
       } else if (!!alarm.myStatus && ['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
-        alarmService.start({ alarmType: 'personal', destination: alarm.dest_name, journeyId: alarm.journeyId, destLat: alarm.dest_lat, destLng: alarm.dest_lng, transportMode: toTransportMode(alarm.transport === 'car') });
+        alarmService.start({ alarmType: 'personal', destination: alarm.dest_name, journeyId: alarm.journeyId, destLat: alarm.dest_lat, destLng: alarm.dest_lng, transportMode: toTransportMode(alarm.transport === 'car'), repeatDays: repeatDaysToMask(alarm.repeat) });
       }
     }
   };
@@ -257,8 +253,17 @@ export default function PersonalAllAlarmSheet({ onClose }: Props) {
   // DRIVING/TRANSIT 공통 카카오맵 딥링크 — 단일 딥링크 설계 (docs/reference/kakao-map-deeplink-spec.md §2.2~2.4 참고)
   const canNavigate = (alarm: Alarm) => canNavigateAlarm(alarm.myStatus);
 
-  const handleNavigate = (alarm: Alarm) =>
-    handleNavigateAlarm(alarm.dest_lat, alarm.dest_lng, alarm.myStatus, alarm.transport === 'car');
+  // 매번 새로 GPS를 잡아 열기까지 1~2초 걸릴 수 있어(kakaoMapDeeplink.ts 참고),
+  // 버튼이 멈춘 건지 헷갈리지 않도록 눌린 카드의 id만 로딩 표시한다.
+  const [navigatingId, setNavigatingId] = useState<string | null>(null);
+  const handleNavigate = async (alarm: Alarm) => {
+    setNavigatingId(alarm.id);
+    try {
+      await handleNavigateAlarm(alarm.dest_lat, alarm.dest_lng, alarm.transport === 'car');
+    } finally {
+      setNavigatingId(null);
+    }
+  };
 
   const toggleRepeat = (day: string) => {
     setEditAlarm((prev) => {
@@ -295,10 +300,8 @@ export default function PersonalAllAlarmSheet({ onClose }: Props) {
                 if (alarm.journeyId) {
                   try {
                     await journeysApi.deleteJourney(alarm.journeyId);
+                    // alarmService.stop()이 내부적으로 ACTIVE_JOURNEYS_KEY 제거까지 안전하게(잠금 걸린 채) 처리함
                     alarmService.stop(alarm.journeyId);
-                    const raw = await AsyncStorage.getItem(ACTIVE_JOURNEYS_KEY);
-                    const ids: number[] = raw ? JSON.parse(raw) : [];
-                    await AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify(ids.filter(id => id !== alarm.journeyId)));
                   } catch { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
                 }
                 setAlarms((prev) => prev.filter((a) => a.id !== alarm.id));
@@ -328,11 +331,15 @@ export default function PersonalAllAlarmSheet({ onClose }: Props) {
                     </View>
                   </View>
                   <View style={styles.cardRight}>
-                    {canNavigate(alarm) && (
-                      <TouchableOpacity style={styles.navigateBtn} onPress={() => handleNavigate(alarm)}>
-                        <Feather name="navigation" size={14} color="#4A90D9" />
-                      </TouchableOpacity>
-                    )}
+                    <TouchableOpacity
+                      style={[styles.navigateBtn, !canNavigate(alarm) && styles.navigateBtnDisabled]}
+                      onPress={() => handleNavigate(alarm)}
+                      disabled={!canNavigate(alarm) || navigatingId === alarm.id}
+                    >
+                      {navigatingId === alarm.id
+                        ? <ActivityIndicator size="small" color="#4A90D9" />
+                        : <Feather name="map" size={14} color={canNavigate(alarm) ? '#4A90D9' : '#CCCCCC'} />}
+                    </TouchableOpacity>
                     <Switch value={alarm.enabled} onValueChange={() => toggleAlarm(alarm)}
                       trackColor={{ false: '#E0E0E0', true: '#4CAF50' }} thumbColor="#FFFFFF" />
                   </View>
@@ -517,6 +524,7 @@ const styles = StyleSheet.create({
   alarmInfo: { flex: 1, marginRight: 8, justifyContent: 'center' },
   cardRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   navigateBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#EAF2FB', alignItems: 'center', justifyContent: 'center' },
+  navigateBtnDisabled: { backgroundColor: '#EEEEEE' },
   alarmDate: { fontSize: 11, fontWeight: '500', color: '#FF3B30', marginBottom: 3 },
   alarmPlace: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 5 },
   alarmMeta: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },

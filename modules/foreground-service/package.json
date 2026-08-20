@@ -1,0 +1,7 @@
+{
+  "name": "foreground-service",
+  "version": "1.0.0",
+  "description": "Local Expo module — GPS 위치 구독과 무관하게 독립적으로 켜고 끄는 Foreground Service(알림 표시/유지 전용)",
+  "main": "index.ts",
+  "types": "index.ts"
+}

@@ -12,67 +12,39 @@ import { Linking, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import type { KakaoMapTransportMode } from '@/src/utils/kakaoMapDeeplink';
+import { dlog } from '@/src/utils/deviceLogger';
 
 export type AlarmStage = 1 | 2 | 3 | 4;
-// 도착 관련 알림 3종 — 출발 단계별 채널과 완전히 분리(성격이 다른 알림이라 서로 영향 안 주도록).
-// 'arrival-expected'/'arrival-complete'의 채널 문자열은 스프링 ParticipantService.java의
-// ArrivalChannel enum과 반드시 일치해야 함 — 이 둘은 스프링이 FCM에 실어 보내는 값이라
-// resetAlarmChannel()로 버전을 올리면 안 됨(버전 0 고정, UI에서 초기화 버튼 자체를 안 줌).
-export type ChannelKey = AlarmStage | 'arrival-check' | 'arrival-expected' | 'arrival-complete';
 export type AlarmType = 'personal' | 'group' | 'home';
 
-const CHANNEL_BASE: Record<ChannelKey, string> = {
-  1: 'gonow-alarm-1',
-  2: 'gonow-alarm-2',
-  3: 'gonow-alarm-3',
-  4: 'gonow-alarm-4',
-  'arrival-check': 'gonow-arrival-check',
-  'arrival-expected': 'gonow-arrival-expected',
-  'arrival-complete': 'gonow-arrival-complete',
+// 도착 예정/완료는 FCM이라 앱이 완전히 꺼진 상태에서도 OS가 직접 채널ID로 표시함 — 그래서
+// 로컬 AsyncStorage 토글이 아니라 스프링(MemberSetting.arrivalExpectedSoundMode/
+// arrivalCompleteSoundMode, PATCH /api/members/me/arrival-sound)이 선호도를 들고 있다가
+// 발송 시점에 알맞은 채널ID를 골라 보낸다. 채널ID 문자열은 스프링 ArrivalChannel.getChannelId()
+// 조합 결과와 반드시 일치해야 함 — 절대 임의로 바꾸지 말 것.
+export const ARRIVAL_EXPECTED_CHANNEL_IDS: Record<ArrivalCheckSoundMode, string> = {
+  sound: 'gonow-arrival-expected-sound',
+  vibrate: 'gonow-arrival-expected-vibrate',
+  silent: 'gonow-arrival-expected-silent',
+};
+export const ARRIVAL_COMPLETE_CHANNEL_IDS: Record<ArrivalCheckSoundMode, string> = {
+  sound: 'gonow-arrival-complete-sound',
+  vibrate: 'gonow-arrival-complete-vibrate',
+  silent: 'gonow-arrival-complete-silent',
 };
 export const CHANNEL_SILENT = 'gonow-silent';
+// GPS 호출/FGS 켜짐·꺼짐 등 임시 디버그 알림(sendDebugNotification) 전용 채널 — 도착
+// 여부 확인(소리)과 같은 arrived.wav를 쓰면 실기기 테스트 중 둘이 구분이 안 돼서 분리함.
+// 완전 무음(소리/진동 없음, 팝업만 뜸) — 실제 도착 알람 테스트 중 방해되지 않게. 사용자에게
+// 노출될 일도 없는 개발용 채널(TODO 삭제 예정과 함께 제거될 것). 채널ID를 'gonow-debug'에서
+// 바꾼 이유: 기존 채널이 이미 sound:'default'로 생성된 적 있어서(안드로이드 채널 불변
+// 특성상) 같은 ID로는 무음으로 못 바꿈 — 새 ID를 발급해야 새 설정이 적용됨.
+const DEBUG_CHANNEL_ID = 'gonow-debug-silent';
 
-// 채널의 "리셋 횟수" — 안드로이드는 같은 채널ID로 삭제 후 재생성해도 이전 사용자 설정을
-// 그대로 되살리므로(un-delete), 진짜 초기화하려면 한 번도 안 쓰인 새 채널ID가 필요함.
-// 이 값을 늘려서 ID 뒤에 붙이는 방식으로 매번 새 채널을 만듦.
-const CHANNEL_VERSIONS_KEY = 'gonow_channel_versions'; // Record<ChannelKey를 문자열로, number>
-
-let channelIds: Record<ChannelKey, string> = { ...CHANNEL_BASE };
-
-// 리셋 횟수는 "초기화" 버튼을 누를 때만 바뀌는데, ensureChannels()는 알람을 보낼
-// 때마다(하루 여러 번) 호출되므로 매번 AsyncStorage를 다시 읽지 않고 세션 중엔 캐싱함.
-// resetAlarmChannel()이 값을 바꾸면 캐시도 그 자리에서 같이 갱신됨.
-let channelVersionsCache: Record<ChannelKey, number> | null = null;
-
-// 채널 9개를 세션 중 한 번만 실제로 생성하기 위한 플래그. ensureChannels()는 알람을
+// 채널 목록을 세션 중 한 번만 실제로 생성하기 위한 플래그. ensureChannels()는 알람을
 // 보낼 때마다(하루 여러 번) 호출되는데, notifee.createChannel()이 이미 존재하는
-// 채널엔 no-op이라도 매번 네이티브 브리지를 9번 왕복하는 건 낭비라 이 플래그로 건너뜀.
-// resetAlarmChannel()이 새 버전을 발급할 때만 false로 내려서 재생성을 강제함.
+// 채널엔 no-op이라도 매번 네이티브 브리지를 여러 번 왕복하는 건 낭비라 이 플래그로 건너뜀.
 let channelsEnsured = false;
-
-function buildChannelId(key: ChannelKey, version: number): string {
-  return version <= 0 ? CHANNEL_BASE[key] : `${CHANNEL_BASE[key]}-r${version}`;
-}
-
-async function loadChannelVersions(): Promise<Record<ChannelKey, number>> {
-  if (channelVersionsCache) return channelVersionsCache;
-  try {
-    const raw = await AsyncStorage.getItem(CHANNEL_VERSIONS_KEY);
-    const map: Partial<Record<string, number>> = raw ? JSON.parse(raw) : {};
-    channelVersionsCache = {
-      1: map['1'] ?? 0, 2: map['2'] ?? 0, 3: map['3'] ?? 0, 4: map['4'] ?? 0,
-      'arrival-check': map['arrival-check'] ?? 0,
-      'arrival-expected': map['arrival-expected'] ?? 0,
-      'arrival-complete': map['arrival-complete'] ?? 0,
-    };
-  } catch {
-    channelVersionsCache = {
-      1: 0, 2: 0, 3: 0, 4: 0,
-      'arrival-check': 0, 'arrival-expected': 0, 'arrival-complete': 0,
-    };
-  }
-  return channelVersionsCache;
-}
 
 // 단계별 알람 trigger ID AsyncStorage 키 — journeyId/appointmentId 기준으로 저장
 const TRIGGER_IDS_KEY = 'gonow_trigger_ids'; // Record<'j_N' | 'a_N', string[]>
@@ -83,7 +55,7 @@ async function saveTriggerIds(key: string, ids: string[]): Promise<void> {
     const map: Record<string, string[]> = raw ? JSON.parse(raw) : {};
     map[key] = [...(map[key] ?? []), ...ids];
     await AsyncStorage.setItem(TRIGGER_IDS_KEY, JSON.stringify(map));
-    console.log(`[trigger] 저장 완료 — key:${key} ids:${ids}`);
+    dlog('NEARDEST', `[trigger] 저장 완료 — key:${key} ids:${ids}`);
   } catch {}
 }
 
@@ -97,13 +69,13 @@ async function cancelAndRemoveTriggerIds(key: string): Promise<void> {
     if (raw) {
       const map: Record<string, string[]> = JSON.parse(raw);
       const ids = map[key] ?? [];
-      console.log(`[trigger] 취소 시도 — key:${key} ids:${ids}`);
+      dlog('NEARDEST', `[trigger] 취소 시도 — key:${key} ids:${ids}`);
       await Promise.all(ids.map(id => notifee.cancelTriggerNotification(id).catch(() => {})));
       delete map[key];
       await AsyncStorage.setItem(TRIGGER_IDS_KEY, JSON.stringify(map));
-      console.log(`[trigger] 취소 완료 — key:${key}`);
+      dlog('NEARDEST', `[trigger] 취소 완료 — key:${key}`);
     } else {
-      console.log(`[trigger] 취소 시도 — key:${key} AsyncStorage 없음`);
+      dlog('NEARDEST', `[trigger] 취소 시도 — key:${key} AsyncStorage 없음`);
     }
   } catch {}
   // 트리거를 취소하는 시점엔 그 지문(fingerprint)도 항상 무효화 — syncStagedAlarms()가
@@ -122,7 +94,7 @@ type StagingFingerprint = { departureAlarmTime: string; whichStation: string | n
 
 // DEPARTING/NEARDEST 구간에서는 매 폴링(짧으면 10~30초 간격)마다 syncStagedAlarms()가 이
 // 지문을 읽는데, 대부분 "변경 없음, 스킵"으로 끝나면서도 매번 AsyncStorage를 다시 읽는 건
-// 낭비라 channelVersionsCache와 동일한 패턴으로 메모리 캐싱. 반환된 객체를 직접 수정하고
+// 낭비라 메모리에 캐싱해둠. 반환된 객체를 직접 수정하고
 // 그대로 AsyncStorage에 저장하면(참조 공유) 캐시도 같이 최신 상태로 유지됨.
 let stagingFingerprintCache: Record<string, StagingFingerprint> | null = null;
 
@@ -165,7 +137,14 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
     }
 
     if (actionId === 'arrival-yes') {
-      if (storageKey) await cancelAndRemoveTriggerIds(storageKey);
+      dlog('NEARDEST', `도착확인 YES버튼(백그라운드) — key:${storageKey}`);
+      if (storageKey) {
+        await cancelAndRemoveTriggerIds(storageKey);
+        // 아직 EXIT 콜백이 안 뜬 상태(100m 안)로 도착 확인을 누른 경우, 지오펜스 region이
+        // 정리 안 된 채 남을 수 있어 여기서도 명시적으로 정리 — 정상 플로우에서 흔히 일어남
+        const { exitNearDestGeofenceMode } = await import('@/src/tasks/nearDestGeofenceTask');
+        await exitNearDestGeofenceMode(storageKey).catch(() => {});
+      }
       if (data?.journeyId) {
         const { createJourneysApi } = await import('@/src/api/journeys');
         await createJourneysApi().arrive(Number(data.journeyId));
@@ -174,25 +153,48 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
         const { createAppointmentsApi } = await import('@/src/api/appointments');
         await createAppointmentsApi().arriveParticipant(Number(data.appointmentId));
       }
+      // 포그라운드 경로(alarmService.stop())와 달리 여기는 alarmService의 인메모리 러너 목록에
+      // 기대면 안 된다 — 앱이 완전 종료된 헤드리스 컨텍스트에서는 그 목록이 항상 비어있는
+      // 새 인스턴스라, "다른 알람 없음"으로 잘못 판단해 FGS를 오판할 위험이 있다. 대신
+      // backgroundLocationTask.ts가 이미 쓰는 영속 저장소(ALARM_NAV_INFO_KEY) 기준 판단을
+      // 그대로 재사용한다 — 이 알람을 지우고, 남은 알람이 없을 때만 FGS를 끈다.
+      if (storageKey) {
+        // 프로세스가 살아있는 경우(스와이프만 하고 완전 종료는 아니었던 경우 — 2026-08-17
+        // 실기기로 확인된 대로 흔한 케이스) alarmService의 러너가 좀비로 메모리에 남는 것을
+        // 방지 — FGS는 위에서 이미 별도로 정리하므로 onFinish(중복 재확인) 없이 순수하게
+        // 메모리에서만 지운다. 진짜 헤드리스면 러너가 애초에 없어 조용히 no-op.
+        const { alarmService } = await import('@/src/services/alarmService');
+        alarmService.forgetIfExists(journeyId, appointmentId);
+        const { removeOrParkAlarmNavInfo, hasAnyTrackedAlarm, stopAlarmForegroundService } = await import('@/src/tasks/backgroundLocationTask');
+        // 반복 여정이면 nav info를 지우지 않고 다음 회차까지 파킹한다(버그45) — 삭제가 아니라
+        // ARRIVED 의미이므로 항상 지우던 기존 동작은 반복 알람의 FGS를 여기서도 꺼뜨렸었다.
+        const parked = await removeOrParkAlarmNavInfo(storageKey);
+        if (parked) {
+          dlog('NEARDEST', `key:${storageKey} 도착 처리 완료 — 반복 여정, 다음 회차까지 nav info 파킹(버그45) → FGS 유지`);
+        } else if (await hasAnyTrackedAlarm()) {
+          dlog('NEARDEST', `key:${storageKey} 도착 처리 완료 — 남은 알람 있어 FGS 유지`);
+        } else {
+          await stopAlarmForegroundService();
+          dlog('NEARDEST', `key:${storageKey} 도착 처리 완료 — 남은 알람 없어 FGS 종료`);
+        }
+      }
     }
 
     if (actionId === 'navigate' && data?.destLat && data?.destLng && data?.transportMode) {
-      // 단계별 출발 알람(1~4단계)은 전부 DEPARTING 구간에서만 발생 — 캐시 유효기간도 그에 맞춤
-      const { openKakaoMapRoute, NAVIGATE_CACHE_MAX_AGE_MS } = await import('@/src/utils/kakaoMapDeeplink');
+      const { openKakaoMapRoute } = await import('@/src/utils/kakaoMapDeeplink');
       await openKakaoMapRoute(
         { lat: Number(data.destLat), lng: Number(data.destLng) },
         data.transportMode as KakaoMapTransportMode,
-        NAVIGATE_CACHE_MAX_AGE_MS.DEPARTING,
       );
     }
   }
 });
 
 const STAGE_CONFIG = {
-  1: { title: '🟢 여유 구간', vibrate: false },
-  2: { title: '🟡 주의 구간', vibrate: true  },
-  3: { title: '🟠 위험 구간', vibrate: true  },
-  4: { title: '🔴 임계 구간', vibrate: true  },
+  1: { title: '🟢 여유 구간' },
+  2: { title: '🟡 주의 구간' },
+  3: { title: '🟠 위험 구간' },
+  4: { title: '🔴 임계 구간' },
 };
 
 // 1~3단계를 건너뛰고 4단계가 바로 발송되는("이미 늦음") 경우 전용 제목.
@@ -241,86 +243,171 @@ const LATE_STAGE4_MESSAGES: Record<AlarmType, string> = {
 };
 const LATE_HOME_LAST_TRAIN_MESSAGE = '이미 출발 시각이 지났어요! 막차를 놓쳤을 수 있어요, 지금 바로 출발하세요.';
 
+const ARRIVAL_SOUND_RAW_NAME = 'arrived';
+
+// 도착 여부 확인은 100% 로컬 트리거(지오펜싱 태스크가 직접 호출)라 OS 채널 설정 화면 대신
+// 앱 자체 소리/진동/무음 3-way 토글로 대체함 — MediaStore 등록(버그27) 없이 번들 raw
+// 사운드만으로 충분함(어차피 OS "직접 설정" 화면으로 안 보낼 거라 시스템 사운드 목록에
+// 노출시킬 필요가 없고, 그만큼 사용자가 실수로 지울 위험도 없음). 채널 3개를 미리 다 만들어
+// 두고 실제 발송 시점에 저장된 모드에 맞는 채널ID만 골라 쓰는 방식 — 안드로이드 채널은
+// 한 번 만들면 sound/vibration을 다시 못 바꾸므로, "바뀔 필요 없는" 채널 3개를 준비해두는 것.
+export type ArrivalCheckSoundMode = 'sound' | 'vibrate' | 'silent';
+const ARRIVAL_CHECK_CHANNEL_IDS: Record<ArrivalCheckSoundMode, string> = {
+  sound: 'gonow-arrival-check-sound',
+  vibrate: 'gonow-arrival-check-vibrate',
+  silent: 'gonow-arrival-check-silent',
+};
+const ARRIVAL_CHECK_MODE_KEY = 'gonow_arrival_check_sound_mode';
+const DEFAULT_ARRIVAL_CHECK_MODE: ArrivalCheckSoundMode = 'sound';
+
+export async function getArrivalCheckSoundMode(): Promise<ArrivalCheckSoundMode> {
+  try {
+    const raw = await AsyncStorage.getItem(ARRIVAL_CHECK_MODE_KEY);
+    if (raw === 'sound' || raw === 'vibrate' || raw === 'silent') return raw;
+    dlog('NEARDEST', `[도착여부확인 소리] getArrivalCheckSoundMode — 저장된 값 없음/비정상값(raw:${raw}) → 기본값(${DEFAULT_ARRIVAL_CHECK_MODE}) 사용`);
+  } catch (e) {
+    dlog('NEARDEST', `[도착여부확인 소리] getArrivalCheckSoundMode 읽기 실패 ${e} → 기본값(${DEFAULT_ARRIVAL_CHECK_MODE}) 사용`);
+  }
+  return DEFAULT_ARRIVAL_CHECK_MODE;
+}
+
+export async function setArrivalCheckSoundMode(mode: ArrivalCheckSoundMode): Promise<void> {
+  dlog('NEARDEST', `[도착여부확인 소리] setArrivalCheckSoundMode — mode:${mode}`);
+  await AsyncStorage.setItem(ARRIVAL_CHECK_MODE_KEY, mode);
+}
+
+// 출발 알람(1~4단계)도 도착 여부 확인과 동일한 이유(100% 로컬 트리거)로 OS 채널 설정 화면
+// 대신 앱 자체 소리/진동/무음 토글로 대체 — 단계마다 독립된 값을 저장해서 예를 들어
+// 4단계만 소리 켜두고 나머지는 무음으로 두는 것도 가능함.
+export type DepartureSoundMode = 'sound' | 'vibrate' | 'silent';
+const DEPARTURE_MODE_KEY_PREFIX = 'gonow_departure_sound_mode_';
+const DEFAULT_DEPARTURE_MODE: DepartureSoundMode = 'sound';
+
+const DEPARTURE_CHANNEL_IDS: Record<AlarmStage, Record<DepartureSoundMode, string>> = {
+  1: { sound: 'gonow-alarm-1-sound', vibrate: 'gonow-alarm-1-vibrate', silent: 'gonow-alarm-1-silent' },
+  2: { sound: 'gonow-alarm-2-sound', vibrate: 'gonow-alarm-2-vibrate', silent: 'gonow-alarm-2-silent' },
+  3: { sound: 'gonow-alarm-3-sound', vibrate: 'gonow-alarm-3-vibrate', silent: 'gonow-alarm-3-silent' },
+  4: { sound: 'gonow-alarm-4-sound', vibrate: 'gonow-alarm-4-vibrate', silent: 'gonow-alarm-4-silent' },
+};
+
+// "소리" 모드 채널의 진동 패턴/LED 색 — "진동" 모드도 소리만 빼고 같은 패턴을 재사용함
+// (1단계는 원래 무진동이라 패턴이 없어서, 진동 모드 전용으로 부드러운 패턴을 하나 지정)
+const DEPARTURE_STAGE_CONFIG: Record<AlarmStage, { vibrationPattern?: number[]; lightColor?: string }> = {
+  1: {},
+  2: { vibrationPattern: [100, 250, 250, 250], lightColor: '#4CAF50' },
+  3: { vibrationPattern: [100, 500, 200, 500, 200, 500], lightColor: '#E74C3C' },
+  4: { vibrationPattern: [100, 500, 200, 500, 200, 500], lightColor: '#E74C3C' },
+};
+const DEPARTURE_STAGE1_VIBRATE_PATTERN = [100, 250, 250, 250];
+
+export async function getDepartureSoundMode(stage: AlarmStage): Promise<DepartureSoundMode> {
+  try {
+    const raw = await AsyncStorage.getItem(`${DEPARTURE_MODE_KEY_PREFIX}${stage}`);
+    if (raw === 'sound' || raw === 'vibrate' || raw === 'silent') return raw;
+  } catch {}
+  return DEFAULT_DEPARTURE_MODE;
+}
+
+export async function setDepartureSoundMode(stage: AlarmStage, mode: DepartureSoundMode): Promise<void> {
+  await AsyncStorage.setItem(`${DEPARTURE_MODE_KEY_PREFIX}${stage}`, mode);
+}
+
 async function ensureChannels(): Promise<void> {
   if (Platform.OS !== 'android') return;
-
-  const versions = await loadChannelVersions();
-  channelIds = {
-    1: buildChannelId(1, versions[1]),
-    2: buildChannelId(2, versions[2]),
-    3: buildChannelId(3, versions[3]),
-    4: buildChannelId(4, versions[4]),
-    'arrival-check': buildChannelId('arrival-check', versions['arrival-check']),
-    'arrival-expected': buildChannelId('arrival-expected', versions['arrival-expected']),
-    'arrival-complete': buildChannelId('arrival-complete', versions['arrival-complete']),
-  };
-
   if (channelsEnsured) return;
 
+  const STAGE_NAMES: Record<AlarmStage, string> = { 1: '1단계', 2: '2단계', 3: '3단계', 4: '4단계' };
+  const departureChannelPromises = ([1, 2, 3, 4] as AlarmStage[]).flatMap((stage) => {
+    const cfg = DEPARTURE_STAGE_CONFIG[stage];
+    return [
+      // 앱 내 토글로만 고르므로(OS 설정 화면 노출 없음) MediaStore 등록(ensureChannelWithCustomSound)
+      // 불필요 — 번들 raw 사운드만으로 충분(파일관리자 노출/실수 삭제 위험도 없앰)
+      notifee.createChannel({
+        id: DEPARTURE_CHANNEL_IDS[stage].sound,
+        name: `GoNow 알람 (${STAGE_NAMES[stage]}·소리)`,
+        importance: AndroidImportance.HIGH,
+        sound: `stage${stage}`,
+        vibration: !!cfg.vibrationPattern,
+        ...(cfg.vibrationPattern && { vibrationPattern: cfg.vibrationPattern }),
+        ...(cfg.lightColor && { lights: true, lightColor: cfg.lightColor }),
+      }),
+      notifee.createChannel({
+        id: DEPARTURE_CHANNEL_IDS[stage].vibrate,
+        name: `GoNow 알람 (${STAGE_NAMES[stage]}·진동)`,
+        importance: AndroidImportance.HIGH,
+        vibration: true,
+        vibrationPattern: cfg.vibrationPattern ?? DEPARTURE_STAGE1_VIBRATE_PATTERN,
+      }),
+      notifee.createChannel({
+        id: DEPARTURE_CHANNEL_IDS[stage].silent,
+        name: `GoNow 알람 (${STAGE_NAMES[stage]}·무음)`,
+        importance: AndroidImportance.HIGH,
+        vibration: false,
+      }),
+    ];
+  });
+
   await Promise.all([
+    ...departureChannelPromises,
+
     notifee.createChannel({
-      id: channelIds[1],
-      name: 'GoNow 알람 (1단계)',
+      id: ARRIVAL_CHECK_CHANNEL_IDS.sound,
+      name: 'GoNow 도착 여부 확인 (소리)',
       importance: AndroidImportance.HIGH,
-      sound: 'stage1',
+      sound: ARRIVAL_SOUND_RAW_NAME,
+      vibration: true,
+    }),
+    notifee.createChannel({
+      id: ARRIVAL_CHECK_CHANNEL_IDS.vibrate,
+      name: 'GoNow 도착 여부 확인 (진동)',
+      importance: AndroidImportance.HIGH,
+      vibration: true,
+    }),
+    notifee.createChannel({
+      id: ARRIVAL_CHECK_CHANNEL_IDS.silent,
+      name: 'GoNow 도착 여부 확인 (무음)',
+      importance: AndroidImportance.HIGH,
       vibration: false,
     }),
 
     notifee.createChannel({
-      id: channelIds[2],
-      name: 'GoNow 알람 (2단계)',
+      id: ARRIVAL_EXPECTED_CHANNEL_IDS.sound,
+      name: 'GoNow 도착 예정 알림 (소리)',
       importance: AndroidImportance.HIGH,
-      sound: 'stage2',
+      sound: ARRIVAL_SOUND_RAW_NAME,
       vibration: true,
-      vibrationPattern: [100, 250, 250, 250],
-      lights: true,
-      lightColor: '#4CAF50',
+    }),
+    notifee.createChannel({
+      id: ARRIVAL_EXPECTED_CHANNEL_IDS.vibrate,
+      name: 'GoNow 도착 예정 알림 (진동)',
+      importance: AndroidImportance.HIGH,
+      vibration: true,
+    }),
+    notifee.createChannel({
+      id: ARRIVAL_EXPECTED_CHANNEL_IDS.silent,
+      name: 'GoNow 도착 예정 알림 (무음)',
+      importance: AndroidImportance.HIGH,
+      vibration: false,
     }),
 
     notifee.createChannel({
-      id: channelIds[3],
-      name: 'GoNow 알람 (3단계)',
+      id: ARRIVAL_COMPLETE_CHANNEL_IDS.sound,
+      name: 'GoNow 도착 완료 알림 (소리)',
       importance: AndroidImportance.HIGH,
-      sound: 'stage3',
-      vibration: true,
-      vibrationPattern: [100, 500, 200, 500, 200, 500],
-      lights: true,
-      lightColor: '#E74C3C',
-    }),
-
-    notifee.createChannel({
-      id: channelIds[4],
-      name: 'GoNow 알람 (4단계)',
-      importance: AndroidImportance.HIGH,
-      sound: 'stage4',
-      vibration: true,
-      vibrationPattern: [100, 500, 200, 500, 200, 500],
-      lights: true,
-      lightColor: '#E74C3C',
-    }),
-
-    notifee.createChannel({
-      id: channelIds['arrival-check'],
-      name: 'GoNow 도착 여부 확인',
-      importance: AndroidImportance.HIGH,
-      sound: 'default',
+      sound: ARRIVAL_SOUND_RAW_NAME,
       vibration: true,
     }),
-
     notifee.createChannel({
-      id: channelIds['arrival-expected'],
-      name: 'GoNow 도착 예정 알림',
+      id: ARRIVAL_COMPLETE_CHANNEL_IDS.vibrate,
+      name: 'GoNow 도착 완료 알림 (진동)',
       importance: AndroidImportance.HIGH,
-      sound: 'default',
       vibration: true,
     }),
-
     notifee.createChannel({
-      id: channelIds['arrival-complete'],
-      name: 'GoNow 도착 완료 알림',
+      id: ARRIVAL_COMPLETE_CHANNEL_IDS.silent,
+      name: 'GoNow 도착 완료 알림 (무음)',
       importance: AndroidImportance.HIGH,
-      sound: 'default',
-      vibration: true,
+      vibration: false,
     }),
 
     notifee.createChannel({
@@ -334,6 +421,13 @@ async function ensureChannels(): Promise<void> {
       id: 'gonow',
       name: 'GoNow 알람 실행 중 (알림)',
       importance: AndroidImportance.LOW,
+      vibration: false,
+    }),
+
+    notifee.createChannel({
+      id: DEBUG_CHANNEL_ID,
+      name: 'GoNow 디버그(GPS/FGS)',
+      importance: AndroidImportance.HIGH,
       vibration: false,
     }),
   ]);
@@ -419,31 +513,19 @@ export function setupNotificationCategories(): void {
   ensureChannels().catch(() => {});
 }
 
-// 특정 채널의 현재 활성 채널ID 조회(설정 화면 등 외부에서 호출). ensureChannels()를
-// 먼저 실행해 최신 상태(리셋 여부 포함)를 보장한 뒤 반환함.
-export async function getChannelId(key: ChannelKey): Promise<string> {
-  await ensureChannels();
-  return channelIds[key];
-}
-
-// 사용자가 시스템 설정에서 소리/진동을 직접 바꾼 채널을 앱 기본값으로 되돌림.
-// 안드로이드는 같은 채널ID로 삭제 후 재생성해도 이전 사용자 설정을 그대로
-// 되살리므로(un-delete), 한 번도 안 쓰인 새 채널ID를 발급하는 방식으로 리셋함.
-// 방금까지 쓰던 예전 채널은 새 채널 생성 후 바로 삭제해서 설정 목록이 안 지저분해지게 함
-// (지금 막 새로 만든 채널과는 다른 ID라 un-delete 문제 없이 안전하게 지워짐).
-// 주의: 'arrival-expected'/'arrival-complete'는 스프링이 채널ID를 고정값으로 알고 있어서
-// 호출 금지(UI에서 이 두 개는 초기화 버튼 자체를 안 보여줘야 함) — 호출하면 프론트-백엔드
-// 채널ID가 어긋나 그 순간부터 해당 FCM 알림이 깨짐.
-export async function resetAlarmChannel(key: ChannelKey): Promise<void> {
-  if (Platform.OS !== 'android') return;
-  const versions = await loadChannelVersions();
-  const oldChannelId = buildChannelId(key, versions[key] ?? 0);
-  // versions는 channelVersionsCache와 같은 객체 참조라, 여기서 바로 캐시도 함께 갱신됨
-  versions[key] = (versions[key] ?? 0) + 1;
-  await AsyncStorage.setItem(CHANNEL_VERSIONS_KEY, JSON.stringify(versions));
-  channelsEnsured = false; // 새 채널ID가 생겼으니 ensureChannels()가 다시 생성하도록 강제
-  await ensureChannels();
-  await notifee.deleteChannel(oldChannelId).catch(() => {});
+// TODO: 실기기 지오펜싱 실측 테스트 완료 후 이 함수와 모든 호출부를 삭제할 것(임시 디버그용).
+// EXIT 콜백/FGS 온오프 등 백그라운드 동작을 로그 없이(폰 들고 밖에 나가서) 눈으로 확인하기 위한
+// 용도. 전용 디버그 채널(DEBUG_CHANNEL_ID, 완전 무음) 사용 — 원래 시스템 기본음이었으나
+// 실제 도착 알람 테스트 중 계속 같이 울려서 방해된다는 피드백으로 무음으로 변경.
+export async function sendDebugNotification(title: string, body: string): Promise<void> {
+  try {
+    await ensureChannels();
+    await notifee.displayNotification({
+      title: `🧪 ${title}`,
+      body,
+      android: { channelId: DEBUG_CHANNEL_ID, importance: AndroidImportance.HIGH, pressAction: { id: 'default' } },
+    });
+  } catch {}
 }
 
 function buildAlarmBody(
@@ -483,6 +565,7 @@ export async function sendAlarm(
   appointmentId?: number,
 ): Promise<string[]> {
   await ensureChannels();
+  const mode = await getDepartureSoundMode(stage);
 
   const config = STAGE_CONFIG[stage];
   const title = `${config.title} - ${TYPE_NAMES[type]} 알람`;
@@ -500,14 +583,10 @@ export async function sendAlarm(
         ...(appointmentId != null && { appointmentId: String(appointmentId) }),
       },
       android: {
-        channelId: channelIds[stage],
+        channelId: DEPARTURE_CHANNEL_IDS[stage][mode],
         importance: AndroidImportance.HIGH,
         category: AndroidCategory.ALARM,
         visibility: AndroidVisibility.PUBLIC,
-        // 채널이 없는 Android 8.0 미만에서는 이 값이 실제로 소리를 결정함(8.0 이상에선 채널이
-        // 우선이라 무시되지만, 같은 리소스를 가리키므로 지정해둬도 무해함)
-        sound: `stage${stage}`,
-        vibrationPattern: config.vibrate ? [100, 500, 200, 500, 200, 500] : undefined,
         // 타이머 알람 스타일: 잠금화면에서 전체화면으로 표시
         fullScreenAction: {
           id: 'default',
@@ -543,6 +622,8 @@ export async function sendArrivalCheckAlarm(
   appointmentId?: number,
 ): Promise<string> {
   await ensureChannels();
+  const mode = await getArrivalCheckSoundMode();
+  dlog('NEARDEST', `[도착여부확인 소리] sendArrivalCheckAlarm — mode:${mode} channelId:${ARRIVAL_CHECK_CHANNEL_IDS[mode]} journeyId:${journeyId} appointmentId:${appointmentId}`);
   return notifee.displayNotification({
     title: '📍 도착 확인',
     body: `${nickname}님 ${destination}에 도착하신건가요?`,
@@ -551,7 +632,7 @@ export async function sendArrivalCheckAlarm(
       ...(appointmentId != null && { appointmentId: String(appointmentId) }),
     },
     android: {
-      channelId: channelIds['arrival-check'],
+      channelId: ARRIVAL_CHECK_CHANNEL_IDS[mode],
       importance: AndroidImportance.HIGH,
       pressAction: { id: 'default', launchActivity: 'default' },
       actions: [
@@ -568,17 +649,20 @@ export async function sendArrivalCheckAlarm(
   });
 }
 
+// 실제 FCM 표시는 스프링이 보낸 채널ID(_layout.tsx의 포그라운드 핸들러)를 그대로 쓰고, 이
+// 함수는 설정 화면/디버그 화면의 로컬 미리듣기 전용이라 mode를 인자로 받음(서버 동기화 X).
 export async function sendArrivalConfirmAlarm(
   nickname: string,
   arrivalTime: string,
   destination: string,
+  mode: ArrivalCheckSoundMode = 'sound',
 ): Promise<string> {
   await ensureChannels();
   return notifee.displayNotification({
     title: '✅ 도착 완료',
     body: `${nickname}님이 ${arrivalTime}에 ${destination}에 도착하였습니다.`,
     android: {
-      channelId: channelIds['arrival-complete'],
+      channelId: ARRIVAL_COMPLETE_CHANNEL_IDS[mode],
       importance: AndroidImportance.HIGH,
       pressAction: { id: 'default', launchActivity: 'default' },
     },
@@ -589,37 +673,16 @@ export async function sendArrivalAlarm(
   memberName: string,
   arrivalTime: string,
   destination: string,
+  mode: ArrivalCheckSoundMode = 'sound',
 ): Promise<void> {
   await ensureChannels();
   await notifee.displayNotification({
     title: '🏃 도착예정 알림',
     body: `${memberName}님이 ${arrivalTime}에 ${destination}에 도착 예정이에요!`,
     android: {
-      channelId: channelIds['arrival-expected'],
+      channelId: ARRIVAL_EXPECTED_CHANNEL_IDS[mode],
       importance: AndroidImportance.HIGH,
       pressAction: { id: 'default', launchActivity: 'default' },
-    },
-  });
-}
-
-export async function sendLastTransitAlarm(
-  transitType: '지하철' | '버스',
-  stopName: string,
-  time: string,
-): Promise<string> {
-  await ensureChannels();
-  return notifee.displayNotification({
-    title: `${transitType}: 지금 출발하세요!`,
-    body: `${stopName} ${time} 탑승`,
-    android: {
-      channelId: channelIds[4],
-      importance: AndroidImportance.HIGH,
-      category: AndroidCategory.ALARM,
-      visibility: AndroidVisibility.PUBLIC,
-      vibrationPattern: [100, 500, 200, 500, 200, 500],
-      fullScreenAction: { id: 'default', launchActivity: 'default' },
-      pressAction: { id: 'default' },
-      actions: [{ title: '✕ 닫기', pressAction: { id: 'dismiss' } }],
     },
   });
 }
@@ -639,6 +702,7 @@ export async function scheduleFutureAlarm(
   isLastMode?: boolean,
 ): Promise<string[]> {
   await ensureChannels();
+  const mode = await getDepartureSoundMode(stage);
   const config = STAGE_CONFIG[stage];
   const repeatCount = stage === 4 ? 3 : 1;
   const ids: string[] = [];
@@ -659,14 +723,10 @@ export async function scheduleFutureAlarm(
       ...(canNavigate && { destLat: String(destLat), destLng: String(destLng), transportMode: transportMode as string }),
     };
     const androidConfig = {
-      channelId: channelIds[stage],
+      channelId: DEPARTURE_CHANNEL_IDS[stage][mode],
       importance: AndroidImportance.HIGH,
       category: AndroidCategory.ALARM,
       visibility: AndroidVisibility.PUBLIC,
-      // 채널이 없는 Android 8.0 미만에서는 이 값이 실제로 소리를 결정함(8.0 이상에선 채널이
-      // 우선이라 무시되지만, 같은 리소스를 가리키므로 지정해둬도 무해함)
-      sound: `stage${stage}`,
-      vibrationPattern: config.vibrate ? [100, 500, 200, 500, 200, 500] : undefined,
       fullScreenAction: { id: 'default', launchActivity: 'default' },
       pressAction: { id: 'default' },
       ...(stage <= 3 && {
@@ -738,7 +798,7 @@ export async function syncStagedAlarms(
     // 재발송)을 반복하지 않음 — 이게 "한참 지난 후 4단계가 다시 울리는" 버그의 진짜 원인이었음.
     const normalizedStation = whichStation ?? prev?.whichStation ?? null;
     if (prev && prev.departureAlarmTime === departureAlarmTime && prev.whichStation === normalizedStation) {
-      console.log(`[알람] syncStagedAlarms — key:${key} 지문 동일, 재등록 스킵`);
+      dlog('NEARDEST', `[알람] syncStagedAlarms — key:${key} 지문 동일, 재등록 스킵`);
       return;
     }
 
@@ -762,7 +822,7 @@ export async function syncStagedAlarms(
     const foundIdx = stepTimes.findIndex((t) => now < t);
     const startIdx = foundIdx === -1 ? 3 : foundIdx;
 
-    console.log(`[알람] key:${key} ${startIdx + 1}단계부터 예약 — 1단계:${new Date(stepTimes[0]).toLocaleTimeString('ko-KR', { hour12: false })} 2단계:${new Date(stepTimes[1]).toLocaleTimeString('ko-KR', { hour12: false })} 3단계:${new Date(stepTimes[2]).toLocaleTimeString('ko-KR', { hour12: false })} 4단계:${new Date(stepTimes[3]).toLocaleTimeString('ko-KR', { hour12: false })} whichStation:${normalizedStation}`);
+    dlog('NEARDEST', `[알람] key:${key} ${startIdx + 1}단계부터 예약 — 1단계:${new Date(stepTimes[0]).toLocaleTimeString('ko-KR', { hour12: false })} 2단계:${new Date(stepTimes[1]).toLocaleTimeString('ko-KR', { hour12: false })} 3단계:${new Date(stepTimes[2]).toLocaleTimeString('ko-KR', { hour12: false })} 4단계:${new Date(stepTimes[3]).toLocaleTimeString('ko-KR', { hour12: false })} whichStation:${normalizedStation}`);
 
     try {
       const allIds: string[] = [];
@@ -773,9 +833,9 @@ export async function syncStagedAlarms(
         const ids = await scheduleFutureAlarm(type, stage, destination, stepTimes[i], journeyId, appointmentId, normalizedStation, minutesRemaining, destLat, destLng, transportMode, isLastMode);
         allIds.push(...ids);
       }
-      console.log(`[알람] syncStagedAlarms 등록 완료 — key:${key} ids:${allIds}`);
+      dlog('NEARDEST', `[알람] syncStagedAlarms 등록 완료 — key:${key} ids:${allIds}`);
     } catch (e) {
-      console.log('[알람] syncStagedAlarms 등록 실패', e);
+      dlog('NEARDEST', `[알람] syncStagedAlarms 등록 실패 ${e}`);
     }
   });
 }
@@ -787,14 +847,4 @@ export function extractApiErrorMessage(raw: string, fallback: string): string {
     if (typeof parsed?.message === 'string' && parsed.message.trim()) return parsed.message;
   } catch {}
   return fallback;
-}
-
-export async function sendAllArrivalAlarms(
-  members: { name: string; arrivalTime: string }[],
-  destination: string,
-): Promise<void> {
-  for (let i = 0; i < members.length; i++) {
-    if (i > 0) await new Promise<void>((res) => setTimeout(res, 3000));
-    await sendArrivalAlarm(members[i].name, members[i].arrivalTime, destination);
-  }
 }

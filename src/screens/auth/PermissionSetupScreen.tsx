@@ -19,10 +19,14 @@ import {
   getBatteryOptimizationIgnored,
   getLocationAlwaysStatus,
   getLocationServicesEnabled,
+  getUnusedAppRestrictionsDisabled,
+  getWifiScanAlwaysAvailable,
   LocationAlwaysStatus,
   openBatteryOptimizationSettings,
   openExactAlarmSettings,
+  openLocationScanningSettings,
   openLocationServiceSettings,
+  openUnusedAppRestrictionsSettings,
   requestLocationAlways,
 } from '@/src/utils/permissions';
 import {
@@ -48,6 +52,8 @@ export default function PermissionSetupScreen() {
   const [alarmGranted, setAlarmGranted] = useState<boolean | 'checking'>('checking');
   const [batteryIgnored, setBatteryIgnored] = useState<boolean | 'checking'>('checking');
   const [locationServicesEnabled, setLocationServicesEnabled] = useState<boolean | 'checking'>('checking');
+  const [unusedAppRestrictionsDisabled, setUnusedAppRestrictionsDisabled] = useState<boolean | 'checking'>('checking');
+  const [wifiScanAvailable, setWifiScanAvailable] = useState<boolean | 'checking'>('checking');
 
   const refreshLocationStatus = useCallback(() => {
     getLocationAlwaysStatus().then(setLocationStatus);
@@ -69,12 +75,22 @@ export default function PermissionSetupScreen() {
     setBatteryIgnored(getBatteryOptimizationIgnored());
   }, []);
 
+  const refreshUnusedAppRestrictionsStatus = useCallback(() => {
+    getUnusedAppRestrictionsDisabled().then(setUnusedAppRestrictionsDisabled);
+  }, []);
+
+  const refreshWifiScanStatus = useCallback(() => {
+    setWifiScanAvailable(getWifiScanAlwaysAvailable());
+  }, []);
+
   useEffect(() => {
     refreshLocationStatus();
     refreshLocationServicesStatus();
     refreshNotificationStatus();
     refreshAlarmStatus();
     refreshBatteryStatus();
+    refreshUnusedAppRestrictionsStatus();
+    refreshWifiScanStatus();
     // 설정 화면 다녀온 뒤 앱으로 돌아오면 상태 다시 확인
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
@@ -83,10 +99,20 @@ export default function PermissionSetupScreen() {
         refreshNotificationStatus();
         refreshAlarmStatus();
         refreshBatteryStatus();
+        refreshUnusedAppRestrictionsStatus();
+        refreshWifiScanStatus();
       }
     });
     return () => sub.remove();
-  }, [refreshLocationStatus, refreshLocationServicesStatus, refreshNotificationStatus, refreshAlarmStatus, refreshBatteryStatus]);
+  }, [
+    refreshLocationStatus,
+    refreshLocationServicesStatus,
+    refreshNotificationStatus,
+    refreshAlarmStatus,
+    refreshBatteryStatus,
+    refreshUnusedAppRestrictionsStatus,
+    refreshWifiScanStatus,
+  ]);
 
   const handleRequestLocation = async () => {
     setRequesting(true);
@@ -154,6 +180,16 @@ export default function PermissionSetupScreen() {
   const locationServicesBadge =
     locationServicesEnabled === 'checking' ? '확인 중…'
     : locationServicesEnabled ? '✅ 완료'
+    : '❌ 꺼져있음';
+
+  const unusedAppRestrictionsBadge =
+    unusedAppRestrictionsDisabled === 'checking' ? '확인 중…'
+    : unusedAppRestrictionsDisabled ? '✅ 완료'
+    : '❌ 켜져있음';
+
+  const wifiScanBadge =
+    wifiScanAvailable === 'checking' ? '확인 중…'
+    : wifiScanAvailable ? '✅ 완료'
     : '❌ 꺼져있음';
 
   return (
@@ -227,6 +263,20 @@ export default function PermissionSetupScreen() {
               )}
             </View>
 
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>🗑️ 사용하지 않는 앱 관리</Text>
+              <Text style={styles.cardDesc}>
+                이 옵션이 켜져 있으면 몇 달간 앱을 안 열었을 때 안드로이드가 알림·위치 권한을
+                자동으로 꺼버려요. 알람이 왜 안 울리는지 모른 채 방치되지 않으려면 꺼두는 게 좋아요.
+              </Text>
+              <Text style={styles.statusText}>{unusedAppRestrictionsBadge}</Text>
+              {unusedAppRestrictionsDisabled !== true && (
+                <TouchableOpacity style={styles.actionButton} onPress={openUnusedAppRestrictionsSettings}>
+                  <Text style={styles.actionButtonText}>설정으로 이동</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
             <Text style={styles.sectionTitle}>기기 설정</Text>
             <View style={styles.card}>
               <Text style={styles.cardTitle}>📡 위치 서비스(GPS)</Text>
@@ -236,6 +286,21 @@ export default function PermissionSetupScreen() {
               <Text style={styles.statusText}>{locationServicesBadge}</Text>
               {locationServicesEnabled !== true && (
                 <TouchableOpacity style={styles.actionButton} onPress={openLocationServiceSettings}>
+                  <Text style={styles.actionButtonText}>설정으로 이동</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>📶 Wi-Fi 찾기</Text>
+              <Text style={styles.cardDesc}>
+                Wi-Fi가 꺼져 있어도 위치 정확도를 높이기 위해 스캔하는 기능이에요. 실내(특히
+                새벽에 집에서 첫 위치를 잡을 때)에서는 GPS만으로 오차가 클 수 있어, 이 옵션이
+                켜져 있으면 더 정확해져요.
+              </Text>
+              <Text style={styles.statusText}>{wifiScanBadge}</Text>
+              {wifiScanAvailable !== true && (
+                <TouchableOpacity style={styles.actionButton} onPress={openLocationScanningSettings}>
                   <Text style={styles.actionButtonText}>설정으로 이동</Text>
                 </TouchableOpacity>
               )}

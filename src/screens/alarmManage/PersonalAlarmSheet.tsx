@@ -5,8 +5,6 @@ import { createJourneysApi, ensureFutureDateTime, JourneyDetail, maskToRepeatDay
 import { alarmService } from '@/src/services/alarmService';
 import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
 import { toTransportMode } from '@/src/utils/kakaoMapDeeplink';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ACTIVE_JOURNEYS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { usePlaces } from '@/src/hooks/usePlaces';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -233,14 +231,14 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
       if (isEditMode && editAlarm.journeyId) {
         const res = await journeysApi.updatePersonal(editAlarm.journeyId, payload);
         if (res.data.journey_status === 'READY') {
-          alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: editAlarm.journeyId, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, transportMode: toTransportMode(editAlarm.transport === 'car') });
+          alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: editAlarm.journeyId, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, transportMode: toTransportMode(editAlarm.transport === 'car'), repeatDays: payload.repeat_days });
         } else if (res.data.journey_status === 'SCHEDULED') {
           alarmService.stop(editAlarm.journeyId);
         }
       } else {
         const res = await journeysApi.createPersonal(payload);
         if (res.data.journey_status === 'READY') {
-          alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: res.data.journey_id, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, transportMode: toTransportMode(editAlarm.transport === 'car') });
+          alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: res.data.journey_id, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, transportMode: toTransportMode(editAlarm.transport === 'car'), repeatDays: payload.repeat_days });
         }
       }
       await loadAlarms();
@@ -257,10 +255,8 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
     if (editAlarm.journeyId) {
       try {
         await journeysApi.deleteJourney(editAlarm.journeyId);
+        // alarmService.stop()이 내부적으로 ACTIVE_JOURNEYS_KEY 제거까지 안전하게(잠금 걸린 채) 처리함
         alarmService.stop(editAlarm.journeyId);
-        const raw = await AsyncStorage.getItem(ACTIVE_JOURNEYS_KEY);
-        const ids: number[] = raw ? JSON.parse(raw) : [];
-        await AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify(ids.filter(id => id !== editAlarm.journeyId)));
       } catch {
         Alert.alert('삭제 실패', '다시 시도해주세요.');
         return;
@@ -295,7 +291,7 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
       if (!newEnabled) {
         alarmService.stop(alarm.journeyId);
       } else if (!!alarm.myStatus && ['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
-        alarmService.start({ alarmType: 'personal', destination: alarm.dest_name, journeyId: alarm.journeyId, destLat: alarm.dest_lat, destLng: alarm.dest_lng, transportMode: toTransportMode(alarm.transport === 'car') });
+        alarmService.start({ alarmType: 'personal', destination: alarm.dest_name, journeyId: alarm.journeyId, destLat: alarm.dest_lat, destLng: alarm.dest_lng, transportMode: toTransportMode(alarm.transport === 'car'), repeatDays: repeatDaysToMask(alarm.repeat) });
       }
     }
   };
@@ -350,10 +346,8 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
                 if (alarm.journeyId) {
                   try {
                     await journeysApi.deleteJourney(alarm.journeyId);
+                    // alarmService.stop()이 내부적으로 ACTIVE_JOURNEYS_KEY 제거까지 안전하게(잠금 걸린 채) 처리함
                     alarmService.stop(alarm.journeyId);
-                    const raw = await AsyncStorage.getItem(ACTIVE_JOURNEYS_KEY);
-                    const ids: number[] = raw ? JSON.parse(raw) : [];
-                    await AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify(ids.filter(id => id !== alarm.journeyId)));
                   } catch { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
                 }
                 setAlarms((prev) => prev.filter((a) => a.id !== alarm.id));

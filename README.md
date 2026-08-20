@@ -61,8 +61,11 @@ eas build --platform android --profile preview
 - `src/api/`: 서버 API 호출
 - `src/screens/`: 화면 컴포넌트
 - `src/services/`: 알람 서비스 등 비즈니스 로직
+- `src/tasks/`: 백그라운드 위치추적/지오펜스 헤드리스 태스크
 - `src/utils/`: 공통 유틸리티 (알림 채널 등)
 - `assets/`: 이미지 및 정적 파일
+
+문서(해결된 버그 히스토리 등)는 백엔드 저장소(`gonow`)의 `docs/`에서 통합 관리합니다.
 
 ## 주요 기능
 

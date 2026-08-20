@@ -6,8 +6,6 @@ import { createAppointmentsApi } from '@/src/api/appointments';
 import { alarmService } from '@/src/services/alarmService';
 import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
 import { toTransportMode, canNavigateAlarm, handleNavigateAlarm } from '@/src/utils/kakaoMapDeeplink';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ACTIVE_APPOINTMENTS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { targetTimeToAmpmHourMinute } from '@/src/api/journeys';
 import { createMembersApi } from '@/src/api/members';
 import { usePlaces } from '@/src/hooks/usePlaces';
@@ -18,6 +16,7 @@ import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Platform,
   Share,
@@ -438,10 +437,8 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
     try {
       const res = await appointmentsApi.deleteAppointment(editAlarm.appointmentId);
       if (res.success) {
+        // alarmService.stop()이 내부적으로 ACTIVE_APPOINTMENTS_KEY 제거까지 안전하게(잠금 걸린 채) 처리함
         alarmService.stop(undefined, editAlarm.appointmentId);
-        const raw = await AsyncStorage.getItem(ACTIVE_APPOINTMENTS_KEY);
-        const ids: number[] = raw ? JSON.parse(raw) : [];
-        await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify(ids.filter(id => id !== editAlarm.appointmentId)));
         await loadAlarms();
         bumpAlarmVersion();
         setView('list');
@@ -469,18 +466,27 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
   // DRIVING/TRANSIT 공통 카카오맵 딥링크 — 단일 딥링크 설계 (docs/reference/kakao-map-deeplink-spec.md §2.2~2.4 참고)
   const canNavigate = (alarm: GroupAlarm) => canNavigateAlarm(alarm.myStatus);
 
-  const handleNavigate = (alarm: GroupAlarm) =>
-    handleNavigateAlarm(alarm.place_lat, alarm.place_lng, alarm.myStatus, alarm.transport === 'car');
-
-  const copyInviteCode = async () => {
+  // 매번 새로 GPS를 잡아 열기까지 1~2초 걸릴 수 있어(kakaoMapDeeplink.ts 참고),
+  // 버튼이 멈춘 건지 헷갈리지 않도록 눌린 카드의 id만 로딩 표시한다.
+  const [navigatingId, setNavigatingId] = useState<string | null>(null);
+  const handleNavigate = async (alarm: GroupAlarm) => {
+    setNavigatingId(alarm.id);
     try {
-      await Share.share({ message: editAlarm.inviteCode });
-    } catch {}
+      await handleNavigateAlarm(alarm.place_lat, alarm.place_lng, alarm.transport === 'car');
+    } finally {
+      setNavigatingId(null);
+    }
   };
+
   const shareInviteCode = async () => {
     try {
       await Share.share({
-        message: '[GoNow] 그룹 초대코드: ' + editAlarm.inviteCode + ' | 초대코드를 앱에 입력해 그룹에 참여하세요!',
+        // https 유니버설 링크 — 앱이 설치돼 있으면 탭 한 번에 앱이 열리고 초대코드가 자동 입력된다
+        // (app.json의 Android App Links + app/_layout.tsx의 딥링크 리스너 참고).
+        message:
+          '[GoNow] 모임에 초대되었습니다!\n' +
+          '아래 링크를 누르면 그룹에 바로 참여할 수 있어요.\n' +
+          `https://gonow-api.uk/join?code=${editAlarm.inviteCode}`,
       });
     } catch {}
   };
@@ -537,19 +543,14 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
                   if (isHost) {
                     const res = await appointmentsApi.deleteAppointment(alarm.appointmentId);
                     if (res.success) {
+                      // alarmService.stop()이 내부적으로 ACTIVE_APPOINTMENTS_KEY 제거까지 안전하게(잠금 걸린 채) 처리함
                       alarmService.stop(undefined, alarm.appointmentId);
-                      const raw = await AsyncStorage.getItem(ACTIVE_APPOINTMENTS_KEY);
-                      const ids: number[] = raw ? JSON.parse(raw) : [];
-                      await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify(ids.filter(id => id !== alarm.appointmentId)));
                       await loadAlarms(); bumpAlarmVersion();
                     }
                   } else {
                     const res = await appointmentsApi.removeParticipant(alarm.appointmentId, myMemberId);
                     if (res.success) {
                       alarmService.stop(undefined, alarm.appointmentId);
-                      const raw = await AsyncStorage.getItem(ACTIVE_APPOINTMENTS_KEY);
-                      const ids: number[] = raw ? JSON.parse(raw) : [];
-                      await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify(ids.filter(id => id !== alarm.appointmentId)));
                       await loadAlarms(); bumpAlarmVersion();
                     }
                   }
@@ -583,11 +584,15 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
                         color={alarm.isArrivalActive ? '#FFFFFF' : '#CCCCCC'}
                       />
                     </TouchableOpacity>
-                    {canNavigate(alarm) && (
-                      <TouchableOpacity style={styles.navigateBtn} onPress={() => handleNavigate(alarm)}>
-                        <Feather name="navigation" size={14} color="#4A90D9" />
-                      </TouchableOpacity>
-                    )}
+                    <TouchableOpacity
+                      style={[styles.navigateBtn, !canNavigate(alarm) && styles.navigateBtnDisabled]}
+                      onPress={() => handleNavigate(alarm)}
+                      disabled={!canNavigate(alarm) || navigatingId === alarm.id}
+                    >
+                      {navigatingId === alarm.id
+                        ? <ActivityIndicator size="small" color="#4A90D9" />
+                        : <Feather name="map" size={14} color={canNavigate(alarm) ? '#4A90D9' : '#CCCCCC'} />}
+                    </TouchableOpacity>
                     <Switch
                       value={alarm.enabled}
                       onValueChange={() => toggleAlarm(alarm.id)}
@@ -729,9 +734,6 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress }: Props) {
                       <Text style={styles.optionLabel}>초대코드</Text>
                       <View style={styles.rowRight}>
                         <Text style={styles.rowValue}>{editAlarm.inviteCode}</Text>
-                        <TouchableOpacity onPress={copyInviteCode} style={{ marginLeft: 8 }}>
-                          <Feather name="copy" size={16} color="#AAAAAA" />
-                        </TouchableOpacity>
                         <TouchableOpacity onPress={shareInviteCode} style={{ marginLeft: 8 }}>
                           <Feather name="share" size={16} color="#AAAAAA" />
                         </TouchableOpacity>
@@ -963,6 +965,7 @@ const styles = StyleSheet.create({
   dashboardBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center' },
   dashboardBtnActive: { backgroundColor: '#92DEFE' },
   navigateBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#EAF2FB', alignItems: 'center', justifyContent: 'center' },
+  navigateBtnDisabled: { backgroundColor: '#EEEEEE' },
   pickerContainer: {
     flexDirection: 'row',
     backgroundColor: '#F5F5F5', borderRadius: 14,

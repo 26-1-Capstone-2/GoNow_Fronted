@@ -6,8 +6,6 @@ import { alarmService } from '@/src/services/alarmService';
 import { extractApiErrorMessage } from '@/src/utils/notifications';
 import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
 import { toTransportMode } from '@/src/utils/kakaoMapDeeplink';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ACTIVE_JOURNEYS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { usePlaces } from '@/src/hooks/usePlaces';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -255,14 +253,14 @@ export default function HomeAlarmSheet({ onClose, initialMode, editJourneyId, in
       if (isEditMode && editAlarm.journeyId) {
         const res = await journeysApi.updateHome(editAlarm.journeyId, payload);
         if (res.data.journey_status === 'READY') {
-          alarmService.start({ alarmType: 'home', destination: editAlarm.home_name, journeyId: editAlarm.journeyId, destLat: editAlarm.home_lat, destLng: editAlarm.home_lng, transportMode: toTransportMode(editAlarm.transport === 'car'), isLastMode: editAlarm.mode === 'lastTrain' });
+          alarmService.start({ alarmType: 'home', destination: editAlarm.home_name, journeyId: editAlarm.journeyId, destLat: editAlarm.home_lat, destLng: editAlarm.home_lng, transportMode: toTransportMode(editAlarm.transport === 'car'), isLastMode: editAlarm.mode === 'lastTrain', repeatDays: payload.repeat_days });
         } else if (res.data.journey_status === 'SCHEDULED') {
           alarmService.stop(editAlarm.journeyId);
         }
       } else {
         const res = await journeysApi.createHome(payload);
         if (res.data.journey_status === 'READY') {
-          alarmService.start({ alarmType: 'home', destination: editAlarm.home_name, journeyId: res.data.journey_id, destLat: editAlarm.home_lat, destLng: editAlarm.home_lng, transportMode: toTransportMode(editAlarm.transport === 'car'), isLastMode: editAlarm.mode === 'lastTrain' });
+          alarmService.start({ alarmType: 'home', destination: editAlarm.home_name, journeyId: res.data.journey_id, destLat: editAlarm.home_lat, destLng: editAlarm.home_lng, transportMode: toTransportMode(editAlarm.transport === 'car'), isLastMode: editAlarm.mode === 'lastTrain', repeatDays: payload.repeat_days });
         }
       }
       await loadAlarms();
@@ -280,10 +278,8 @@ export default function HomeAlarmSheet({ onClose, initialMode, editJourneyId, in
     if (editAlarm.journeyId) {
       try {
         await journeysApi.deleteJourney(editAlarm.journeyId);
+        // alarmService.stop()이 내부적으로 ACTIVE_JOURNEYS_KEY 제거까지 안전하게(잠금 걸린 채) 처리함
         alarmService.stop(editAlarm.journeyId);
-        const raw = await AsyncStorage.getItem(ACTIVE_JOURNEYS_KEY);
-        const ids: number[] = raw ? JSON.parse(raw) : [];
-        await AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify(ids.filter(id => id !== editAlarm.journeyId)));
       } catch {
         Alert.alert('삭제 실패', '다시 시도해주세요.');
         return;
@@ -304,7 +300,7 @@ export default function HomeAlarmSheet({ onClose, initialMode, editJourneyId, in
       if (!newEnabled) {
         alarmService.stop(alarm.journeyId);
       } else if (!!alarm.myStatus && ['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
-        alarmService.start({ alarmType: 'home', destination: alarm.home_name, journeyId: alarm.journeyId, destLat: alarm.home_lat, destLng: alarm.home_lng, transportMode: toTransportMode(alarm.transport === 'car'), isLastMode: alarm.mode === 'lastTrain' });
+        alarmService.start({ alarmType: 'home', destination: alarm.home_name, journeyId: alarm.journeyId, destLat: alarm.home_lat, destLng: alarm.home_lng, transportMode: toTransportMode(alarm.transport === 'car'), isLastMode: alarm.mode === 'lastTrain', repeatDays: repeatDaysToMask(alarm.repeat) });
       }
     }
   };
@@ -357,10 +353,8 @@ export default function HomeAlarmSheet({ onClose, initialMode, editJourneyId, in
                 if (alarm.journeyId) {
                   try {
                     await journeysApi.deleteJourney(alarm.journeyId);
+                    // alarmService.stop()이 내부적으로 ACTIVE_JOURNEYS_KEY 제거까지 안전하게(잠금 걸린 채) 처리함
                     alarmService.stop(alarm.journeyId);
-                    const raw = await AsyncStorage.getItem(ACTIVE_JOURNEYS_KEY);
-                    const ids: number[] = raw ? JSON.parse(raw) : [];
-                    await AsyncStorage.setItem(ACTIVE_JOURNEYS_KEY, JSON.stringify(ids.filter(id => id !== alarm.journeyId)));
                   } catch { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
                 }
                 setAlarms((prev) => prev.filter((a) => a.id !== alarm.id));

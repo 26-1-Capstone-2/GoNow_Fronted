@@ -5,8 +5,6 @@ import { createAppointmentsApi } from '@/src/api/appointments';
 import { alarmService } from '@/src/services/alarmService';
 import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
 import { toTransportMode } from '@/src/utils/kakaoMapDeeplink';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ACTIVE_APPOINTMENTS_KEY } from '@/src/tasks/backgroundLocationTask';
 import { targetTimeToAmpmHourMinute } from '@/src/api/journeys';
 import { createMembersApi } from '@/src/api/members';
 import { usePlaces } from '@/src/hooks/usePlaces';
@@ -42,9 +40,10 @@ interface GroupAlarm {
 interface Props {
   onClose: () => void;
   onArrivalPress?: (alarm: GroupAlarm) => void;
-  initialMode?: 'add' | 'create' | 'edit';
+  initialMode?: 'add' | 'create' | 'edit' | 'join';
   editAppointmentId?: number;
   initialAlarm?: any;
+  initialInviteCode?: string;
 }
 
 const alarmsApi = createAlarmsApi();
@@ -87,7 +86,7 @@ const DEFAULT_ALARM: GroupAlarm = {
 
 type ViewType = 'list' | 'edit' | 'place' | 'addChoice' | 'join' | 'transport';
 
-export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, editAppointmentId, initialAlarm }: Props) {
+export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, editAppointmentId, initialAlarm, initialInviteCode }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const snapPoints = useMemo(() => ['85%'], []);
   const { selectedDate, alarmVersion, bumpAlarmVersion } = useCalendarStore();
@@ -96,7 +95,9 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
   const { places, searchKey, loadPlaces, savePlace, deletePlace } = usePlaces('DEST');
 
   const [view, setView] = useState<ViewType>(
-    initialMode === 'add' ? 'addChoice' : (initialMode === 'create' || initialMode === 'edit') ? 'edit' : 'list'
+    initialMode === 'join' ? 'join'
+      : initialMode === 'add' ? 'addChoice'
+      : (initialMode === 'create' || initialMode === 'edit') ? 'edit' : 'list'
   );
   const [alarms, setAlarms] = useState<GroupAlarm[]>([]);
   const [editAlarm, setEditAlarm] = useState<GroupAlarm>(() => {
@@ -106,7 +107,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
     return DEFAULT_ALARM;
   });
   const [tempPlace, setTempPlace] = useState<SearchResult | null>(null);
-  const [inviteCode, setInviteCode] = useState('');
+  const [inviteCode, setInviteCode] = useState(initialInviteCode ?? '');
   const [inviteError, setInviteError] = useState('');
   const [joinTransport, setJoinTransport] = useState<Transport>('public');
   const isEditMode = !!editAlarm.id;
@@ -400,10 +401,8 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
     try {
       const res = await appointmentsApi.deleteAppointment(editAlarm.appointmentId);
       if (res.success) {
+        // alarmService.stop()이 내부적으로 ACTIVE_APPOINTMENTS_KEY 제거까지 안전하게(잠금 걸린 채) 처리함
         alarmService.stop(undefined, editAlarm.appointmentId);
-        const raw = await AsyncStorage.getItem(ACTIVE_APPOINTMENTS_KEY);
-        const ids: number[] = raw ? JSON.parse(raw) : [];
-        await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify(ids.filter(id => id !== editAlarm.appointmentId)));
         await loadAlarms();
         bumpAlarmVersion();
         initialMode ? onClose() : setView('list');
@@ -426,15 +425,15 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
       setAlarms((prev) => prev.map((a) => a.id === id ? { ...a, enabled: alarm.enabled } : a));
     }
   };
-  const copyInviteCode = async () => {
-    try {
-      await Share.share({ message: editAlarm.inviteCode });
-    } catch {}
-  };
   const shareInviteCode = async () => {
     try {
       await Share.share({
-        message: '[GoNow] 그룹 초대코드: ' + editAlarm.inviteCode + ' | 초대코드를 앱에 입력해 그룹에 참여하세요!',
+        // https 유니버설 링크 — 앱이 설치돼 있으면 탭 한 번에 앱이 열리고 초대코드가 자동 입력된다
+        // (app.json의 Android App Links + app/_layout.tsx의 딥링크 리스너 참고).
+        message:
+          '[GoNow] 모임에 초대되었습니다!\n' +
+          '아래 링크를 누르면 그룹에 바로 참여할 수 있어요.\n' +
+          `https://gonow-api.uk/join?code=${editAlarm.inviteCode}`,
       });
     } catch {}
   };
@@ -486,19 +485,14 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
                   if (isHost) {
                     const res = await appointmentsApi.deleteAppointment(alarm.appointmentId);
                     if (res.success) {
+                      // alarmService.stop()이 내부적으로 ACTIVE_APPOINTMENTS_KEY 제거까지 안전하게(잠금 걸린 채) 처리함
                       alarmService.stop(undefined, alarm.appointmentId);
-                      const raw = await AsyncStorage.getItem(ACTIVE_APPOINTMENTS_KEY);
-                      const ids: number[] = raw ? JSON.parse(raw) : [];
-                      await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify(ids.filter(id => id !== alarm.appointmentId)));
                       await loadAlarms(); bumpAlarmVersion();
                     }
                   } else {
                     const res = await appointmentsApi.removeParticipant(alarm.appointmentId, myMemberId);
                     if (res.success) {
                       alarmService.stop(undefined, alarm.appointmentId);
-                      const raw = await AsyncStorage.getItem(ACTIVE_APPOINTMENTS_KEY);
-                      const ids: number[] = raw ? JSON.parse(raw) : [];
-                      await AsyncStorage.setItem(ACTIVE_APPOINTMENTS_KEY, JSON.stringify(ids.filter(id => id !== alarm.appointmentId)));
                       await loadAlarms(); bumpAlarmVersion();
                     }
                   }
@@ -638,7 +632,6 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
                     <Text style={styles.optionLabel}>초대코드</Text>
                     <View style={styles.rowRight}>
                       <Text style={styles.inviteCode}>{editAlarm.inviteCode}</Text>
-                      <TouchableOpacity onPress={copyInviteCode} style={{ marginLeft: 8 }}><Feather name="copy" size={16} color="#AAAAAA" /></TouchableOpacity>
                       <TouchableOpacity onPress={shareInviteCode} style={{ marginLeft: 8 }}><Feather name="share" size={16} color="#AAAAAA" /></TouchableOpacity>
                     </View>
                   </View>

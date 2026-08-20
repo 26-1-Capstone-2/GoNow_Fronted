@@ -1,0 +1,7 @@
+{
+  "name": "wifi-scan-status",
+  "version": "1.0.0",
+  "description": "Local Expo module — checks Android's \"Wi-Fi scanning always available\" location-accuracy setting (WifiManager.isScanAlwaysAvailable)",
+  "main": "index.ts",
+  "types": "index.ts"
+}
