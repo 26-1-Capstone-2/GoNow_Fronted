@@ -448,7 +448,7 @@ class AlarmRunner {
       } else if (journey_status === 'READY' && Platform.OS === 'android') {
         // READY — 지오펜싱으로 감시 이관(Phase 3, 안드로이드 전용 — iOS는 지오펜싱 불가라
         // 기존 폴링 유지). 방금 실제로 GPS를 찍은 좌표라 근사치 오차 없이 정확한 앵커로 등록됨.
-        await enterReadyGeofenceMode(this.currentKey()!, lat, lng, this.target.destLat, this.target.destLng);
+        await enterReadyGeofenceMode(this.currentKey()!, lat, lng, this.target.destLat, this.target.destLng, departure_alarm_time != null);
         await removeActiveId(this.target.journeyId, undefined);
         await maybeSyncGpsPolling();
         dlog('READY', `key:${this.currentKey()} 포그라운드 폴링에서 지오펜스로 전환 완료 — 앵커(${lat.toFixed(6)}, ${lng.toFixed(6)})`);
@@ -534,7 +534,7 @@ class AlarmRunner {
       } else if (participant_status === 'READY' && Platform.OS === 'android') {
         // READY — 지오펜싱으로 감시 이관(Phase 3, 안드로이드 전용). 추적 자체는 isActive와
         // 무관하게 계속(그룹 전체 상태 계산에 필요).
-        await enterReadyGeofenceMode(this.currentKey()!, lat, lng, this.target.destLat, this.target.destLng);
+        await enterReadyGeofenceMode(this.currentKey()!, lat, lng, this.target.destLat, this.target.destLng, departure_alarm_time != null);
         await removeActiveId(undefined, this.target.appointmentId);
         await maybeSyncGpsPolling();
         dlog('READY', `key:${this.currentKey()} 포그라운드 폴링에서 지오펜스로 전환 완료 — 앵커(${lat.toFixed(6)}, ${lng.toFixed(6)})`);

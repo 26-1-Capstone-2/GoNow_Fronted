@@ -845,7 +845,7 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
           // READY — 지오펜싱으로 감시 이관(Phase 3, 안드로이드 전용). 방금 이 틱에서 실제로
           // 보낸 좌표(lat,lng)를 앵커로 등록 — 근사치 문제 없음(정확한 GPS 판독값).
           dlog('POLLING', `READY — journeyId:${id} 지오펜스로 전환, 폴링 중단`);
-          await enterReadyGeofenceMode(key, lat, lng, navInfo[key]?.destLat, navInfo[key]?.destLng);
+          await enterReadyGeofenceMode(key, lat, lng, navInfo[key]?.destLat, navInfo[key]?.destLng, departure_alarm_time != null);
           removeActiveId(id, undefined).catch(() => {});
         } else {
           remainingJourneys.push(id);
@@ -951,7 +951,7 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
           remainingAppointments.push(id);
         } else if (participant_status === 'READY' && Platform.OS === 'android') {
           dlog('POLLING', `READY — appointmentId:${id} 지오펜스로 전환, 폴링 중단`);
-          await enterReadyGeofenceMode(key, lat, lng, navInfo[key]?.destLat, navInfo[key]?.destLng);
+          await enterReadyGeofenceMode(key, lat, lng, navInfo[key]?.destLat, navInfo[key]?.destLng, departure_alarm_time != null);
           removeActiveId(undefined, id).catch(() => {});
         } else {
           remainingAppointments.push(id);
