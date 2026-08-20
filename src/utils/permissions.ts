@@ -4,21 +4,26 @@ import { router } from 'expo-router';
 import { Alert, Linking, Platform } from 'react-native';
 
 import BatteryOptimizationModule from '@/modules/battery-optimization';
+import UnusedAppRestrictionsModule from '@/modules/unused-app-restrictions';
+import WifiScanStatusModule from '@/modules/wifi-scan-status';
 import { ROUTES } from '@/src/navigation/routes';
 import { getNotificationPermissionGranted } from '@/src/utils/notifications';
 
 /**
- * 안드로이드가 런타임 팝업으로 자동 승인해주지 않는 3가지 필수 설정(위치 항상 허용,
- * 정확한 알람, 배터리 최적화 제외) 중 위치 관련 확인/요청 + 알람/배터리 설정화면
- * 이동을 담당하는 헬퍼. iOS는 해당 제약이 없어 위치 권한만 의미가 있다.
+ * 안드로이드가 런타임 팝업으로 자동 승인해주지 않는 필수 설정(위치 항상 허용, 정확한 알람,
+ * 배터리 최적화 제외, 사용하지 않는 앱 관리, Wi-Fi 찾기) 중 위치 관련 확인/요청 + 각종
+ * 설정화면 이동을 담당하는 헬퍼. iOS는 해당 제약이 없어 위치 권한만 의미가 있다.
  * (정확한 알람의 상태 "확인"은 notifee를 쓰는 `src/utils/notifications.ts`의
- * `getExactAlarmGranted()`에 있음 — 배터리 상태 확인은 `getBatteryOptimizationIgnored()`,
- * 로컬 네이티브 모듈 `modules/battery-optimization` 사용, 재빌드 필요)
+ * `getExactAlarmGranted()`에 있음 — 배터리/사용하지 않는 앱 관리/Wi-Fi 찾기 상태 확인은
+ * 각각 로컬 네이티브 모듈(`modules/battery-optimization`, `modules/unused-app-restrictions`,
+ * `modules/wifi-scan-status`) 사용, 재빌드 필요)
  *
- * 알람/배터리는 앱 하나만 바로 찾아가는 화면이 있긴 하지만(각각 별도 매니페스트 권한
- * 선언 + 네이티브 모듈 필요, 배터리는 추가로 스토어 심사 리스크까지) 그 정도 편의 향상 대비
- * 부담이 커서, 전체 목록 화면으로 이동만 시키고 사용자가 직접 gonow를 찾게 하는
+ * 정확한 알람/배터리는 앱 하나만 바로 찾아가는 화면이 있긴 하지만(각각 별도 매니페스트
+ * 권한 선언 + 네이티브 모듈 필요, 배터리는 추가로 스토어 심사 리스크까지) 그 정도 편의
+ * 향상 대비 부담이 커서, 전체 목록 화면으로 이동만 시키고 사용자가 직접 gonow를 찾게 하는
  * 가장 단순하고 안전한 방식을 쓴다. 순수 RN 코어 Linking만 사용 — 추가 패키지/재빌드 불필요.
+ * (반면 사용하지 않는 앱 관리는 구글이 공식 제공하는 앱 전용 딥링크라 이 리스크가 없어서
+ * 네이티브 모듈로 바로 앱 화면까지 이동시킨다 — 아래 `openUnusedAppRestrictionsSettings` 참고)
  */
 
 export type LocationAlwaysStatus = 'granted' | 'foregroundOnly' | 'denied';
@@ -45,6 +50,17 @@ export function openLocationServiceSettings(): void {
   Linking.sendIntent('android.settings.LOCATION_SOURCE_SETTINGS').catch(() => {
     // 일부 기기/OS 버전에는 해당 화면이 없을 수 있음 — 앱 설정 화면으로라도 보냄
     Linking.openSettings().catch(() => {});
+  });
+}
+
+// "위치 서비스"(Wi-Fi/블루투스 찾기 등 정확도 향상 옵션) 화면으로 바로 이동 시도.
+// LOCATION_SCANNING_SETTINGS는 AOSP 소스에 실존하지만 @hide(비공개 API)라 기기/OS
+// 버전에 따라 없을 수 있음 — 실패하면 기존처럼 "위치" 최상위 화면으로 폴백(그 안에서
+// 한 단계 더 들어가야 함, 일부 제조사 UI는 이마저도 필요할 수 있음).
+export function openLocationScanningSettings(): void {
+  if (Platform.OS !== 'android') return;
+  Linking.sendIntent('android.settings.LOCATION_SCANNING_SETTINGS').catch(() => {
+    openLocationServiceSettings();
   });
 }
 
@@ -126,6 +142,46 @@ export function getBatteryOptimizationIgnored(): boolean {
   } catch {
     // 재빌드 전(네이티브 모듈 미연결) 등 예외 상황 — 미확인 상태를 false로 취급
     return false;
+  }
+}
+
+// "Wi-Fi 찾기"(Wi-Fi가 꺼져 있어도 위치 정확도를 위해 스캔) 상태 확인 — 로컬 네이티브
+// 모듈(modules/wifi-scan-status)이 WifiManager.isScanAlwaysAvailable()을 감싸서 제공.
+// 전용 딥링크 화면은 따로 없어 기존 위치 서비스 설정 화면(openLocationServiceSettings)을
+// 그대로 재사용 — 거기서 "정확도 향상" 섹션까지 한 단계만 더 들어가면 됨. iOS는 해당 개념 없음.
+export function getWifiScanAlwaysAvailable(): boolean {
+  if (Platform.OS !== 'android') return true;
+  try {
+    return WifiScanStatusModule.isScanAlwaysAvailable();
+  } catch {
+    // 재빌드 전(네이티브 모듈 미연결) 등 예외 상황 — 미확인 상태를 false로 취급
+    return false;
+  }
+}
+
+// "사용하지 않는 앱 관리"(미사용 시 권한 자동 삭제) 상태 확인 — 로컬 네이티브 모듈
+// (modules/unused-app-restrictions)이 androidx PackageManagerCompat.
+// getUnusedAppRestrictionsStatus()를 감싸서 제공.
+export async function getUnusedAppRestrictionsDisabled(): Promise<boolean> {
+  if (Platform.OS !== 'android') return true;
+  try {
+    const enabled = await UnusedAppRestrictionsModule.isRestrictionEnabled();
+    return !enabled;
+  } catch {
+    // 재빌드 전(네이티브 모듈 미연결) 등 예외 상황 — 미확인 상태를 false로 취급
+    return false;
+  }
+}
+
+// "사용하지 않는 앱 관리" 화면(gonow 전용)으로 바로 이동 — 배터리 최적화 요청 인텐트와
+// 달리 별도 매니페스트 권한/스토어 심사 리스크가 없는 구글 공식 권장 패턴이라 앱 전용
+// 화면으로 바로 보낼 수 있음(전체 목록에서 사용자가 직접 찾을 필요 없음).
+export function openUnusedAppRestrictionsSettings(): void {
+  if (Platform.OS !== 'android') return;
+  try {
+    UnusedAppRestrictionsModule.openSettings();
+  } catch {
+    // 재빌드 전(네이티브 모듈 미연결) 등 예외 상황 — 무시
   }
 }
 

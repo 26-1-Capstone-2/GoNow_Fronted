@@ -1,0 +1,7 @@
+{
+  "name": "unused-app-restrictions",
+  "version": "1.0.0",
+  "description": "Local Expo module — checks/opens Android's per-app \"remove permissions if unused\" setting (androidx PackageManagerCompat)",
+  "main": "index.ts",
+  "types": "index.ts"
+}
