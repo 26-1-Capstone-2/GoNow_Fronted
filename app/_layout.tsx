@@ -48,8 +48,11 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 async function checkAndApplyUpdate(): Promise<void> {
-  if (__DEV__ || !Updates.isEnabled) {
-    dlog('FOREGROUND', `[expo-updates] 체크 스킵 — __DEV__:${__DEV__} isEnabled:${Updates.isEnabled}`);
+  // EXPO_PUBLIC_API_BASE_URL이 설정된 로컬 테스트 빌드(.env.local)에서는 OTA 체크를 건너뛴다 —
+  // 안 그러면 preview 채널의 예전 번들(gonow-api.uk 하드코딩)이 로컬 빌드를 그 자리에서 덮어써서
+  // 로컬 서버를 보고 있는 줄 알았는데 실제로는 EC2를 보고 있는 혼란이 생긴다.
+  if (__DEV__ || !Updates.isEnabled || process.env.EXPO_PUBLIC_API_BASE_URL) {
+    dlog('FOREGROUND', `[expo-updates] 체크 스킵 — __DEV__:${__DEV__} isEnabled:${Updates.isEnabled} localOverride:${!!process.env.EXPO_PUBLIC_API_BASE_URL}`);
     return;
   }
   try {

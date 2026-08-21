@@ -1,7 +1,9 @@
 import { router } from 'expo-router';
 import { useAuthStore } from '@/src/store/authStore';
 
-const defaultBaseUrl = 'https://gonow-api.uk';
+// 로컬 스프링으로 테스트하고 싶을 때: .env.local(gitignore 대상)에
+// EXPO_PUBLIC_API_BASE_URL=http://<내 노트북 LAN IP>:8080 추가 후 Metro 재시작(npx expo start -c)
+const defaultBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'https://gonow-api.uk';
 
 export type ApiClientOptions = {
   baseUrl?: string;
