@@ -1,4 +1,5 @@
 import { createMembersApi } from '@/src/api/members';
+import { getErrorMessage } from '@/src/api/client';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
@@ -27,17 +28,20 @@ export default function ChangePasswordScreen() {
   const [loading, setLoading] = useState(false);
 
   const isNewPasswordInvalid = newPassword.length > 0 && !PASSWORD_REGEX.test(newPassword);
+  // 서버(MemberService.updatePassword)와 동일한 규칙 — 기존과 같은 비밀번호로는 변경 불가
+  const isSamePassword =
+    currentPassword.length > 0 && newPassword.length > 0 && currentPassword === newPassword;
   const isValid = currentPassword.trim() && PASSWORD_REGEX.test(newPassword) && confirmPassword.trim();
   const isMismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
 
   const handleSave = async () => {
-    if (!isValid || isMismatch) return;
+    if (!isValid || isMismatch || isSamePassword) return;
     setLoading(true);
     try {
       await membersApi.updatePassword(currentPassword, newPassword);
       router.back();
-    } catch (e: any) {
-      Alert.alert('변경 실패', '현재 비밀번호를 확인해주세요.');
+    } catch (e) {
+      Alert.alert('변경 실패', getErrorMessage(e, '현재 비밀번호를 확인해주세요.'));
     } finally {
       setLoading(false);
     }
@@ -70,7 +74,7 @@ export default function ChangePasswordScreen() {
 
         <Text style={styles.inputLabel}>새 비밀번호</Text>
         <TextInput
-          style={[styles.input, isNewPasswordInvalid && styles.inputError]}
+          style={[styles.input, (isNewPasswordInvalid || isSamePassword) && styles.inputError]}
           placeholder=""
           placeholderTextColor="#BBBBBB"
           value={newPassword}
@@ -79,6 +83,9 @@ export default function ChangePasswordScreen() {
         />
         {isNewPasswordInvalid && (
           <Text style={styles.errorText}>공백 없는 영문/숫자/특수문자로 8~64자여야 합니다.</Text>
+        )}
+        {!isNewPasswordInvalid && isSamePassword && (
+          <Text style={styles.errorText}>기존 비밀번호와 다른 비밀번호를 입력해주세요.</Text>
         )}
 
         <Text style={styles.inputLabel}>새 비밀번호 확인</Text>
@@ -98,9 +105,12 @@ export default function ChangePasswordScreen() {
       {/* 저장 버튼 */}
       <View style={styles.footer}>
         <TouchableOpacity
-          style={[styles.saveButton, (!isValid || isMismatch || loading) && styles.saveButtonDisabled]}
+          style={[
+            styles.saveButton,
+            (!isValid || isMismatch || isSamePassword || loading) && styles.saveButtonDisabled,
+          ]}
           onPress={handleSave}
-          disabled={!isValid || isMismatch || loading}
+          disabled={!isValid || isMismatch || isSamePassword || loading}
           activeOpacity={0.7}
         >
           {loading
