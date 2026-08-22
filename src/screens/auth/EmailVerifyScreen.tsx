@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   StyleSheet,
   Text,
@@ -16,6 +17,7 @@ import { createAuthApi } from '@/src/api/auth';
 import { getErrorMessage } from '@/src/api/client';
 import { useAppNavigation } from '@/src/navigation';
 import { useSignUpStore } from '@/src/store/signUpStore';
+import { getWebmailUrl } from '@/src/utils/webmail';
 
 const authApi = createAuthApi();
 
@@ -36,6 +38,8 @@ const LOCAL_VERIFIED_GRACE_MS = 10 * 60 * 1000;
 export default function EmailVerifyScreen() {
   const { goBack, goToHomeAddressSetup } = useAppNavigation();
   const email = useSignUpStore((s) => s.email);
+  // 알려진 이메일 서비스면 문구의 이메일 부분을 탭해서 웹메일로 바로 이동시켜준다(모르는 도메인이면 null).
+  const webmailUrl = getWebmailUrl(email);
   const verifiedEmail = useSignUpStore((s) => s.verifiedEmail);
   const verifiedAt = useSignUpStore((s) => s.verifiedAt);
   const setVerified = useSignUpStore((s) => s.setVerified);
@@ -172,7 +176,14 @@ export default function EmailVerifyScreen() {
           {/* 타이틀 */}
           <Text style={styles.title}>이메일 인증</Text>
           <Text style={styles.desc}>
-            {email}로 인증코드를 보냈어요.{'\n'}5분 이내에 입력해주세요.
+            {webmailUrl ? (
+              <Text style={styles.emailLink} onPress={() => Linking.openURL(webmailUrl)}>
+                {email}
+              </Text>
+            ) : (
+              email
+            )}
+            로 인증코드를 보냈어요.{'\n'}5분 이내에 입력해주세요.
           </Text>
 
           {/* 코드 입력 */}
@@ -255,6 +266,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 22,
     marginBottom: 32,
+  },
+  emailLink: {
+    color: '#1A1A1A',
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
   codeInput: {
     width: '100%',
