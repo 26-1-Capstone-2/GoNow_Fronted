@@ -26,7 +26,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 type FieldStatus = 'idle' | 'checking' | 'ok' | 'error';
 
 export default function SignUpScreen() {
-  const { goBack, goToHomeAddressSetup } = useAppNavigation();
+  const { goBack, goToEmailVerify } = useAppNavigation();
   const setBasicInfo = useSignUpStore((s) => s.setBasicInfo);
 
   const [email, setEmail] = useState('');
@@ -95,7 +95,7 @@ export default function SignUpScreen() {
   const handleNext = () => {
     if (!canProceed) return;
     setBasicInfo({ email, password, nickname });
-    goToHomeAddressSetup();
+    goToEmailVerify();
   };
 
   return (

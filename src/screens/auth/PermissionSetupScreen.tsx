@@ -39,12 +39,7 @@ import {
 export default function PermissionSetupScreen() {
   const { goBack, goToMainTabs } = useAppNavigation();
   const { fromOnboarding } = useLocalSearchParams<{ fromOnboarding?: string }>();
-  // 회원가입 직후(goToPermissionSetup이 붙여준 파라미터)면 메인 탭으로, 설정 화면에서
-  // 들어온 거면 뒤로가기 — canGoBack()으로는 구별 불가(회원가입 스택도 뒤로 갈 곳이 남아있음)
-  const handleDone = () => {
-    if (fromOnboarding === '1') goToMainTabs();
-    else goBack();
-  };
+  const isOnboarding = fromOnboarding === '1';
   const [locationStatus, setLocationStatus] = useState<LocationAlwaysStatus | 'checking'>('checking');
   const [requesting, setRequesting] = useState(false);
   const [notificationGranted, setNotificationGranted] = useState<boolean | 'checking'>('checking');
@@ -113,6 +108,20 @@ export default function PermissionSetupScreen() {
     refreshUnusedAppRestrictionsStatus,
     refreshWifiScanStatus,
   ]);
+
+  // 알림 + 위치(항상 허용) 2개만 필수 — 이 앱의 핵심 기능(출발 알람)이 이 둘 없이는 아예 작동하지 않음.
+  // 나머지(정확한 알람/배터리 제한 해제/미사용앱 관리/GPS/Wi-Fi 스캔)는 권장 사항으로 두고 스킵 허용.
+  const requiredGranted = notificationGranted === true && locationStatus === 'granted';
+  // 가입 온보딩 중일 때만 필수 권한을 강제 — 설정 화면에서 재방문한 기존 유저까지 못 나가게 막지 않음
+  const canComplete = !isOnboarding || requiredGranted;
+
+  // 회원가입 직후(goToPermissionSetup이 붙여준 파라미터)면 메인 탭으로, 설정 화면에서
+  // 들어온 거면 뒤로가기 — canGoBack()으로는 구별 불가(회원가입 스택도 뒤로 갈 곳이 남아있음)
+  const handleDone = () => {
+    if (!canComplete) return; // 버튼이 disabled면 여기 도달 안 하지만 방어적으로 한 번 더 체크
+    if (isOnboarding) goToMainTabs();
+    else goBack();
+  };
 
   const handleRequestLocation = async () => {
     setRequesting(true);
@@ -204,7 +213,7 @@ export default function PermissionSetupScreen() {
       <ScrollView style={styles.cardScroll} contentContainerStyle={styles.cardList} showsVerticalScrollIndicator={false}>
         <Text style={styles.sectionTitle}>앱 권한</Text>
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>🔔 알림</Text>
+          <Text style={styles.cardTitle}>🔔 알림 <Text style={styles.requiredLabel}>(필수)</Text></Text>
           <Text style={styles.cardDesc}>
             출발 시각을 알려주는 알람 자체가 이 권한 없이는 아예 안 보여요. GoNow의 가장 기본 기능이에요.
           </Text>
@@ -219,10 +228,10 @@ export default function PermissionSetupScreen() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>📍 위치 접근 — 항상 허용</Text>
+          <Text style={styles.cardTitle}>📍 위치 접근 — 항상 허용 <Text style={styles.requiredLabel}>(필수)</Text></Text>
           <Text style={styles.cardDesc}>
             앱을 꺼두거나 다른 화면을 보고 있어도 출발 시각을 계산하려면 위치를 계속 확인해야 해요.
-            "앱 사용 중에만 허용"으로는 백그라운드에서 멈춰요.
+            “앱 사용 중에만 허용”으로는 백그라운드에서 멈춰요.
           </Text>
           <Text style={styles.statusText}>{locationBadge}</Text>
           {locationStatus !== 'granted' && (
@@ -237,7 +246,7 @@ export default function PermissionSetupScreen() {
         {Platform.OS === 'android' && (
           <>
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>⏰ 알람 및 리마인더</Text>
+              <Text style={styles.cardTitle}>⏰ 알람 및 리마인더 <Text style={styles.recommendedLabel}>(권장)</Text></Text>
               <Text style={styles.cardDesc}>
                 이 설정이 꺼져있으면 출발 알람이 예정 시각보다 늦게 울릴 수 있어요.
                 열리는 화면에서 GoNow의 권한 허용을 켜주세요.
@@ -251,9 +260,9 @@ export default function PermissionSetupScreen() {
             </View>
 
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>🔋 배터리 사용량 제한 해제</Text>
+              <Text style={styles.cardTitle}>🔋 배터리 사용량 제한 해제 <Text style={styles.recommendedLabel}>(권장)</Text></Text>
               <Text style={styles.cardDesc}>
-                목록에서 gonow를 찾아 "제한 없음"으로 바꿔주세요. 그래야 오랜 시간 뒤 알람도 끊기지 않아요.
+                목록에서 gonow를 찾아 “제한 없음”으로 바꿔주세요. 그래야 오랜 시간 뒤 알람도 끊기지 않아요.
               </Text>
               <Text style={styles.statusText}>{batteryBadge}</Text>
               {batteryIgnored !== true && (
@@ -264,7 +273,7 @@ export default function PermissionSetupScreen() {
             </View>
 
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>🗑️ 사용하지 않는 앱 관리</Text>
+              <Text style={styles.cardTitle}>🗑️ 사용하지 않는 앱 관리 <Text style={styles.recommendedLabel}>(권장)</Text></Text>
               <Text style={styles.cardDesc}>
                 이 옵션이 켜져 있으면 몇 달간 앱을 안 열었을 때 안드로이드가 알림·위치 권한을
                 자동으로 꺼버려요. 알람이 왜 안 울리는지 모른 채 방치되지 않으려면 꺼두는 게 좋아요.
@@ -279,7 +288,7 @@ export default function PermissionSetupScreen() {
 
             <Text style={styles.sectionTitle}>기기 설정</Text>
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>📡 위치 서비스(GPS)</Text>
+              <Text style={styles.cardTitle}>📡 위치 서비스(GPS) <Text style={styles.recommendedLabel}>(권장)</Text></Text>
               <Text style={styles.cardDesc}>
                 기기 자체의 위치(GPS)가 꺼져 있으면 GoNow 권한이 있어도 위치를 가져올 수 없어요.
               </Text>
@@ -292,7 +301,7 @@ export default function PermissionSetupScreen() {
             </View>
 
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>📶 Wi-Fi 찾기</Text>
+              <Text style={styles.cardTitle}>📶 Wi-Fi 찾기 <Text style={styles.recommendedLabel}>(권장)</Text></Text>
               <Text style={styles.cardDesc}>
                 Wi-Fi가 꺼져 있어도 위치 정확도를 높이기 위해 스캔하는 기능이에요. 실내(특히
                 새벽에 집에서 첫 위치를 잡을 때)에서는 GPS만으로 오차가 클 수 있어, 이 옵션이
@@ -310,10 +319,18 @@ export default function PermissionSetupScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
-        <TouchableOpacity style={styles.completeButton} onPress={handleDone}>
+        <TouchableOpacity
+          style={[styles.completeButton, !canComplete && styles.completeButtonDisabled]}
+          onPress={handleDone}
+          disabled={!canComplete}
+        >
           <Text style={styles.completeButtonText}>완료</Text>
         </TouchableOpacity>
-        <Text style={styles.footerNote}>나중에 설정 화면에서 다시 확인할 수 있어요.</Text>
+        {isOnboarding && !requiredGranted ? (
+          <Text style={styles.footerNoteRequired}>알림과 위치 권한(항상 허용), 이 두 가지만 켜주시면 다음으로 넘어갈 수 있어요.</Text>
+        ) : (
+          <Text style={styles.footerNote}>나중에 설정 화면에서 다시 확인할 수 있어요.</Text>
+        )}
       </View>
     </SafeAreaView>
   );
@@ -339,6 +356,8 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   cardTitle: { fontSize: 15, fontWeight: '700', color: '#1A1A1A', marginBottom: 6 },
+  requiredLabel: { fontSize: 12, fontWeight: '700', color: '#FF4444' },
+  recommendedLabel: { fontSize: 12, fontWeight: '600', color: '#AAAAAA' },
   cardDesc: { fontSize: 13, color: '#666666', lineHeight: 19 },
   statusText: { fontSize: 13, fontWeight: '600', color: '#1A1A1A', marginTop: 10 },
   actionButton: {
@@ -358,6 +377,8 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
   },
+  completeButtonDisabled: { backgroundColor: '#CCCCCC' },
   completeButtonText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
   footerNote: { fontSize: 12, color: '#AAAAAA', marginTop: 10 },
+  footerNoteRequired: { fontSize: 12, color: '#FF4444', marginTop: 10, textAlign: 'center', paddingHorizontal: 24 },
 });

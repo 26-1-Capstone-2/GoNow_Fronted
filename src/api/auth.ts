@@ -48,6 +48,18 @@ export function createAuthApi(clientOptions?: ApiClientOptions) {
     checkNickname: (nickname: string) =>
       request<CheckResponse>(`/api/members/check?nickname=${encodeURIComponent(nickname)}`),
 
+    sendEmailVerification: (email: string) =>
+      request<CheckResponse>('/api/members/email-verification', {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      }),
+
+    confirmEmailVerification: (email: string, code: string) =>
+      request<CheckResponse>('/api/members/email-verification/confirm', {
+        method: 'POST',
+        body: JSON.stringify({ email, code }),
+      }),
+
     logout: () =>
       request<{ success: boolean; message: string; data: null }>('/api/auth/logout', {
         method: 'POST',

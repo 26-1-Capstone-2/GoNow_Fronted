@@ -42,3 +42,18 @@ export function createApiClient(options: ApiClientOptions = {}) {
 }
 
 export const api = createApiClient();
+
+// request()는 실패 시 응답 바디 원문(JSON 문자열)을 그대로 Error.message에 담아 던진다.
+// 여기서 그 문자열을 파싱해서 서버가 준 message 필드만 꺼내 화면에 보여줄 때 쓴다.
+export function getErrorMessage(e: unknown, fallback: string): string {
+  if (e instanceof Error && e.message) {
+    try {
+      const parsed = JSON.parse(e.message);
+      if (typeof parsed?.message === 'string') return parsed.message;
+    } catch {
+      // JSON이 아니면 원문 그대로 사용
+    }
+    return e.message;
+  }
+  return fallback;
+}

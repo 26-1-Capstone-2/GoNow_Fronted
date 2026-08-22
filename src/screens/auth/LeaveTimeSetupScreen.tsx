@@ -12,14 +12,27 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppNavigation } from '@/src/navigation';
 import { createAuthApi } from '@/src/api/auth';
 import { createMembersApi } from '@/src/api/members';
+import { getErrorMessage } from '@/src/api/client';
 import { useSignUpStore } from '@/src/store/signUpStore';
 import { useAuthStore } from '@/src/store/authStore';
 import * as Notifications from 'expo-notifications';
 
 const authApi = createAuthApi();
 
+// MemberService.signUp()이 이메일 인증 미완료/만료 시 던지는 메시지 원문과 동일하게 맞춤.
+// 이 화면까지 왔다는 건 email-verify에서 이미 확인(confirm)에 성공했다는 뜻이라,
+// 여기서 이 메시지가 뜨면 "인증 안 함"이 아니라 100% "10분 유효시간 만료"로 확정할 수 있다
+// (백엔드는 Redis TTL 특성상 이 둘을 구분 못 해서 일부러 문구를 애매하게 남겨둠 — 프론트만 아는 문맥).
+//
+// ⚠️ 문자열 매칭이라 깨지기 쉬움: 서버 응답에 code 필드가 없어서(ApiResult가 message만 줌)
+// 임시로 message 문구를 그대로 비교한다. 백엔드에서 이 문구를 조금이라도 바꾸면
+// 이 분기는 예외 없이 조용히 else(일반 실패 알럿)로 빠지고 재인증 자동이동만 없어진다.
+// 백엔드 message를 바꿀 일이 있으면 이 상수도 반드시 같이 바꿀 것.
+// 근본 해결책(에러 코드 필드 도입)은 docs/planning/api-error-code-backlog.md 참고.
+const EMAIL_VERIFICATION_REQUIRED_MESSAGE = '이메일 인증을 먼저 완료해주세요.';
+
 export default function LeaveTimeSetupScreen() {
-  const { goBack, goToPermissionSetup } = useAppNavigation();
+  const { goBack, goToEmailVerify, goToPermissionSetup } = useAppNavigation();
   const email = useSignUpStore((s) => s.email);
   const password = useSignUpStore((s) => s.password);
   const nickname = useSignUpStore((s) => s.nickname);
@@ -55,8 +68,17 @@ export default function LeaveTimeSetupScreen() {
 
       resetSignUp();
       goToPermissionSetup();
-    } catch (e: any) {
-      Alert.alert('회원가입 실패', e?.message ?? '다시 시도해주세요.');
+    } catch (e) {
+      const message = getErrorMessage(e, '다시 시도해주세요.');
+      if (message === EMAIL_VERIFICATION_REQUIRED_MESSAGE) {
+        Alert.alert(
+          '이메일 인증 유효시간(10분)이 지났어요',
+          '다시 인증해주세요.',
+          [{ text: '확인', onPress: () => goToEmailVerify({ recovery: true }) }],
+        );
+      } else {
+        Alert.alert('회원가입 실패', message);
+      }
     } finally {
       setLoading(false);
     }
