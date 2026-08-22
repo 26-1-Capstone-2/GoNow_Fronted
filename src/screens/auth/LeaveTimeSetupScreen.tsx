@@ -42,6 +42,8 @@ export default function LeaveTimeSetupScreen() {
   const home_lng = useSignUpStore((s) => s.home_lng);
   const resetSignUp = useSignUpStore((s) => s.reset);
   const setToken = useAuthStore((s) => s.setToken);
+  const setRefreshToken = useAuthStore((s) => s.setRefreshToken);
+  const setMemberId = useAuthStore((s) => s.setMemberId);
   const [minutes, setMinutes] = useState(10);
   const [loading, setLoading] = useState(false);
 
@@ -60,6 +62,8 @@ export default function LeaveTimeSetupScreen() {
 
       const loginRes = await authApi.login({ email, password });
       setToken(loginRes.data.access_token);
+      setRefreshToken(loginRes.data.refresh_token);
+      setMemberId(loginRes.data.member_id);
 
       try {
         const tokenData = await Notifications.getDevicePushTokenAsync();

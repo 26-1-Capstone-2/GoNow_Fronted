@@ -37,7 +37,11 @@ export function createAuthApi(clientOptions?: ApiClientOptions) {
 
   return {
     login: (body: LoginPayload) =>
-      request<{ success: boolean; message: string; data: { member_id: number; access_token: string } }>('/api/auth/login', {
+      request<{
+        success: boolean;
+        message: string;
+        data: { member_id: number; access_token: string; refresh_token: string };
+      }>('/api/auth/login', {
         method: 'POST',
         body: JSON.stringify(body),
       }),

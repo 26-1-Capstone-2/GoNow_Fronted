@@ -70,6 +70,7 @@ module.exports = {
     },
     plugins: [
       "expo-router",
+      "expo-secure-store",
       "./plugins/withNotifeeMavenRepo.js",
       [
         "expo-location",

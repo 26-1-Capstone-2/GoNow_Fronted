@@ -29,6 +29,8 @@ const authApi = createAuthApi();
 export default function LoginScreen() {
   const { goToMainTabs, goToSignUp, goToPasswordReset } = useAppNavigation();
   const setToken = useAuthStore((s) => s.setToken);
+  const setRefreshToken = useAuthStore((s) => s.setRefreshToken);
+  const setMemberId = useAuthStore((s) => s.setMemberId);
   const setNickname = useAuthStore((s) => s.setNickname);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -40,6 +42,8 @@ export default function LoginScreen() {
     try {
       const res = await authApi.login({ email, password });
       setToken(res.data.access_token);
+      setRefreshToken(res.data.refresh_token);
+      setMemberId(res.data.member_id);
 
       // 닉네임 저장
       try {

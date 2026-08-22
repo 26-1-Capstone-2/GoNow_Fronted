@@ -39,6 +39,8 @@ export default function ProfileSettingsScreen() {
           try { await createAuthApi({ getToken: () => useAuthStore.getState().token }).logout(); } catch {}
           await alarmService.stopAll();
           useAuthStore.getState().setToken(null);
+          useAuthStore.getState().setRefreshToken(null);
+          useAuthStore.getState().setMemberId(null);
           router.replace('/(auth)/login');
         },
       },
