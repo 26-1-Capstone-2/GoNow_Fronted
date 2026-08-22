@@ -26,6 +26,12 @@ export type CheckResponse = {
   data: null;
 };
 
+export type ExistsResponse = {
+  success: boolean;
+  message: string;
+  data: { exists: boolean };
+};
+
 export function createAuthApi(clientOptions?: ApiClientOptions) {
   const { request } = createApiClient(clientOptions);
 
@@ -42,11 +48,13 @@ export function createAuthApi(clientOptions?: ApiClientOptions) {
         body: JSON.stringify(body),
       }),
 
+    // 항상 200으로 응답하고 data.exists 값만 다르다 — 회원가입 실시간 중복확인과
+    // 비밀번호 찾기(계정 존재 확인) 공용. "중복이면 에러로 취급"은 호출부가 알아서 판단한다.
     checkEmail: (email: string) =>
-      request<CheckResponse>(`/api/members/check?email=${encodeURIComponent(email)}`),
+      request<ExistsResponse>(`/api/members/check?email=${encodeURIComponent(email)}`),
 
     checkNickname: (nickname: string) =>
-      request<CheckResponse>(`/api/members/check?nickname=${encodeURIComponent(nickname)}`),
+      request<ExistsResponse>(`/api/members/check?nickname=${encodeURIComponent(nickname)}`),
 
     sendEmailVerification: (email: string) =>
       request<CheckResponse>('/api/members/email-verification', {
@@ -58,6 +66,12 @@ export function createAuthApi(clientOptions?: ApiClientOptions) {
       request<CheckResponse>('/api/members/email-verification/confirm', {
         method: 'POST',
         body: JSON.stringify({ email, code }),
+      }),
+
+    resetPassword: (email: string, newPassword: string) =>
+      request<CheckResponse>('/api/members/password-reset', {
+        method: 'PATCH',
+        body: JSON.stringify({ email, new_password: newPassword }),
       }),
 
     logout: () =>

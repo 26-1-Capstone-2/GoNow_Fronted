@@ -34,6 +34,11 @@ export function useAppNavigation() {
     [router],
   );
 
+  /** 로그인 화면에서: 비밀번호 찾기 (뒤로가기로 로그인 화면 복귀 가능하도록 push) */
+  const goToPasswordReset = useCallback(() => {
+    router.push(ROUTES.passwordReset);
+  }, [router]);
+
   const goToMainTabs = useCallback(() => {
     router.replace(ROUTES.mainTabs);
   }, [router]);
@@ -95,6 +100,7 @@ export function useAppNavigation() {
       goToLogin,
       goToSignUp,
       goToEmailVerify,
+      goToPasswordReset,
       goToHomeAddressSetup,
       goToLeaveTimeSetup,
       goToPermissionSetup,
@@ -104,6 +110,6 @@ export function useAppNavigation() {
       replace,
       push,
     }),
-    [goToLogin, goToSignUp, goToEmailVerify, goToHomeAddressSetup, goToLeaveTimeSetup, goToPermissionSetup, goToYearCalendar, goToMainTabs, goBack, replace, push],
+    [goToLogin, goToSignUp, goToEmailVerify, goToPasswordReset, goToHomeAddressSetup, goToLeaveTimeSetup, goToPermissionSetup, goToYearCalendar, goToMainTabs, goBack, replace, push],
   );
 }

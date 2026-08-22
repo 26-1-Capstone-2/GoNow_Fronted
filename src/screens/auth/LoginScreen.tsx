@@ -27,7 +27,7 @@ import * as Notifications from 'expo-notifications';
 const authApi = createAuthApi();
 
 export default function LoginScreen() {
-  const { goToMainTabs, goToSignUp } = useAppNavigation();
+  const { goToMainTabs, goToSignUp, goToPasswordReset } = useAppNavigation();
   const setToken = useAuthStore((s) => s.setToken);
   const setNickname = useAuthStore((s) => s.setNickname);
   const [email, setEmail] = useState('');
@@ -171,6 +171,11 @@ export default function LoginScreen() {
               : <Text style={styles.loginButtonText}>로그인</Text>
             }
           </TouchableOpacity>
+
+          {/* 비밀번호 찾기 */}
+          <TouchableOpacity style={styles.forgotPasswordButton} onPress={goToPasswordReset}>
+            <Text style={styles.forgotPasswordText}>비밀번호를 잊으셨나요?</Text>
+          </TouchableOpacity>
         </View>
 
         {/* 하단 회원가입 링크 */}
@@ -249,6 +254,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  forgotPasswordButton: {
+    alignItems: 'center',
+    marginTop: 16,
+    paddingVertical: 8,
+  },
+  forgotPasswordText: {
+    fontSize: 13,
+    color: '#888888',
   },
   footer: {
     flexDirection: 'row',
