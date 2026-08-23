@@ -14,18 +14,27 @@ import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Platform, StyleSheet, Switch, Text, ToastAndroid, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const journeysApi = createJourneysApi();
 const alarmsApi = createAlarmsApi();
 
 const DAY_LABEL = ['일', '월', '화', '수', '목', '금', '토'];
-const DAYS = ['일요일마다', '월요일마다', '화요일마다', '수요일마다', '목요일마다', '금요일마다', '토요일마다', '안함'];
+const REPEAT_DAYS = [
+  { short: '월', full: '월요일마다' },
+  { short: '화', full: '화요일마다' },
+  { short: '수', full: '수요일마다' },
+  { short: '목', full: '목요일마다' },
+  { short: '금', full: '금요일마다' },
+  { short: '토', full: '토요일마다' },
+  { short: '일', full: '일요일마다' },
+];
 const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));
 const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
 
 type AlarmMode = 'lastTrain' | 'deadline';
 type Transport = 'public' | 'car';
-type ViewType = 'list' | 'edit' | 'repeat' | 'homePlace' | 'transport' | 'date';
+type ViewType = 'list' | 'edit' | 'homePlace' | 'date';
 
 interface HomeAlarm {
   id: string;
@@ -46,7 +55,7 @@ interface HomeAlarm {
   myStatus?: string;
 }
 
-interface Props { onClose: () => void; }
+interface Props { onClose: () => void; initialEditId?: number; }
 
 function fromAlarmItem(item: AlarmItem): HomeAlarm {
   const { ampm, hour, minute } = targetTimeToAmpmHourMinute(item.target_time);
@@ -117,9 +126,10 @@ const DEFAULT_ALARM: HomeAlarm = {
   repeat: ['안함'], enabled: true, transport: 'public', date: todayStr,
 };
 
-export default function HomeAllAlarmSheet({ onClose }: Props) {
+export default function HomeAllAlarmSheet({ onClose, initialEditId }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ['85%'], []);
+  const insets = useSafeAreaInsets();
+  const snapPoints = useMemo(() => ['88%'], []);
   const { bumpAlarmVersion } = useCalendarStore();
   const { places, searchKey, loadPlaces, savePlace, deletePlace } = usePlaces('HOME');
 
@@ -140,6 +150,13 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
   }, []);
 
   useEffect(() => { loadAlarms(); }, [loadAlarms]);
+
+  useEffect(() => {
+    if (!initialEditId || alarms.length === 0) return;
+    const match = alarms.find((a) => a.journeyId === initialEditId);
+    if (match) openEdit(match);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialEditId, alarms]);
 
   const handleSheetChange = useCallback((index: number) => { if (index === -1) onClose(); }, [onClose]);
   const openAdd = () => { setEditAlarm(DEFAULT_ALARM); setView('edit'); };
@@ -298,11 +315,11 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
 
       {/* ── 목록 ── */}
       {view === 'list' && (
-        <>
+        <View style={{ flex: 1 }}>
           <View style={styles.header}>
             <TouchableOpacity style={styles.headerBtn} onPress={onClose}><Feather name="x" size={22} color="#1A1A1A" /></TouchableOpacity>
             <Text style={styles.title}>귀가</Text>
-            <TouchableOpacity style={styles.addBtn} onPress={openAdd}><Feather name="plus" size={22} color="#1A1A1A" /></TouchableOpacity>
+            <View style={{ width: 36 }} />
           </View>
           <View style={styles.datePillContainer}>
             <View style={styles.datePill}><Text style={styles.datePillText}>전체</Text></View>
@@ -332,6 +349,9 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
                     }
                     openEdit(alarm);
                   }} activeOpacity={0.7}>
+                  <View style={[styles.typeChip, alarm.isActive && { opacity: 0.45 }]}>
+                    <Feather name="navigation" size={17} color="#30D158" />
+                  </View>
                   <View style={[styles.alarmInfo, alarm.isActive && { opacity: 0.45 }]}>
                     {alarm.date ? <Text style={styles.alarmDate}>{formatCardDate(alarm.date)}</Text> : null}
                     <Text style={styles.alarmPlace}>{alarm.home_name}</Text>
@@ -342,7 +362,7 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
                       }
                       {alarm.mode === 'lastTrain' || alarm.transport === 'public'
                         ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
-                        : <FontAwesome5 name="car-side" size={13} color="#F5A623" />
+                        : <FontAwesome5 name="car-side" size={13} color="#30D158" />
                       }
                       {getRepeatLabel(alarm.repeat) !== '안함' && (
                         <Text style={styles.repeatLabel}>· {getRepeatLabel(alarm.repeat)}</Text>
@@ -360,13 +380,16 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
                         : <Feather name="map" size={14} color={canNavigate(alarm) ? '#4A90D9' : '#CCCCCC'} />}
                     </TouchableOpacity>
                     <Switch value={alarm.enabled} onValueChange={() => toggleAlarm(alarm)}
-                      trackColor={{ false: '#E0E0E0', true: '#4CAF50' }} thumbColor="#FFFFFF" />
+                      trackColor={{ false: '#E0E0E0', true: '#30D158' }} thumbColor="#FFFFFF" />
                   </View>
                 </TouchableOpacity>
               </SwipeableAlarmCard>
             ))}
           </BottomSheetScrollView>
-        </>
+          <TouchableOpacity style={[styles.fab, { bottom: 24 + insets.bottom }]} onPress={openAdd} activeOpacity={0.85}>
+            <Feather name="plus" size={24} color="#1A1A1A" />
+          </TouchableOpacity>
+        </View>
       )}
 
       {/* ── 수정/추가 ── */}
@@ -380,78 +403,102 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.tabContainer}>
-            <TouchableOpacity style={[styles.tab, editAlarm.mode === 'lastTrain' && styles.tabActive]}
-              onPress={() => setEditAlarm((prev) => ({ ...prev, mode: 'lastTrain' }))}>
-              <Text style={[styles.tabText, editAlarm.mode === 'lastTrain' && styles.tabTextActive]}>막차</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.tab, editAlarm.mode === 'deadline' && styles.tabActive]}
-              onPress={() => setEditAlarm((prev) => ({ ...prev, mode: 'deadline' }))}>
-              <Text style={[styles.tabText, editAlarm.mode === 'deadline' && styles.tabTextActive]}>데드라인</Text>
-            </TouchableOpacity>
-          </View>
-
-          <TouchableOpacity style={styles.datePillContainer} onPress={() => setView('date')} activeOpacity={0.7}>
-            <View style={styles.datePill}>
-              <Text style={editAlarm.date ? styles.datePillText : styles.datePillPlaceholder}>
-                {editAlarm.date ? formatDateLabel(editAlarm.date) : '날짜 선택'}
-              </Text>
-            </View>
-          </TouchableOpacity>
-
           <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldGroupLabel}>기준</Text>
+              <View style={styles.segmentTrack}>
+                <TouchableOpacity
+                  style={[styles.segmentBtn, editAlarm.mode === 'lastTrain' && styles.segmentBtnSelected]}
+                  onPress={() => setEditAlarm((prev) => ({ ...prev, mode: 'lastTrain' }))}
+                >
+                  <Text style={[styles.segmentText, editAlarm.mode === 'lastTrain' && styles.segmentTextSelected]}>막차 기준</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.segmentBtn, editAlarm.mode === 'deadline' && styles.segmentBtnSelected]}
+                  onPress={() => setEditAlarm((prev) => ({ ...prev, mode: 'deadline' }))}
+                >
+                  <Text style={[styles.segmentText, editAlarm.mode === 'deadline' && styles.segmentTextSelected]}>직접 설정</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <TouchableOpacity style={styles.fieldRow} onPress={() => setView('date')} activeOpacity={0.7}>
+              <Feather name="calendar" size={17} color="#30D158" />
+              <Text style={styles.fieldValue}>{editAlarm.date ? formatDateLabel(editAlarm.date) : '날짜 선택'}</Text>
+              <Feather name="chevron-right" size={16} color="#B0B0B4" />
+            </TouchableOpacity>
+
             {editAlarm.mode === 'lastTrain' ? (
               <View style={styles.lastTrainInfo}>
                 <Text style={styles.lastTrainBig}>막차</Text>
                 <Text style={styles.lastTrainDesc}>설정한 귀가지까지의 막차를 기준으로 알람을 드립니다.</Text>
               </View>
             ) : (
-              <View style={styles.pickerContainer}>
-                <Picker selectedValue={editAlarm.ampm} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, ampm: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
-                  <Picker.Item label="오전" value="오전" color="#1A1A1A" /><Picker.Item label="오후" value="오후" color="#1A1A1A" />
-                </Picker>
-                <Picker selectedValue={editAlarm.hour} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, hour: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
-                  {HOURS.map((h) => <Picker.Item key={h} label={h} value={h} color="#1A1A1A" />)}
-                </Picker>
-                <Picker selectedValue={editAlarm.minute} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, minute: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
-                  {MINUTES.map((m) => <Picker.Item key={m} label={m} value={m} color="#1A1A1A" />)}
-                </Picker>
+              <View style={styles.timeCard}>
+                <Text style={styles.timeCardLabel}>출발 시각</Text>
+                <View style={styles.pickerContainer}>
+                  <Picker selectedValue={editAlarm.ampm} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, ampm: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
+                    <Picker.Item label="오전" value="오전" color="#1A1A1A" /><Picker.Item label="오후" value="오후" color="#1A1A1A" />
+                  </Picker>
+                  <Picker selectedValue={editAlarm.hour} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, hour: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
+                    {HOURS.map((h) => <Picker.Item key={h} label={h} value={h} color="#1A1A1A" />)}
+                  </Picker>
+                  <Picker selectedValue={editAlarm.minute} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, minute: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
+                    {MINUTES.map((m) => <Picker.Item key={m} label={m} value={m} color="#1A1A1A" />)}
+                  </Picker>
+                </View>
               </View>
             )}
 
-            <View style={styles.divider} />
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldGroupLabel}>귀가지</Text>
+              <TouchableOpacity style={styles.fieldRow} onPress={openHomePlace} activeOpacity={0.7}>
+                <Feather name="map-pin" size={17} color="#30D158" />
+                <Text style={styles.fieldValue}>{editAlarm.home_name || '귀가지 선택'}</Text>
+                <Feather name="chevron-right" size={16} color="#B0B0B4" />
+              </TouchableOpacity>
+            </View>
 
-            <View style={styles.section}>
-              <View style={styles.optionBox}>
-                <TouchableOpacity style={styles.optionRow} onPress={openHomePlace}>
-                  <Text style={styles.optionLabel}>귀가지</Text>
-                  <View style={styles.rowRight}>
-                    <Text style={styles.rowValue}>{editAlarm.home_name || '선택'}</Text>
-                    <Feather name="chevron-right" size={16} color="#AAAAAA" />
-                  </View>
-                </TouchableOpacity>
-                {editAlarm.mode === 'deadline' && (
-                  <>
-                    <View style={styles.separator} />
-                    <TouchableOpacity style={styles.optionRow} onPress={() => setView('transport')}>
-                      <Text style={styles.optionLabel}>이동수단</Text>
-                      <View style={styles.rowRight}>
-                        <Text style={styles.rowValue}>{editAlarm.transport === 'public' ? '대중교통' : '자가용'}</Text>
-                        <Feather name="chevron-right" size={16} color="#AAAAAA" />
-                      </View>
+            {editAlarm.mode === 'deadline' && (
+              <View style={styles.fieldGroup}>
+                <Text style={styles.fieldGroupLabel}>이동 수단</Text>
+                <View style={styles.segmentTrack}>
+                  <TouchableOpacity
+                    style={[styles.segmentBtn, editAlarm.transport === 'public' && styles.segmentBtnSelected]}
+                    onPress={() => setEditAlarm((prev) => ({ ...prev, transport: 'public' }))}
+                  >
+                    <MaterialCommunityIcons name="bus-side" size={16} color={editAlarm.transport === 'public' ? '#1A1A1A' : '#8A8A8E'} />
+                    <Text style={[styles.segmentText, editAlarm.transport === 'public' && styles.segmentTextSelected]}>대중교통</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.segmentBtn, editAlarm.transport === 'car' && styles.segmentBtnSelected]}
+                    onPress={() => setEditAlarm((prev) => ({ ...prev, transport: 'car' }))}
+                  >
+                    <FontAwesome5 name="car-side" size={14} color={editAlarm.transport === 'car' ? '#1A1A1A' : '#8A8A8E'} />
+                    <Text style={[styles.segmentText, editAlarm.transport === 'car' && styles.segmentTextSelected]}>자가용</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldGroupLabel}>반복</Text>
+              <View style={styles.dayPillRow}>
+                {REPEAT_DAYS.map(({ short, full }) => {
+                  const selected = editAlarm.repeat.includes(full);
+                  return (
+                    <TouchableOpacity
+                      key={full}
+                      style={[styles.dayPill, selected && styles.dayPillSelected]}
+                      onPress={() => toggleRepeat(full)}
+                    >
+                      <Text style={[styles.dayPillText, selected && styles.dayPillTextSelected]}>{short}</Text>
                     </TouchableOpacity>
-                  </>
-                )}
-                <View style={styles.separator} />
-                <TouchableOpacity style={styles.optionRow} onPress={() => setView('repeat')}>
-                  <Text style={styles.optionLabel}>반복</Text>
-                  <View style={styles.rowRight}>
-                    <Text style={styles.rowValue}>{getRepeatLabel(editAlarm.repeat)}</Text>
-                    <Feather name="chevron-right" size={16} color="#AAAAAA" />
-                  </View>
-                </TouchableOpacity>
+                  );
+                })}
               </View>
             </View>
+
             {isEditMode && (
               <View style={styles.deleteContainer}>
                 <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}><Text style={styles.deleteButtonText}>알람삭제</Text></TouchableOpacity>
@@ -474,57 +521,6 @@ export default function HomeAllAlarmSheet({ onClose }: Props) {
               selectedDate={editAlarm.date}
               onSelectDate={(date) => { setEditAlarm((prev) => ({ ...prev, date })); setView('edit'); }}
             />
-          </BottomSheetScrollView>
-        </>
-      )}
-
-      {/* ── 이동수단 ── */}
-      {view === 'transport' && (
-        <>
-          <View style={styles.header}>
-            <TouchableOpacity style={styles.headerBtn} onPress={() => setView('edit')}><Feather name="chevron-left" size={22} color="#1A1A1A" /></TouchableOpacity>
-            <Text style={styles.title}>이동수단</Text>
-            <TouchableOpacity style={styles.saveBtn} onPress={() => setView('edit')}><Feather name="check" size={20} color="#FFFFFF" /></TouchableOpacity>
-          </View>
-          <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-            <View style={styles.optionBox}>
-              <TouchableOpacity style={styles.optionRow} onPress={() => setEditAlarm((prev) => ({ ...prev, transport: 'public' }))}>
-                <Text style={styles.optionLabel}>대중교통</Text>
-                {editAlarm.transport === 'public' && <Feather name="check" size={18} color="#F5A623" />}
-              </TouchableOpacity>
-              <View style={styles.separator} />
-              <TouchableOpacity style={styles.optionRow} onPress={() => setEditAlarm((prev) => ({ ...prev, transport: 'car' }))}>
-                <Text style={styles.optionLabel}>자가용</Text>
-                {editAlarm.transport === 'car' && <Feather name="check" size={18} color="#F5A623" />}
-              </TouchableOpacity>
-            </View>
-          </BottomSheetScrollView>
-        </>
-      )}
-
-      {/* ── 반복 ── */}
-      {view === 'repeat' && (
-        <>
-          <View style={styles.header}>
-            <TouchableOpacity style={styles.headerBtn} onPress={() => setView('edit')}><Feather name="chevron-left" size={22} color="#1A1A1A" /></TouchableOpacity>
-            <Text style={styles.title}>반복</Text>
-            <TouchableOpacity style={styles.saveBtn} onPress={() => setView('edit')}><Feather name="check" size={20} color="#FFFFFF" /></TouchableOpacity>
-          </View>
-          <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-            <View style={styles.optionBox}>
-              {DAYS.map((day, index) => {
-                const selected = editAlarm.repeat.includes(day);
-                return (
-                  <View key={day}>
-                    <TouchableOpacity style={styles.optionRow} onPress={() => toggleRepeat(day)}>
-                      <Text style={styles.optionLabel}>{day}</Text>
-                      {selected && <Feather name="check" size={18} color="#F5A623" />}
-                    </TouchableOpacity>
-                    {index < DAYS.length - 1 && <View style={styles.separator} />}
-                  </View>
-                );
-              })}
-            </View>
           </BottomSheetScrollView>
         </>
       )}
@@ -557,43 +553,58 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16 },
   headerBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 16, fontWeight: '600', color: '#1A1A1A' },
-  addBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center' },
-  saveBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F5A623', alignItems: 'center', justifyContent: 'center' },
+  fab: {
+    position: 'absolute', right: 20, bottom: 24, width: 56, height: 56, borderRadius: 20,
+    backgroundColor: '#FFCE0C', alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.2, shadowRadius: 6, elevation: 4,
+  },
+  saveBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#30D158', alignItems: 'center', justifyContent: 'center' },
   datePillContainer: { alignItems: 'center', marginBottom: 12 },
   datePill: { backgroundColor: '#E8E8E8', borderRadius: 20, paddingHorizontal: 20, paddingVertical: 7 },
-  datePillText: { fontSize: 13, fontWeight: '600', color: '#FF3B30' },
-  datePillPlaceholder: { fontSize: 13, fontWeight: '500', color: '#AAAAAA' },
+  datePillText: { fontSize: 13, fontWeight: '600', color: '#FF453A' },
   content: { paddingHorizontal: 16, paddingBottom: Platform.OS === 'ios' ? 40 : 24 },
-  alarmCard: { flexDirection: 'row', alignItems: 'stretch', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: 16, backgroundColor: '#F5F5F5', borderRadius: 12, marginBottom: 8 },
+  alarmCard: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 14, paddingHorizontal: 14, backgroundColor: '#FFFFFF', borderRadius: 18,
+    marginBottom: 10,
+    shadowColor: '#141413', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 6, elevation: 2,
+  },
+  typeChip: { width: 40, height: 40, borderRadius: 14, backgroundColor: '#EAF9EE', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   alarmInfo: { flex: 1, marginRight: 8, justifyContent: 'center' },
   cardRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   navigateBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#EAF2FB', alignItems: 'center', justifyContent: 'center' },
   navigateBtnDisabled: { backgroundColor: '#EEEEEE' },
-  alarmDate: { fontSize: 11, fontWeight: '500', color: '#FF3B30', marginBottom: 3 },
+  alarmDate: { fontSize: 11, fontWeight: '500', color: '#FF453A', marginBottom: 3 },
   alarmPlace: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 5 },
   alarmMeta: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
   alarmDeadline: { fontSize: 13, fontWeight: '500', color: '#555555' },
   repeatLabel: { fontSize: 12, color: '#888888' },
-  tabContainer: { flexDirection: 'row', marginHorizontal: 16, marginBottom: 8, backgroundColor: '#F5F5F5', borderRadius: 10, padding: 4 },
-  tab: { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center' },
-  tabActive: { backgroundColor: '#FFFFFF' },
-  tabText: { fontSize: 14, fontWeight: '500', color: '#AAAAAA' },
-  tabTextActive: { color: '#1A1A1A', fontWeight: '600' },
-  lastTrainInfo: { alignItems: 'center', paddingVertical: 32 },
-  lastTrainBig: { fontSize: 40, fontWeight: '700', color: '#1A1A1A', marginBottom: 12 },
-  lastTrainDesc: { fontSize: 13, color: '#888888', textAlign: 'center', lineHeight: 20 },
-  divider: { height: StyleSheet.hairlineWidth, backgroundColor: '#E0E0E0', marginVertical: 16 },
-  pickerContainer: { flexDirection: 'row', backgroundColor: '#F5F5F5', borderRadius: 14, overflow: 'hidden', height: 200, marginBottom: 8 },
+  lastTrainInfo: { alignItems: 'center', paddingVertical: 24, backgroundColor: '#F7F7F8', borderRadius: 16, marginBottom: 16 },
+  lastTrainBig: { fontSize: 36, fontWeight: '700', color: '#1A1A1A', marginBottom: 10 },
+  lastTrainDesc: { fontSize: 13, color: '#888888', textAlign: 'center', lineHeight: 20, paddingHorizontal: 24 },
+  pickerContainer: { flexDirection: 'row', backgroundColor: '#F7F7F8', borderRadius: 14, overflow: 'hidden', height: Platform.OS === 'ios' ? 200 : 56, marginTop: 8 },
   picker: { flex: 1 },
   pickerItem: { fontSize: 20, color: '#1A1A1A', height: 200 },
-  section: { marginBottom: 16 },
-  optionBox: { backgroundColor: '#F5F5F5', borderRadius: 12, paddingHorizontal: 16 },
-  optionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 50 },
-  optionLabel: { fontSize: 15, color: '#1A1A1A' },
-  rowRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  rowValue: { fontSize: 14, color: '#AAAAAA' },
-  separator: { height: StyleSheet.hairlineWidth, backgroundColor: '#DDDDDD' },
+  fieldGroup: { marginBottom: 16 },
+  fieldGroupLabel: { fontSize: 12, fontWeight: '600', color: '#8A8A8E', marginBottom: 8 },
+  fieldRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: '#F7F7F8', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 14, marginBottom: 16,
+  },
+  fieldValue: { flex: 1, fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
+  timeCard: { backgroundColor: '#F7F7F8', borderRadius: 18, padding: 12, marginBottom: 16 },
+  timeCardLabel: { fontSize: 12, fontWeight: '600', color: '#8A8A8E', textAlign: 'center' },
+  dayPillRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  dayPill: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F0F0F1', alignItems: 'center', justifyContent: 'center' },
+  dayPillSelected: { backgroundColor: '#FFCE0C' },
+  dayPillText: { fontSize: 13, fontWeight: '700', color: '#8A8A8E' },
+  dayPillTextSelected: { color: '#1A1A1A' },
+  segmentTrack: { flexDirection: 'row', backgroundColor: '#F0F0F1', borderRadius: 16, padding: 4, gap: 4 },
+  segmentBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 11 },
+  segmentBtnSelected: { backgroundColor: '#FFCE0C' },
+  segmentText: { fontSize: 13, fontWeight: '600', color: '#8A8A8E' },
+  segmentTextSelected: { color: '#1A1A1A', fontWeight: '700' },
   deleteContainer: { alignItems: 'center', marginTop: 8 },
-  deleteButton: { backgroundColor: '#FF3B30', borderRadius: 24, paddingVertical: 14, paddingHorizontal: 48 },
+  deleteButton: { backgroundColor: '#FF453A', borderRadius: 24, paddingVertical: 14, paddingHorizontal: 48 },
   deleteButtonText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
 });

@@ -1,9 +1,17 @@
-/** 앱 전역 색·타이포 (스토리보드의 골드 포인트 등은 여기서 조정) */
+/** 앱 전역 색·타이포 (2026 리디자인 팔레트) */
 export const colors = {
   background: '#fff',
-  text: '#111',
-  accent: '#c9a227',
-  border: '#e8e8e8',
+  text: '#1A1A1A',
+  textSecondary: '#8A8A8E',
+  accent: '#FFCE0C',
+  accentText: '#1A1A1A',
+  border: '#ECECEE',
+  fieldBg: '#F7F7F8',
+  cardBg: '#FFFFFF',
+  personal: '#0A84FF',
+  group: '#FF9F0A',
+  home: '#30D158',
+  danger: '#FF453A',
 } as const;
 
 export const spacing = {

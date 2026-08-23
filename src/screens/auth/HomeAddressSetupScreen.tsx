@@ -155,10 +155,10 @@ const styles = StyleSheet.create({
   title: { fontSize: 17, fontWeight: '600', color: '#1A1A1A' },
   footer: { position: 'absolute', bottom: 40, left: 0, right: 0, alignItems: 'center' },
   completeButton: {
-    backgroundColor: '#4CAF50', borderRadius: 24,
+    backgroundColor: '#FFCE0C', borderRadius: 24,
     paddingVertical: 14, paddingHorizontal: 48,
     minWidth: 140, alignItems: 'center',
   },
   completeButtonDisabled: { backgroundColor: '#CCCCCC' },
-  completeButtonText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
+  completeButtonText: { fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
 });

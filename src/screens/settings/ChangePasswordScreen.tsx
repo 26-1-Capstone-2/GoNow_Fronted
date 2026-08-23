@@ -171,11 +171,11 @@ const styles = StyleSheet.create({
   },
   inputError: {
     borderWidth: 1.5,
-    borderColor: '#FF3B30',
+    borderColor: '#FF453A',
   },
   errorText: {
     fontSize: 12,
-    color: '#FF3B30',
+    color: '#FF453A',
     marginTop: -12,
     marginBottom: 12,
   },
@@ -187,7 +187,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   saveButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#FFCE0C',
     borderRadius: 24,
     paddingVertical: 14,
     paddingHorizontal: 48,
@@ -197,7 +197,7 @@ const styles = StyleSheet.create({
   },
   saveButtonText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
+    fontWeight: '700',
+    color: '#1A1A1A',
   },
 });

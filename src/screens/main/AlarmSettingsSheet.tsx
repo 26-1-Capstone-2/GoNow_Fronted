@@ -22,7 +22,7 @@ interface Props {
 
 export default function AlarmSettingsSheet({ onClose, onSave }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ['85%'], []);
+  const snapPoints = useMemo(() => ['88%'], []);
 
   const [priorityType, setPriorityType] = useState<PriorityType>('MIN_TIME');
   const [transitType, setTransitType] = useState<TransitType>('ALL');
@@ -83,8 +83,8 @@ export default function AlarmSettingsSheet({ onClose, onSave }: Props) {
           <Text style={styles.title}>개인설정</Text>
           <TouchableOpacity onPress={handleSave} style={styles.saveBtn} disabled={saving || fetching}>
             {saving
-              ? <ActivityIndicator size="small" color="#FFFFFF" />
-              : <Feather name="check" size={20} color="#FFFFFF" />
+              ? <ActivityIndicator size="small" color="#1A1A1A" />
+              : <Feather name="check" size={20} color="#1A1A1A" />
             }
           </TouchableOpacity>
         </View>
@@ -135,7 +135,7 @@ export default function AlarmSettingsSheet({ onClose, onSave }: Props) {
                       <Switch
                         value={priorityType === type}
                         onValueChange={() => setPriorityType(type)}
-                        trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                        trackColor={{ false: '#E0E0E0', true: '#30D158' }}
                         thumbColor="#FFFFFF"
                       />
                     </View>
@@ -158,7 +158,7 @@ export default function AlarmSettingsSheet({ onClose, onSave }: Props) {
                       <Switch
                         value={transitType === type}
                         onValueChange={() => setTransitType(type)}
-                        trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                        trackColor={{ false: '#E0E0E0', true: '#30D158' }}
                         thumbColor="#FFFFFF"
                       />
                     </View>
@@ -187,7 +187,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 16, fontWeight: '600', color: '#1A1A1A' },
   saveBtn: {
     width: 36, height: 36, borderRadius: 18,
-    backgroundColor: '#F5A623', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#FFCE0C', alignItems: 'center', justifyContent: 'center',
   },
   section: { paddingHorizontal: 16, marginBottom: 20 },
   sectionTitle: {

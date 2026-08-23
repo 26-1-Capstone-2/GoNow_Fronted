@@ -15,6 +15,7 @@ import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Platform, Share, StyleSheet, Switch, Text, TextInput, ToastAndroid, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
 const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));
@@ -84,11 +85,12 @@ const DEFAULT_ALARM: GroupAlarm = {
   isArrivalActive: false, transport: 'public' as Transport,
 };
 
-type ViewType = 'list' | 'edit' | 'place' | 'addChoice' | 'join' | 'transport';
+type ViewType = 'list' | 'edit' | 'place' | 'addChoice' | 'join';
 
 export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, editAppointmentId, initialAlarm, initialInviteCode }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ['85%'], []);
+  const insets = useSafeAreaInsets();
+  const snapPoints = useMemo(() => ['88%'], []);
   const { selectedDate, alarmVersion, bumpAlarmVersion } = useCalendarStore();
   const { participantsVersion, deletedAppointmentId, setDeletedAppointmentId, removedAppointmentId, setRemovedAppointmentId } = useAppointmentStatusStore();
 
@@ -459,11 +461,11 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
 
       {/* ── 목록 화면 ── */}
       {view === 'list' && (
-        <>
+        <View style={{ flex: 1 }}>
           <View style={styles.header}>
             <TouchableOpacity style={styles.headerBtn} onPress={onClose}><Feather name="x" size={22} color="#1A1A1A" /></TouchableOpacity>
             <Text style={styles.title}>그룹</Text>
-            <TouchableOpacity style={styles.addBtn} onPress={openAdd}><Feather name="plus" size={22} color="#1A1A1A" /></TouchableOpacity>
+            <View style={{ width: 36 }} />
           </View>
           <View style={styles.datePillContainer}>
             <View style={styles.datePill}><Text style={styles.datePillText}>{month}월 {date}일 {dayName}요일</Text></View>
@@ -511,13 +513,16 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
                     openEdit(alarm);
                   }}
                 >
+                  <View style={[styles.typeChip, alarm.isArrivalActive && { opacity: 0.45 }]}>
+                    <Feather name="users" size={17} color="#FF9F0A" />
+                  </View>
                   <View style={[styles.alarmInfo, alarm.isArrivalActive && { opacity: 0.45 }]}>
                     <Text style={styles.alarmPlace}>{alarm.dest_name}</Text>
                     <View style={styles.alarmMeta}>
                       <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.hour}:{alarm.minute} 까지</Text>
                       {alarm.transport === 'public'
                         ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
-                        : <FontAwesome5 name="car-side" size={13} color="#F5A623" />
+                        : <FontAwesome5 name="car-side" size={13} color="#FF9F0A" />
                       }
                     </View>
                   </View>
@@ -534,13 +539,16 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
                       <FontAwesome6 name="person-walking" size={14} color={alarm.isArrivalActive ? '#FFFFFF' : '#CCCCCC'} />
                     </TouchableOpacity>
                     <Switch value={alarm.enabled} onValueChange={() => toggleAlarm(alarm.id)}
-                      trackColor={{ false: '#E0E0E0', true: '#4CAF50' }} thumbColor="#FFFFFF" />
+                      trackColor={{ false: '#E0E0E0', true: '#30D158' }} thumbColor="#FFFFFF" />
                   </View>
                 </TouchableOpacity>
               </SwipeableAlarmCard>
             ))}
           </BottomSheetScrollView>
-        </>
+          <TouchableOpacity style={[styles.fab, { bottom: 24 + insets.bottom }]} onPress={openAdd} activeOpacity={0.85}>
+            <Feather name="plus" size={24} color="#1A1A1A" />
+          </TouchableOpacity>
+        </View>
       )}
 
       {/* ── 수정/추가 화면 ── */}
@@ -557,21 +565,24 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
             </Text>
             <TouchableOpacity style={styles.saveBtn} onPress={handleSave}><Feather name="check" size={20} color="#FFFFFF" /></TouchableOpacity>
           </View>
-          <View
-            style={[styles.pickerContainer, editAlarm.isCurrentUserHost === false && styles.pickerDisabled]}
-            pointerEvents={editAlarm.isCurrentUserHost === false ? 'none' : 'auto'}
-          >
-            <Picker selectedValue={editAlarm.ampm} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, ampm: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
-              <Picker.Item label="오전" value="오전" color="#1A1A1A" /><Picker.Item label="오후" value="오후" color="#1A1A1A" />
-            </Picker>
-            <Picker selectedValue={editAlarm.hour} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, hour: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
-              {HOURS.map((h) => <Picker.Item key={h} label={h} value={h} color="#1A1A1A" />)}
-            </Picker>
-            <Picker selectedValue={editAlarm.minute} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, minute: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
-              {MINUTES.map((m) => <Picker.Item key={m} label={m} value={m} color="#1A1A1A" />)}
-            </Picker>
-          </View>
           <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+            <View
+              style={[styles.timeCard, editAlarm.isCurrentUserHost === false && styles.pickerDisabled]}
+              pointerEvents={editAlarm.isCurrentUserHost === false ? 'none' : 'auto'}
+            >
+              <Text style={styles.timeCardLabel}>출발 시각</Text>
+              <View style={styles.pickerContainer}>
+                <Picker selectedValue={editAlarm.ampm} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, ampm: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
+                  <Picker.Item label="오전" value="오전" color="#1A1A1A" /><Picker.Item label="오후" value="오후" color="#1A1A1A" />
+                </Picker>
+                <Picker selectedValue={editAlarm.hour} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, hour: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
+                  {HOURS.map((h) => <Picker.Item key={h} label={h} value={h} color="#1A1A1A" />)}
+                </Picker>
+                <Picker selectedValue={editAlarm.minute} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, minute: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
+                  {MINUTES.map((m) => <Picker.Item key={m} label={m} value={m} color="#1A1A1A" />)}
+                </Picker>
+              </View>
+            </View>
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>멤버({editAlarm.members.length})</Text>
               <View style={styles.optionBox}>
@@ -581,7 +592,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
                       <View style={styles.memberLeft}>
                         <Text style={styles.memberName}>{member.name}</Text>
                         {member.isHost && (
-                          <MaterialCommunityIcons name="crown" size={14} color="#F5A623" style={{ marginLeft: 5 }} />
+                          <MaterialCommunityIcons name="crown" size={14} color="#FF9F0A" style={{ marginLeft: 5 }} />
                         )}
                       </View>
                       <View style={styles.memberRight}>
@@ -589,11 +600,11 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
                           <MaterialCommunityIcons name="bus-side" size={20} color="#4A90D9" />
                         )}
                         {member.transport === 'car' && (
-                          <FontAwesome5 name="car-side" size={18} color="#F5A623" />
+                          <FontAwesome5 name="car-side" size={18} color="#FF9F0A" />
                         )}
                         {editAlarm.isCurrentUserHost && !member.isHost && (
                           <TouchableOpacity onPress={() => handleKickMember(member)} style={{ marginLeft: 16 }}>
-                            <Entypo name="block" size={22} color="#FF3B30" />
+                            <Entypo name="block" size={22} color="#FF453A" />
                           </TouchableOpacity>
                         )}
                       </View>
@@ -603,41 +614,52 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
                 ))}
               </View>
             </View>
-            <View style={styles.section}>
-              <View style={styles.optionBox}>
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldGroupLabel}>어디로 가시나요?</Text>
+              <TouchableOpacity
+                style={[styles.fieldRow, editAlarm.isCurrentUserHost === false && styles.fieldRowDisabled]}
+                onPress={openPlace}
+                disabled={editAlarm.isCurrentUserHost === false}
+                activeOpacity={0.7}
+              >
+                <Feather name="map-pin" size={17} color="#FF9F0A" />
+                <Text style={styles.fieldValue} numberOfLines={1}>{editAlarm.dest_name || '목적지 선택'}</Text>
+                {editAlarm.isCurrentUserHost !== false && <Feather name="chevron-right" size={16} color="#B0B0B4" />}
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.fieldGroup}>
+              <Text style={styles.fieldGroupLabel}>이동 수단</Text>
+              <View style={styles.segmentTrack}>
                 <TouchableOpacity
-                  style={styles.optionRow}
-                  onPress={openPlace}
-                  disabled={editAlarm.isCurrentUserHost === false}
+                  style={[styles.segmentBtn, editAlarm.transport === 'public' && styles.segmentBtnSelected]}
+                  onPress={() => setEditAlarm((prev) => ({ ...prev, transport: 'public' }))}
                 >
-                  <Text style={[styles.optionLabel, editAlarm.isCurrentUserHost === false && { color: '#AAAAAA' }]}>목적지</Text>
-                  <View style={styles.rowRight}>
-                    <Text style={styles.rowValue} numberOfLines={1}>{editAlarm.dest_name || '선택'}</Text>
-                    {editAlarm.isCurrentUserHost !== false && (
-                      <Feather name="chevron-right" size={16} color="#AAAAAA" />
-                    )}
-                  </View>
+                  <MaterialCommunityIcons name="bus-side" size={16} color={editAlarm.transport === 'public' ? '#1A1A1A' : '#8A8A8E'} />
+                  <Text style={[styles.segmentText, editAlarm.transport === 'public' && styles.segmentTextSelected]}>대중교통</Text>
                 </TouchableOpacity>
-                <View style={styles.separator} />
-                <TouchableOpacity style={styles.optionRow} onPress={() => setView('transport')}>
-                  <Text style={styles.optionLabel}>이동수단</Text>
-                  <View style={styles.rowRight}>
-                    <Text style={styles.rowValue}>{editAlarm.transport === 'public' ? '대중교통' : '자가용'}</Text>
-                    <Feather name="chevron-right" size={16} color="#AAAAAA" />
-                  </View>
+                <TouchableOpacity
+                  style={[styles.segmentBtn, editAlarm.transport === 'car' && styles.segmentBtnSelected]}
+                  onPress={() => setEditAlarm((prev) => ({ ...prev, transport: 'car' }))}
+                >
+                  <FontAwesome5 name="car-side" size={14} color={editAlarm.transport === 'car' ? '#1A1A1A' : '#8A8A8E'} />
+                  <Text style={[styles.segmentText, editAlarm.transport === 'car' && styles.segmentTextSelected]}>자가용</Text>
                 </TouchableOpacity>
-                {isEditMode && (<>
-                  <View style={styles.separator} />
-                  <View style={styles.optionRow}>
-                    <Text style={styles.optionLabel}>초대코드</Text>
-                    <View style={styles.rowRight}>
-                      <Text style={styles.inviteCode}>{editAlarm.inviteCode}</Text>
-                      <TouchableOpacity onPress={shareInviteCode} style={{ marginLeft: 8 }}><Feather name="share" size={16} color="#AAAAAA" /></TouchableOpacity>
-                    </View>
-                  </View>
-                </>)}
               </View>
             </View>
+
+            {isEditMode && (
+              <View style={styles.fieldGroup}>
+                <Text style={styles.fieldGroupLabel}>초대코드</Text>
+                <View style={styles.fieldRow}>
+                  <Feather name="key" size={17} color="#FF9F0A" />
+                  <Text style={styles.fieldValue}>{editAlarm.inviteCode}</Text>
+                  <TouchableOpacity onPress={shareInviteCode}>
+                    <Feather name="share" size={17} color="#B0B0B4" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
             {isEditMode && editAlarm.isCurrentUserHost === true && (
               <View style={styles.deleteContainer}>
                 <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}><Text style={styles.deleteButtonText}>그룹 삭제</Text></TouchableOpacity>
@@ -724,40 +746,12 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
             <View style={styles.optionBox}>
               <TouchableOpacity style={styles.optionRow} onPress={() => setJoinTransport('public')}>
                 <Text style={styles.optionLabel}>대중교통</Text>
-                {joinTransport === 'public' && <Feather name="check" size={18} color="#F5A623" />}
+                {joinTransport === 'public' && <Feather name="check" size={18} color="#FF9F0A" />}
               </TouchableOpacity>
               <View style={styles.separator} />
               <TouchableOpacity style={styles.optionRow} onPress={() => setJoinTransport('car')}>
                 <Text style={styles.optionLabel}>자가용</Text>
-                {joinTransport === 'car' && <Feather name="check" size={18} color="#F5A623" />}
-              </TouchableOpacity>
-            </View>
-          </BottomSheetScrollView>
-        </>
-      )}
-
-      {/* ── 이동수단 선택 화면 ── */}
-      {view === 'transport' && (
-        <>
-          <View style={styles.header}>
-            <TouchableOpacity style={styles.headerBtn} onPress={() => setView('edit')}>
-              <Feather name="chevron-left" size={22} color="#1A1A1A" />
-            </TouchableOpacity>
-            <Text style={styles.title}>이동수단</Text>
-            <TouchableOpacity style={styles.saveBtn} onPress={() => setView('edit')}>
-              <Feather name="check" size={20} color="#FFFFFF" />
-            </TouchableOpacity>
-          </View>
-          <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-            <View style={styles.optionBox}>
-              <TouchableOpacity style={styles.optionRow} onPress={() => setEditAlarm((prev) => ({ ...prev, transport: 'public' }))}>
-                <Text style={styles.optionLabel}>대중교통</Text>
-                {editAlarm.transport === 'public' && <Feather name="check" size={18} color="#F5A623" />}
-              </TouchableOpacity>
-              <View style={styles.separator} />
-              <TouchableOpacity style={styles.optionRow} onPress={() => setEditAlarm((prev) => ({ ...prev, transport: 'car' }))}>
-                <Text style={styles.optionLabel}>자가용</Text>
-                {editAlarm.transport === 'car' && <Feather name="check" size={18} color="#F5A623" />}
+                {joinTransport === 'car' && <Feather name="check" size={18} color="#FF9F0A" />}
               </TouchableOpacity>
             </View>
           </BottomSheetScrollView>
@@ -791,13 +785,23 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16 },
   headerBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 16, fontWeight: '600', color: '#1A1A1A' },
-  addBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center' },
-  saveBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F5A623', alignItems: 'center', justifyContent: 'center' },
+  saveBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#FF9F0A', alignItems: 'center', justifyContent: 'center' },
+  fab: {
+    position: 'absolute', right: 20, bottom: 24, width: 56, height: 56, borderRadius: 20,
+    backgroundColor: '#FFCE0C', alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.2, shadowRadius: 6, elevation: 4,
+  },
   datePillContainer: { alignItems: 'center', marginBottom: 16 },
   datePill: { backgroundColor: '#E8E8E8', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 6 },
-  datePillText: { fontSize: 13, fontWeight: '500', color: '#FF3B30' },
+  datePillText: { fontSize: 13, fontWeight: '500', color: '#FF453A' },
   content: { paddingHorizontal: 16, paddingBottom: Platform.OS === 'ios' ? 40 : 24 },
-  alarmCard: { flexDirection: 'row', alignItems: 'stretch', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: 16, backgroundColor: '#F5F5F5', borderRadius: 12, marginBottom: 8 },
+  alarmCard: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 14, paddingHorizontal: 14, backgroundColor: '#FFFFFF', borderRadius: 18,
+    marginBottom: 10,
+    shadowColor: '#141413', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 6, elevation: 2,
+  },
+  typeChip: { width: 40, height: 40, borderRadius: 14, backgroundColor: '#FFF3E5', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   alarmInfo: { flex: 1, marginRight: 8, justifyContent: 'center' },
   alarmPlace: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 5 },
   alarmMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -807,17 +811,29 @@ const styles = StyleSheet.create({
   memberCount: { fontSize: 11, color: '#555555', fontWeight: '500' },
   arrivalBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center' },
   arrivalBtnActive: { backgroundColor: '#92DEFE' },
-  pickerContainer: { flexDirection: 'row', backgroundColor: '#F5F5F5', borderRadius: 14, overflow: 'hidden', height: 200, marginHorizontal: 16, marginBottom: 8 },
+  pickerContainer: { flexDirection: 'row', backgroundColor: '#F7F7F8', borderRadius: 14, overflow: 'hidden', height: Platform.OS === 'ios' ? 200 : 56, marginTop: 8 },
   picker: { flex: 1 },
   pickerItem: { fontSize: 20, color: '#1A1A1A', height: 200 },
+  fieldGroup: { marginBottom: 16 },
+  fieldGroupLabel: { fontSize: 12, fontWeight: '600', color: '#8A8A8E', marginBottom: 8 },
+  fieldRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: '#F7F7F8', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 14,
+  },
+  fieldRowDisabled: { opacity: 0.5 },
+  fieldValue: { flex: 1, fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
+  timeCard: { backgroundColor: '#F7F7F8', borderRadius: 18, padding: 12, marginBottom: 16 },
+  timeCardLabel: { fontSize: 12, fontWeight: '600', color: '#8A8A8E', textAlign: 'center' },
+  segmentTrack: { flexDirection: 'row', backgroundColor: '#F0F0F1', borderRadius: 16, padding: 4, gap: 4 },
+  segmentBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 11 },
+  segmentBtnSelected: { backgroundColor: '#FFCE0C' },
+  segmentText: { fontSize: 13, fontWeight: '600', color: '#8A8A8E' },
+  segmentTextSelected: { color: '#1A1A1A', fontWeight: '700' },
   section: { marginBottom: 16 },
   sectionTitle: { fontSize: 15, fontWeight: '600', color: '#1A1A1A', marginBottom: 8 },
   optionBox: { backgroundColor: '#F5F5F5', borderRadius: 12, paddingHorizontal: 16 },
   optionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 50 },
   optionLabel: { fontSize: 15, color: '#1A1A1A' },
-  rowRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  rowValue: { fontSize: 14, color: '#AAAAAA' },
-  inviteCode: { fontSize: 14, color: '#AAAAAA', letterSpacing: 1 },
   memberRow: { height: 50, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   memberLeft: { flexDirection: 'row', alignItems: 'center' },
   memberRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -825,7 +841,7 @@ const styles = StyleSheet.create({
   memberName: { fontSize: 15, color: '#1A1A1A' },
   separator: { height: StyleSheet.hairlineWidth, backgroundColor: '#DDDDDD' },
   deleteContainer: { alignItems: 'center', marginTop: 8 },
-  deleteButton: { backgroundColor: '#FF3B30', borderRadius: 24, paddingVertical: 14, paddingHorizontal: 48 },
+  deleteButton: { backgroundColor: '#FF453A', borderRadius: 24, paddingVertical: 14, paddingHorizontal: 48 },
   deleteButtonText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
 
 
@@ -837,8 +853,8 @@ const styles = StyleSheet.create({
   choiceDesc: { fontSize: 12, color: '#888888', marginTop: 2 },
   joinLabel: { fontSize: 13, fontWeight: '600', color: '#888888', marginBottom: 8 },
   inviteInputBox: { backgroundColor: '#F5F5F5', borderRadius: 12, paddingHorizontal: 16, height: 52, justifyContent: 'center', borderWidth: 1.5, borderColor: 'transparent' },
-  inviteInputBoxError: { borderColor: '#FF3B30' },
+  inviteInputBoxError: { borderColor: '#FF453A' },
   inviteInput: { fontSize: 16, color: '#1A1A1A', letterSpacing: 2 },
-  inviteError: { fontSize: 12, color: '#FF3B30', marginTop: 6 },
+  inviteError: { fontSize: 12, color: '#FF453A', marginTop: 6 },
   joinDesc: { fontSize: 13, color: '#AAAAAA', marginTop: 12, textAlign: 'center' },
 });

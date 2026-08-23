@@ -278,8 +278,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   chipSelected: {
-    borderColor: '#1A1A1A',
-    backgroundColor: '#1A1A1A',
+    borderColor: '#FFCE0C',
+    backgroundColor: '#FFCE0C',
   },
   chipText: {
     fontSize: 14,
@@ -287,7 +287,8 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   chipTextSelected: {
-    color: '#FFFFFF',
+    color: '#1A1A1A',
+    fontWeight: '700',
   },
   footer: {
     position: 'absolute',
@@ -297,7 +298,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   completeButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#FFCE0C',
     borderRadius: 24,
     paddingVertical: 14,
     paddingHorizontal: 48,
@@ -309,7 +310,7 @@ const styles = StyleSheet.create({
   },
   completeButtonText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
+    fontWeight: '700',
+    color: '#1A1A1A',
   },
 });

@@ -306,7 +306,7 @@ const styles = StyleSheet.create({
   name: { fontSize: 15, fontWeight: '600', color: '#1A1A1A', flexShrink: 1 },
   address: { fontSize: 12, color: '#888888' },
   badge: { backgroundColor: '#E8F5E9', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
-  badgeText: { fontSize: 10, color: '#4CAF50', fontWeight: '500' },
+  badgeText: { fontSize: 10, color: '#30D158', fontWeight: '500' },
   deleteBackground: {
     position: 'absolute', right: 12,
     top: '50%', marginTop: -24,
@@ -315,7 +315,7 @@ const styles = StyleSheet.create({
   },
   deleteBtn: {
     width: 48, height: 48, borderRadius: 24,
-    backgroundColor: '#FF3B30',
+    backgroundColor: '#FF453A',
     justifyContent: 'center', alignItems: 'center',
   },
 });

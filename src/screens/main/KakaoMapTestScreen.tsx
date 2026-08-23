@@ -112,7 +112,7 @@ export default function KakaoMapTestScreen() {
           </TouchableOpacity>
           {origin && (
             <View style={styles.resolvedBox}>
-              <Feather name="map-pin" size={14} color="#4CAF50" />
+              <Feather name="map-pin" size={14} color="#30D158" />
               <Text style={styles.resolvedText}>{origin.name} ({origin.lat}, {origin.lng})</Text>
             </View>
           )}
@@ -129,7 +129,7 @@ export default function KakaoMapTestScreen() {
           </TouchableOpacity>
           {dest && (
             <View style={styles.resolvedBox}>
-              <Feather name="map-pin" size={14} color="#4CAF50" />
+              <Feather name="map-pin" size={14} color="#30D158" />
               <Text style={styles.resolvedText}>{dest.name} ({dest.lat}, {dest.lng})</Text>
             </View>
           )}
@@ -196,7 +196,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#E8F5E9', borderRadius: 8,
     padding: 10, marginTop: 10,
   },
-  resolvedText: { fontSize: 12, color: '#4CAF50', fontWeight: '500', flexShrink: 1 },
+  resolvedText: { fontSize: 12, color: '#30D158', fontWeight: '500', flexShrink: 1 },
   typeRow: { flexDirection: 'row', gap: 10 },
   typeBtn: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',

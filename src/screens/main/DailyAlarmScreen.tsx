@@ -170,8 +170,8 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>개인</Text>
-            <TouchableOpacity onPress={onPersonalAdd}>
-              <Feather name="plus" size={22} color="#888888" />
+            <TouchableOpacity style={[styles.sectionAddBtn, { backgroundColor: '#EAF3FF' }]} onPress={onPersonalAdd}>
+              <Feather name="plus" size={18} color="#0A84FF" />
             </TouchableOpacity>
           </View>
           {personal.map((alarm) => (
@@ -195,13 +195,16 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   }
                   alarm.journeyId && onPersonalEdit(alarm.journeyId, alarm);
                 }}>
+                <View style={[styles.typeChip, { backgroundColor: '#EAF3FF' }, alarm.myStatus === 'MOVING' && { opacity: 0.45 }]}>
+                  <Feather name="map-pin" size={17} color="#0A84FF" />
+                </View>
                 <View style={[styles.alarmInfo, alarm.myStatus === 'MOVING' && { opacity: 0.45 }]}>
                   <Text style={styles.alarmPlace}>{alarm.place}</Text>
                   <View style={styles.alarmMeta}>
                     <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.time} 까지</Text>
                     {alarm.transport === 'public'
                       ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
-                      : <FontAwesome5 name="car-side" size={13} color="#F5A623" />
+                      : <FontAwesome5 name="car-side" size={13} color="#0A84FF" />
                     }
                   </View>
                 </View>
@@ -218,7 +221,7 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   <Switch
                     value={alarm.enabled}
                     onValueChange={() => toggleAlarm(setPersonal, alarm, 'personal')}
-                    trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                    trackColor={{ false: '#E0E0E0', true: '#30D158' }}
                     thumbColor="#FFFFFF"
                   />
                 </View>
@@ -231,8 +234,8 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>그룹</Text>
-            <TouchableOpacity onPress={onGroupAdd}>
-              <Feather name="plus" size={22} color="#888888" />
+            <TouchableOpacity style={[styles.sectionAddBtn, { backgroundColor: '#FFF3E5' }]} onPress={onGroupAdd}>
+              <Feather name="plus" size={18} color="#FF9F0A" />
             </TouchableOpacity>
           </View>
           {group.map((alarm) => {
@@ -273,13 +276,16 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   }
                   alarm.appointmentId && onGroupEdit(alarm.appointmentId, alarm);
                 }}>
+                <View style={[styles.typeChip, { backgroundColor: '#FFF3E5' }, isGroupActive && { opacity: 0.45 }]}>
+                  <Feather name="users" size={17} color="#FF9F0A" />
+                </View>
                 <View style={[styles.alarmInfo, isGroupActive && { opacity: 0.45 }]}>
                   <Text style={styles.alarmPlace}>{alarm.place}</Text>
                   <View style={styles.alarmMeta}>
                     <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.time} 까지</Text>
                     {alarm.transport === 'public'
                       ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
-                      : <FontAwesome5 name="car-side" size={13} color="#F5A623" />
+                      : <FontAwesome5 name="car-side" size={13} color="#FF9F0A" />
                     }
                   </View>
                 </View>
@@ -307,7 +313,7 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   <Switch
                     value={alarm.enabled}
                     onValueChange={() => toggleAlarm(setGroup, alarm)}
-                    trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                    trackColor={{ false: '#E0E0E0', true: '#30D158' }}
                     thumbColor="#FFFFFF"
                   />
                 </View>
@@ -321,8 +327,8 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>귀가</Text>
-            <TouchableOpacity onPress={onHomeAdd}>
-              <Feather name="plus" size={22} color="#888888" />
+            <TouchableOpacity style={[styles.sectionAddBtn, { backgroundColor: '#EAF9EE' }]} onPress={onHomeAdd}>
+              <Feather name="plus" size={18} color="#30D158" />
             </TouchableOpacity>
           </View>
           {home.map((alarm) => (
@@ -346,6 +352,9 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   }
                   alarm.journeyId && onHomeEdit(alarm.journeyId, alarm);
                 }}>
+                <View style={[styles.typeChip, { backgroundColor: '#EAF9EE' }, alarm.myStatus === 'MOVING' && { opacity: 0.45 }]}>
+                  <Feather name="navigation" size={17} color="#30D158" />
+                </View>
                 <View style={[styles.alarmInfo, alarm.myStatus === 'MOVING' && { opacity: 0.45 }]}>
                   <Text style={styles.alarmPlace}>{alarm.place}</Text>
                   <View style={styles.alarmMeta}>
@@ -354,7 +363,7 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                     </Text>
                     {alarm.isLastMode || alarm.transport === 'public'
                       ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
-                      : <FontAwesome5 name="car-side" size={13} color="#F5A623" />
+                      : <FontAwesome5 name="car-side" size={13} color="#30D158" />
                     }
                   </View>
                 </View>
@@ -371,7 +380,7 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   <Switch
                     value={alarm.enabled}
                     onValueChange={() => toggleAlarm(setHome, alarm, 'home')}
-                    trackColor={{ false: '#E0E0E0', true: '#4CAF50' }}
+                    trackColor={{ false: '#E0E0E0', true: '#30D158' }}
                     thumbColor="#FFFFFF"
                   />
                 </View>
@@ -421,7 +430,7 @@ const styles = StyleSheet.create({
   dateTitle: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#FF3B30',
+    color: '#FF453A',
     paddingHorizontal: 20,
     marginBottom: 20,
   },
@@ -441,16 +450,27 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1A1A1A',
   },
+  sectionAddBtn: {
+    width: 32, height: 32, borderRadius: 16,
+    alignItems: 'center', justifyContent: 'center',
+  },
 
   alarmCard: {
     flexDirection: 'row',
-    alignItems: 'stretch',
+    alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 14,
-    paddingHorizontal: 16,
-    backgroundColor: '#F8F8F8',
-    borderRadius: 14,
+    paddingHorizontal: 14,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    marginBottom: 10,
+    shadowColor: '#141413',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
   },
+  typeChip: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
   alarmInfo: { flex: 1, marginRight: 8, justifyContent: 'center' },
   cardRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   alarmPlace: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 5 },

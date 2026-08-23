@@ -260,14 +260,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   inputOk: {
-    borderColor: '#4CAF50',
+    borderColor: '#30D158',
   },
   inputError: {
     borderColor: '#FF4444',
   },
   okText: {
     fontSize: 12,
-    color: '#4CAF50',
+    color: '#30D158',
     marginTop: 4,
   },
   errorText: {
@@ -283,8 +283,8 @@ const styles = StyleSheet.create({
   signUpButton: {
     width: '100%',
     height: 52,
-    backgroundColor: '#1A1A1A',
-    borderRadius: 10,
+    backgroundColor: '#FFCE0C',
+    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 36,
@@ -294,7 +294,7 @@ const styles = StyleSheet.create({
   },
   signUpButtonText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
+    fontWeight: '700',
+    color: '#1A1A1A',
   },
 });

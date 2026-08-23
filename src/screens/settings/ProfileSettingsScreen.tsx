@@ -80,7 +80,9 @@ export default function ProfileSettingsScreen() {
           onPress={() => router.push('/change-nickname')}
           activeOpacity={0.7}
         >
+          <Feather name="user" size={17} color="#0A84FF" />
           <Text style={styles.menuButtonText}>닉네임 변경</Text>
+          <Feather name="chevron-right" size={16} color="#B0B0B4" />
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -88,7 +90,9 @@ export default function ProfileSettingsScreen() {
           onPress={() => router.push('/change-password')}
           activeOpacity={0.7}
         >
+          <Feather name="lock" size={17} color="#0A84FF" />
           <Text style={styles.menuButtonText}>비밀번호 변경</Text>
+          <Feather name="chevron-right" size={16} color="#B0B0B4" />
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -96,7 +100,9 @@ export default function ProfileSettingsScreen() {
           onPress={() => router.push('/permission-setup')}
           activeOpacity={0.7}
         >
+          <Feather name="shield" size={17} color="#0A84FF" />
           <Text style={styles.menuButtonText}>필수 권한 설정 확인</Text>
+          <Feather name="chevron-right" size={16} color="#B0B0B4" />
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -104,18 +110,20 @@ export default function ProfileSettingsScreen() {
           onPress={() => router.push('/alarm-sound-setup')}
           activeOpacity={0.7}
         >
+          <Feather name="volume-2" size={17} color="#0A84FF" />
           <Text style={styles.menuButtonText}>알람 소리 설정</Text>
+          <Feather name="chevron-right" size={16} color="#B0B0B4" />
         </TouchableOpacity>
       </View>
 
       {/* 하단 버튼들 */}
       <View style={styles.deleteContainer}>
         <TouchableOpacity
-          style={styles.menuButton}
+          style={[styles.menuButton, styles.logoutButton]}
           onPress={handleLogout}
           activeOpacity={0.7}
         >
-          <Text style={styles.menuButtonText}>로그아웃</Text>
+          <Text style={[styles.menuButtonText, styles.logoutButtonText]}>로그아웃</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.deleteButton}
@@ -154,16 +162,22 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   menuButton: {
-    backgroundColor: '#F5F5F5',
-    borderRadius: 12,
-    paddingVertical: 16,
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#F7F7F8',
+    borderRadius: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
   },
   menuButtonText: {
+    flex: 1,
     fontSize: 15,
-    fontWeight: '500',
+    fontWeight: '600',
     color: '#1A1A1A',
   },
+  logoutButton: { justifyContent: 'center' },
+  logoutButtonText: { flex: 0, textAlign: 'center', color: '#8A8A8E', fontWeight: '500' },
   deleteContainer: {
     position: 'absolute',
     bottom: 48,
@@ -172,7 +186,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   deleteButton: {
-    backgroundColor: '#FF3B30',
+    backgroundColor: '#FF453A',
     borderRadius: 24,
     paddingVertical: 14,
     paddingHorizontal: 48,

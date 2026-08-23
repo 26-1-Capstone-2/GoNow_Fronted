@@ -37,7 +37,7 @@ const DEFAULT_ALARM: Alarm = {
 
 export default function PersonalAlarmEditSheet({ onClose, onSave, onDelete, initialData }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ['85%'], []);
+  const snapPoints = useMemo(() => ['88%'], []);
   const isEditMode = !!initialData?.id;
 
   const [alarm, setAlarm] = useState<Alarm>(initialData ?? DEFAULT_ALARM);
@@ -144,7 +144,7 @@ export default function PersonalAlarmEditSheet({ onClose, onSave, onDelete, init
                 >
                   <Text style={styles.repeatLabel}>{day}</Text>
                   {alarm.repeat === day && (
-                    <Feather name="check" size={16} color="#4CAF50" />
+                    <Feather name="check" size={16} color="#30D158" />
                   )}
                 </TouchableOpacity>
                 {index < DAYS.length - 1 && <View style={styles.separator} />}
@@ -194,7 +194,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#F5A623',
+    backgroundColor: '#0A84FF',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -284,7 +284,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   deleteButton: {
-    backgroundColor: '#FF3B30',
+    backgroundColor: '#FF453A',
     borderRadius: 24,
     paddingVertical: 14,
     paddingHorizontal: 48,

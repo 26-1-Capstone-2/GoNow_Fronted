@@ -42,20 +42,20 @@ export function AppButton({
 
 const styles = StyleSheet.create({
   base: {
-    paddingVertical: 12,
+    paddingVertical: 14,
     paddingHorizontal: 16,
-    borderRadius: 10,
+    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  primary: { backgroundColor: '#111' },
+  primary: { backgroundColor: '#FFCE0C' },
   secondary: {
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: '#ECECEE',
   },
   pressed: { opacity: 0.85 },
-  label: { fontSize: 16, fontWeight: '600' },
-  labelPrimary: { color: '#fff' },
-  labelSecondary: { color: '#111' },
+  label: { fontSize: 16, fontWeight: '700' },
+  labelPrimary: { color: '#1A1A1A' },
+  labelSecondary: { color: '#1A1A1A' },
 });

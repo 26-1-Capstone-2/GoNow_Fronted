@@ -13,7 +13,7 @@ interface Props {
   btnColor?: string;
 }
 
-export default function SwipeableAlarmCard({ children, onDelete, icon = 'trash', btnColor = '#FF3B30' }: Props) {
+export default function SwipeableAlarmCard({ children, onDelete, icon = 'trash', btnColor = '#FF453A' }: Props) {
   const translateX = useRef(new Animated.Value(0)).current;
   const isOpen = useRef(false);
   const dragX = useRef(0);
@@ -124,10 +124,10 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#FF3B30',
+    backgroundColor: '#FF453A',
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#FF3B30',
+    shadowColor: '#FF453A',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
