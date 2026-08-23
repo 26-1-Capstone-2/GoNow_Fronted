@@ -53,7 +53,7 @@ export default function ChangeNicknameScreen() {
         <Text style={styles.label}>새로운 닉네임을 입력해주세요.</Text>
         <TextInput
           style={styles.input}
-          placeholder="전 닉네임"
+          placeholder="새 닉네임"
           placeholderTextColor="#BBBBBB"
           value={nickname}
           onChangeText={(t) => t.length <= 12 && setNickname(t)}

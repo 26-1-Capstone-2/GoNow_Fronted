@@ -26,7 +26,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 type FieldStatus = 'idle' | 'checking' | 'ok' | 'error';
 
 export default function SignUpScreen() {
-  const { goBack, goToHomeAddressSetup } = useAppNavigation();
+  const { goBack, goToEmailVerify } = useAppNavigation();
   const setBasicInfo = useSignUpStore((s) => s.setBasicInfo);
 
   const [email, setEmail] = useState('');
@@ -55,11 +55,11 @@ export default function SignUpScreen() {
       setEmailStatus('checking');
       try {
         const res = await authApi.checkEmail(email);
-        setEmailStatus(res.success ? 'ok' : 'error');
+        setEmailStatus(res.data.exists ? 'error' : 'ok');
         setEmailMsg(res.message);
       } catch {
         setEmailStatus('error');
-        setEmailMsg('이미 사용 중인 이메일입니다.');
+        setEmailMsg('이메일 확인에 실패했습니다.');
       }
     }, 500);
     return () => { if (emailDebounceRef.current) clearTimeout(emailDebounceRef.current); };
@@ -74,11 +74,11 @@ export default function SignUpScreen() {
       setNicknameStatus('checking');
       try {
         const res = await authApi.checkNickname(nickname);
-        setNicknameStatus(res.success ? 'ok' : 'error');
+        setNicknameStatus(res.data.exists ? 'error' : 'ok');
         setNicknameMsg(res.message);
       } catch {
         setNicknameStatus('error');
-        setNicknameMsg('이미 사용 중인 닉네임입니다.');
+        setNicknameMsg('닉네임 확인에 실패했습니다.');
       }
     }, 500);
     return () => { if (nicknameDebounceRef.current) clearTimeout(nicknameDebounceRef.current); };
@@ -95,7 +95,7 @@ export default function SignUpScreen() {
   const handleNext = () => {
     if (!canProceed) return;
     setBasicInfo({ email, password, nickname });
-    goToHomeAddressSetup();
+    goToEmailVerify();
   };
 
   return (

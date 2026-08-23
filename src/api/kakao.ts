@@ -1,8 +1,15 @@
-const KAKAO_REST_API_KEY = process.env.EXPO_PUBLIC_KAKAO_REST_API_KEY;
-const BASE_URL = 'https://dapi.kakao.com';
+import { getToken } from '@/src/store/authStore';
+import { createApiClient } from './client';
 
-const headers = {
-  Authorization: `KakaoAK ${KAKAO_REST_API_KEY}`,
+// 카카오 REST API 키는 APK 디컴파일로 추출될 수 있어(버그50) 프론트가 직접 들고 있지 않는다.
+// 스프링 프록시(GET /api/places/search/address, /search/keyword)를 대신 호출한다 — 회원가입 중
+// 로그인 전 단계(HomeAddressSetupScreen)에서도 호출되므로 이 두 엔드포인트는 인증 없이 허용됨.
+const { request } = createApiClient({ getToken });
+
+type KakaoProxyResponse<T> = {
+  success: boolean;
+  message: string;
+  data: { documents: T[] };
 };
 
 // 주소 검색 결과 타입
@@ -42,12 +49,10 @@ export interface PlaceResult {
 export async function searchAddress(query: string): Promise<AddressResult[]> {
   if (!query.trim()) return [];
   try {
-    const res = await fetch(
-      `${BASE_URL}/v2/local/search/address.json?query=${encodeURIComponent(query)}&size=10`,
-      { headers }
+    const json = await request<KakaoProxyResponse<AddressResult>>(
+      `/api/places/search/address?query=${encodeURIComponent(query)}`
     );
-    const json = await res.json();
-    return json.documents ?? [];
+    return json.data.documents ?? [];
   } catch (e) {
     console.error('주소 검색 오류:', e);
     return [];
@@ -56,22 +61,17 @@ export async function searchAddress(query: string): Promise<AddressResult[]> {
 
 // 장소 검색 (키워드)
 export async function searchPlace(query: string): Promise<PlaceResult[]> {
-    if (!query.trim()) return [];
-    try {
-      console.log('API KEY:', process.env.EXPO_PUBLIC_KAKAO_REST_API_KEY);
-      const res = await fetch(
-        `${BASE_URL}/v2/local/search/keyword.json?query=${encodeURIComponent(query)}&size=10`,
-        { headers }
-      );
-      console.log('STATUS:', res.status);
-      const json = await res.json();
-      console.log('RESULT:', JSON.stringify(json));
-      return json.documents ?? [];
-    } catch (e) {
-      console.error('장소 검색 오류:', e);
-      return [];
-    }
+  if (!query.trim()) return [];
+  try {
+    const json = await request<KakaoProxyResponse<PlaceResult>>(
+      `/api/places/search/keyword?query=${encodeURIComponent(query)}`
+    );
+    return json.data.documents ?? [];
+  } catch (e) {
+    console.error('장소 검색 오류:', e);
+    return [];
   }
+}
 
 // 주소 + 장소 통합 검색
 export async function searchAll(query: string): Promise<{

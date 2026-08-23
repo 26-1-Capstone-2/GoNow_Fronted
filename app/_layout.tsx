@@ -13,7 +13,8 @@ import { reconcileDepartingGeofences } from '@/src/tasks/departingGeofenceTask';
 import { reconcileMovingGeofences } from '@/src/tasks/movingGeofenceTask';
 import { reconcileReadyGeofences } from '@/src/tasks/readyGeofenceTask';
 import { dlog } from '@/src/utils/deviceLogger';
-import { getToken, useAuthStore, TOKEN_KEY } from '@/src/store/authStore';
+import { getToken, useAuthStore, TOKEN_KEY, REFRESH_TOKEN_KEY, MEMBER_ID_KEY } from '@/src/store/authStore';
+import * as SecureStore from 'expo-secure-store';
 import { useAppointmentStatusStore } from '@/src/store/appointmentStatusStore';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { createMembersApi } from '@/src/api/members';
@@ -48,8 +49,11 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 async function checkAndApplyUpdate(): Promise<void> {
-  if (__DEV__ || !Updates.isEnabled) {
-    dlog('FOREGROUND', `[expo-updates] 체크 스킵 — __DEV__:${__DEV__} isEnabled:${Updates.isEnabled}`);
+  // EXPO_PUBLIC_API_BASE_URL이 설정된 로컬 테스트 빌드(.env.local)에서는 OTA 체크를 건너뛴다 —
+  // 안 그러면 preview 채널의 예전 번들(gonow-api.uk 하드코딩)이 로컬 빌드를 그 자리에서 덮어써서
+  // 로컬 서버를 보고 있는 줄 알았는데 실제로는 EC2를 보고 있는 혼란이 생긴다.
+  if (__DEV__ || !Updates.isEnabled || process.env.EXPO_PUBLIC_API_BASE_URL) {
+    dlog('FOREGROUND', `[expo-updates] 체크 스킵 — __DEV__:${__DEV__} isEnabled:${Updates.isEnabled} localOverride:${!!process.env.EXPO_PUBLIC_API_BASE_URL}`);
     return;
   }
   try {
@@ -206,10 +210,17 @@ export default function RootLayout() {
       // init() 완료 — backgroundLocationTask가 이 시점부터 정상 동작 가능
       await AsyncStorage.setItem(SESSION_READY_KEY, '1');
 
-      // AsyncStorage에서 토큰 복원 → 자동 로그인
+      // AsyncStorage/SecureStore에서 토큰 복원 → 자동 로그인 (Refresh Token은 client.ts의 재발급
+      // 인터셉터가 나중에 쓸 수 있도록 memberId와 함께 스토어에 미리 채워둔다)
       const savedToken = await AsyncStorage.getItem(TOKEN_KEY);
       if (savedToken) {
         useAuthStore.getState().setToken(savedToken);
+        const [savedRefreshToken, savedMemberId] = await Promise.all([
+          SecureStore.getItemAsync(REFRESH_TOKEN_KEY),
+          AsyncStorage.getItem(MEMBER_ID_KEY),
+        ]);
+        if (savedRefreshToken) useAuthStore.getState().setRefreshToken(savedRefreshToken);
+        if (savedMemberId) useAuthStore.getState().setMemberId(Number(savedMemberId));
         try {
           const profileRes = await createMembersApi().getMyProfile();
           if (profileRes.data?.nickname) useAuthStore.getState().setNickname(profileRes.data.nickname);

@@ -35,6 +35,7 @@ interface Props {
 
 const DELETE_WIDTH = 70;
 const THRESHOLD = -50;
+const DEBOUNCE_MS = 300; // 타이핑이 멈추고 이 시간이 지나야 검색 요청을 보냄
 
 function SwipeableResultItem({
   item,
@@ -150,21 +151,28 @@ export default function AddressSearchView({
   const [loading, setLoading] = useState(false);
   const isSearching = query.trim().length > 0;
 
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 가장 최근에 입력된 검색어 — 응답이 늦게 도착했을 때 이미 지난 검색어의 결과인지 판별용
+  // (빠르게 두 번 검색하면 먼저 보낸 요청이 나중에 응답할 수 있어, 최신 검색어와 다르면 그 결과는 버린다)
+  const latestQueryRef = useRef('');
+
   useEffect(() => {
     if (!isSearching) {
       setResults(initialResults);
     }
-  }, [initialResults]);
+  }, [initialResults, isSearching]);
 
-  const handleSearch = useCallback(async (text: string) => {
-    setQuery(text);
-    if (text.trim() === '') {
-      setResults(initialResults);
-      return;
-    }
+  useEffect(() => {
+    return () => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    };
+  }, []);
+
+  const runSearch = useCallback(async (text: string) => {
     setLoading(true);
     try {
       const { places, addresses } = await searchAll(text);
+      if (latestQueryRef.current !== text) return; // 그새 검색어가 바뀜 — 이 결과는 폐기
       const combined: SearchResult[] = [
         ...places.map((p: PlaceResult) => ({
           id: `place_${p.id}`,
@@ -183,12 +191,40 @@ export default function AddressSearchView({
       ].filter((r) => r.name);
       setResults(combined.length > 0 ? combined : []);
     } catch (e) {
+      if (latestQueryRef.current !== text) return;
       console.error('검색 오류:', e);
       setResults([]);
     } finally {
-      setLoading(false);
+      if (latestQueryRef.current === text) setLoading(false);
     }
+  }, []);
+
+  // 검색어를 비우는 동작(✕ 버튼 클릭 포함) 공용 처리 — 대기 중인 디바운스 타이머와
+  // latestQueryRef도 같이 정리해야, 이미 취소된 옛 검색어의 응답이 나중에 도착해도 무시된다
+  const clearSearch = useCallback(() => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    latestQueryRef.current = '';
+    setQuery('');
+    setResults(initialResults);
+    setLoading(false);
   }, [initialResults]);
+
+  const handleSearch = useCallback((text: string) => {
+    if (text.trim() === '') {
+      clearSearch();
+      return;
+    }
+
+    setQuery(text);
+    latestQueryRef.current = text;
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+
+    // 타이핑이 멈추고 DEBOUNCE_MS가 지나야 실제 검색 요청을 보낸다 — 매 키 입력마다 호출하면
+    // 카카오 API 쿼터를 불필요하게 많이 소모하고 화면도 자주 깜빡인다
+    debounceTimer.current = setTimeout(() => {
+      runSearch(text);
+    }, DEBOUNCE_MS);
+  }, [clearSearch, runSearch]);
 
   const handleDelete = (id: string) => {
     const item = results.find((r) => r.id === id);
@@ -210,7 +246,7 @@ export default function AddressSearchView({
         />
         {loading && <ActivityIndicator size="small" color="#AAAAAA" style={{ marginRight: 4 }} />}
         {query.length > 0 && !loading && (
-          <TouchableOpacity onPress={() => { setQuery(''); setResults(initialResults); }}>
+          <TouchableOpacity onPress={clearSearch}>
             <Feather name="x-circle" size={15} color="#AAAAAA" />
           </TouchableOpacity>
         )}
