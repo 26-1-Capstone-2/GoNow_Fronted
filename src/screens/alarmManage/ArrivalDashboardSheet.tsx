@@ -37,7 +37,7 @@ function TransportBadge({ transport }: { transport: 'TRANSIT' | 'DRIVING' }) {
   if (transport === 'TRANSIT') {
     return <MaterialCommunityIcons name="bus-side" size={20} color="#4A90D9" />;
   }
-  return <FontAwesome5 name="car-side" size={18} color="#F5A623" />;
+  return <FontAwesome5 name="car-side" size={18} color="#FF9F0A" />;
 }
 
 interface Props {
@@ -47,7 +47,7 @@ interface Props {
 
 export default function ArrivalDashboardSheet({ onClose, appointmentId }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ['85%'], []);
+  const snapPoints = useMemo(() => ['88%'], []);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -108,15 +108,15 @@ export default function ArrivalDashboardSheet({ onClose, appointmentId }: Props)
           disabled={refreshing}
         >
           {refreshing
-            ? <ActivityIndicator size="small" color="#F5A623" />
-            : <Feather name="refresh-cw" size={18} color="#F5A623" />
+            ? <ActivityIndicator size="small" color="#FF9F0A" />
+            : <Feather name="refresh-cw" size={18} color="#FF9F0A" />
           }
         </TouchableOpacity>
       </View>
 
       {loading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#F5A623" />
+          <ActivityIndicator size="large" color="#FF9F0A" />
         </View>
       ) : (
         <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -177,7 +177,7 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 16, paddingBottom: Platform.OS === 'ios' ? 40 : 24 },
   datePillContainer: { alignItems: 'center', marginBottom: 10 },
   datePill: { backgroundColor: '#F5F5F5', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8 },
-  datePillText: { fontSize: 13, fontWeight: '500', color: '#FF3B30' },
+  datePillText: { fontSize: 13, fontWeight: '500', color: '#FF453A' },
   destinationContainer: { alignItems: 'center', marginBottom: 24 },
   destinationPill: { backgroundColor: '#F5F5F5', borderRadius: 20, paddingHorizontal: 20, paddingVertical: 8 },
   destinationText: { fontSize: 14, fontWeight: '500', color: '#1A1A1A' },
@@ -188,7 +188,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 14,
     marginBottom: 8, alignItems: 'center',
   },
-  memberCardMe: { borderWidth: 1.5, borderColor: '#F5A623' },
+  memberCardMe: { borderWidth: 1.5, borderColor: '#FF9F0A' },
   memberCardTop: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     width: '100%', marginBottom: 10,

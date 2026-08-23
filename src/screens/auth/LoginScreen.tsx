@@ -214,7 +214,7 @@ const styles = StyleSheet.create({
     color: '#1A1A1A',
   },
   logoNow: {
-    color: '#F5A623',
+    color: '#0A84FF',
   },
   formContainer: {
     width: '100%',
@@ -239,16 +239,16 @@ const styles = StyleSheet.create({
   loginButton: {
     width: '100%',
     height: 52,
-    backgroundColor: '#1A1A1A',
-    borderRadius: 10,
+    backgroundColor: '#FFCE0C',
+    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 28,
   },
   loginButtonText: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF',
+    fontWeight: '700',
+    color: '#1A1A1A',
   },
   footer: {
     flexDirection: 'row',
@@ -263,6 +263,6 @@ const styles = StyleSheet.create({
   signUpText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#F5A623',
+    color: '#0A84FF',
   },
 });

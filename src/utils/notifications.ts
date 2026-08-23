@@ -294,7 +294,7 @@ const DEPARTURE_CHANNEL_IDS: Record<AlarmStage, Record<DepartureSoundMode, strin
 // (1단계는 원래 무진동이라 패턴이 없어서, 진동 모드 전용으로 부드러운 패턴을 하나 지정)
 const DEPARTURE_STAGE_CONFIG: Record<AlarmStage, { vibrationPattern?: number[]; lightColor?: string }> = {
   1: {},
-  2: { vibrationPattern: [100, 250, 250, 250], lightColor: '#4CAF50' },
+  2: { vibrationPattern: [100, 250, 250, 250], lightColor: '#30D158' },
   3: { vibrationPattern: [100, 500, 200, 500, 200, 500], lightColor: '#E74C3C' },
   4: { vibrationPattern: [100, 500, 200, 500, 200, 500], lightColor: '#E74C3C' },
 };

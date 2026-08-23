@@ -103,8 +103,8 @@ export default function AlarmTestScreen() {
 
         {/* 권한 상태 */}
         <View style={[styles.permissionBadge, { backgroundColor: hasPermission ? '#E8F5E9' : '#FFEBEE' }]}>
-          <Feather name={hasPermission ? 'check-circle' : 'alert-circle'} size={16} color={hasPermission ? '#4CAF50' : '#F44336'} />
-          <Text style={[styles.permissionText, { color: hasPermission ? '#4CAF50' : '#F44336' }]}>
+          <Feather name={hasPermission ? 'check-circle' : 'alert-circle'} size={16} color={hasPermission ? '#30D158' : '#F44336'} />
+          <Text style={[styles.permissionText, { color: hasPermission ? '#30D158' : '#F44336' }]}>
             {hasPermission ? '알림 권한 허용됨' : '알림 권한 없음 — 탭해서 요청'}
           </Text>
         </View>
@@ -272,7 +272,7 @@ export default function AlarmTestScreen() {
           <Text style={styles.sectionTitle}>FGS 분리 모듈 테스트 (임시)</Text>
           <Text style={styles.sectionDesc}>GPS 구독 없이 알림만 뜨는지 adb로 확인용</Text>
           <TouchableOpacity
-            style={[styles.scenarioBtn, { backgroundColor: '#4CAF50' }]}
+            style={[styles.scenarioBtn, { backgroundColor: '#30D158' }]}
             onPress={() => {
               ForegroundService.start('GoNow 알람 실행 중', '출발 시간을 모니터링하고 있어요.');
               setLastSent('ForegroundService.start() 호출됨');
@@ -368,7 +368,7 @@ export default function AlarmTestScreen() {
         {/* 마지막 전송 */}
         {lastSent !== '' && (
           <View style={styles.lastSentBox}>
-            <Feather name="check" size={14} color="#4CAF50" />
+            <Feather name="check" size={14} color="#30D158" />
             <Text style={styles.lastSentText}>{lastSent}</Text>
           </View>
         )}
@@ -441,5 +441,5 @@ const styles = StyleSheet.create({
     backgroundColor: '#E8F5E9', borderRadius: 8,
     padding: 12, marginTop: 16, marginBottom: 40,
   },
-  lastSentText: { fontSize: 13, color: '#4CAF50', fontWeight: '500' },
+  lastSentText: { fontSize: 13, color: '#30D158', fontWeight: '500' },
 });

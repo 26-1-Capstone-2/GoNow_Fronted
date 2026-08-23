@@ -3,7 +3,8 @@ import GroupAllAlarmSheet from '@/src/screens/allAlarmManage/GroupAllAlarmSheet'
 import HomeAllAlarmSheet from '@/src/screens/allAlarmManage/HomeAllAlarmSheet';
 import PersonalAllAlarmSheet from '@/src/screens/allAlarmManage/PersonalAllAlarmSheet';
 import AlarmSettingsSheet from '@/src/screens/main/AlarmSettingsSheet';
-import { createAlarmsApi } from '@/src/api/alarms';
+import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
+import { targetTimeToAmpmHourMinute } from '@/src/api/journeys';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -15,6 +16,7 @@ import {
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -57,6 +59,23 @@ function locdateToString(locdate: number): string {
 
 type EventMap = Record<string, { label: string; color: string }[]>;
 type AlarmCountMap = Record<string, { personal: number; group: number; home: number }>;
+type AlarmKind = 'personal' | 'group' | 'home';
+interface UpcomingItem {
+  id: string;
+  kind: AlarmKind;
+  targetId: number;
+  title: string;
+  meta: string;
+  dday: string;
+  color: string;
+  bg: string;
+}
+
+const KIND_META: Record<AlarmKind, { label: string; color: string; bg: string }> = {
+  personal: { label: '개인', color: '#0A84FF', bg: '#EAF3FF' },
+  group: { label: '그룹', color: '#FF9F0A', bg: '#FFF3E5' },
+  home: { label: '귀가', color: '#30D158', bg: '#EAF9EE' },
+};
 
 function getOffsetFromBase(baseYear: number, baseMonth: number, targetYear: number, targetMonth: number) {
   return (targetYear - baseYear) * 12 + (targetMonth - baseMonth);
@@ -116,16 +135,12 @@ const CalendarMonth = memo(function CalendarMonth({
   year, month, todayStr, selectedDate, onSelectDate, onDayPress, containerHeight, events, alarmCounts,
 }: CalendarMonthProps) {
   const weeks = getCalendarWeeks(year, month);
-  const MONTH_TITLE_H = 60;
   const WEEKDAY_H = 32;
-  const GRID_H = containerHeight - MONTH_TITLE_H - WEEKDAY_H;
+  const GRID_H = containerHeight - WEEKDAY_H;
   const ROW_HEIGHT = Math.floor(GRID_H / weeks.length);
 
   return (
     <View style={{ width: SCREEN_WIDTH, height: containerHeight }}>
-      <View style={[styles.monthTitleRow, { height: MONTH_TITLE_H }]}>
-        <Text style={styles.monthTitle}>{month}월</Text>
-      </View>
       <View style={[styles.weekdayRow, { height: WEEKDAY_H }]}>
         {DAYS.map((d, i) => (
           <Text key={d} style={[styles.weekdayText, i === 0 && styles.sundayText, i === 6 && styles.saturdayText]}>
@@ -172,18 +187,16 @@ const CalendarMonth = memo(function CalendarMonth({
                   ))}
                   {(() => {
                     const c = alarmCounts[day.fullDate];
-                    if (!c || (c.personal === 0 && c.group === 0 && c.home === 0)) return null;
+                    const dots: string[] = [];
+                    if (c?.personal) dots.push('#0A84FF');
+                    if (c?.group) dots.push('#FF9F0A');
+                    if (c?.home) dots.push('#30D158');
+                    if (dots.length === 0) return null;
                     return (
-                      <View style={[styles.alarmCountRow, !isCur && { opacity: 0.4 }]}>
-                        {c.personal > 0 && (
-                          <Text style={[styles.alarmCountText, { color: '#007AFF' }]}>개인 {c.personal}</Text>
-                        )}
-                        {c.group > 0 && (
-                          <Text style={[styles.alarmCountText, { color: '#FF9500' }]}>그룹 {c.group}</Text>
-                        )}
-                        {c.home > 0 && (
-                          <Text style={[styles.alarmCountText, { color: '#34C759' }]}>귀가 {c.home}</Text>
-                        )}
+                      <View style={[styles.dotRow, !isCur && { opacity: 0.35 }]}>
+                        {dots.map((color, i) => (
+                          <View key={i} style={[styles.dot, { backgroundColor: color }]} />
+                        ))}
                       </View>
                     );
                   })()}
@@ -209,10 +222,14 @@ export default function MainCalendarScreen() {
   const [showPersonalSheet, setShowPersonalSheet] = useState(false);
   const [showGroupSheet, setShowGroupSheet] = useState(false);
   const [showHomeSheet, setShowHomeSheet] = useState(false);
+  const [personalEditId, setPersonalEditId] = useState<number | undefined>(undefined);
+  const [groupEditId, setGroupEditId] = useState<number | undefined>(undefined);
+  const [homeEditId, setHomeEditId] = useState<number | undefined>(undefined);
   const [showArrivalSheet, setShowArrivalSheet] = useState(false);
   const [selectedGroupAlarm, setSelectedGroupAlarm] = useState<any>(null);
   const [events, setEvents] = useState<EventMap>({});
   const [alarmCounts, setAlarmCounts] = useState<AlarmCountMap>({});
+  const [upcoming, setUpcoming] = useState<UpcomingItem[]>([]);
   const flatListRef = useRef<FlatList>(null);
   const isAtTodayRef = useRef(true);
   const isMountedRef = useRef(false);
@@ -226,6 +243,28 @@ export default function MainCalendarScreen() {
   );
 
   const months = Array.from({ length: TOTAL_MONTHS }, (_, i) => i);
+
+  const monthStats = (() => {
+    const stats = { personal: 0, group: 0, home: 0 };
+    getCalendarWeeks(selectedYear, selectedMonth).forEach((week) => week.forEach((day) => {
+      if (day.month !== 'cur') return;
+      const c = alarmCounts[day.fullDate];
+      if (c) { stats.personal += c.personal; stats.group += c.group; stats.home += c.home; }
+    }));
+    return stats;
+  })();
+
+  const goPrevMonth = useCallback(() => {
+    let y = selectedYear, m = selectedMonth - 1;
+    if (m === 0) { m = 12; y -= 1; }
+    setYearMonth(y, m);
+  }, [selectedYear, selectedMonth]);
+
+  const goNextMonth = useCallback(() => {
+    let y = selectedYear, m = selectedMonth + 1;
+    if (m === 13) { m = 1; y += 1; }
+    setYearMonth(y, m);
+  }, [selectedYear, selectedMonth]);
 
   useEffect(() => {
     if (!isMountedRef.current) return;
@@ -306,6 +345,40 @@ export default function MainCalendarScreen() {
       }
     }
 
+    function diffDays(dateStr: string): number {
+      const d1 = new Date(dateStr + 'T00:00:00');
+      const d2 = new Date(todayStr + 'T00:00:00');
+      return Math.round((d1.getTime() - d2.getTime()) / 86400000);
+    }
+
+    function formatUpcomingMeta(kind: AlarmKind, planDate: string, targetTime: string): string {
+      const { ampm, hour, minute } = targetTimeToAmpmHourMinute(targetTime);
+      const dateLabel = planDate === todayStr
+        ? '오늘'
+        : (() => { const d = new Date(planDate + 'T00:00:00'); return `${d.getMonth() + 1}/${d.getDate()}`; })();
+      return `${KIND_META[kind].label} · ${dateLabel} ${ampm} ${hour}:${minute}`;
+    }
+
+    function buildUpcoming(items: { kind: AlarmKind; item: AlarmItem }[]): UpcomingItem[] {
+      return items
+        .map(({ kind, item }) => ({ kind, item, dateKey: item.plan_date.split('T')[0] }))
+        .filter(({ dateKey }) => dateKey >= todayStr && diffDays(dateKey) <= 7)
+        .filter(({ item }) => (item.journey_id ?? item.appointment_id) != null)
+        .sort((a, b) => (a.dateKey !== b.dateKey
+          ? a.dateKey.localeCompare(b.dateKey)
+          : a.item.target_time.localeCompare(b.item.target_time)))
+        .map(({ kind, item, dateKey }) => ({
+          id: `${kind}-${item.journey_id ?? item.appointment_id}`,
+          kind,
+          targetId: (item.journey_id ?? item.appointment_id) as number,
+          title: item.dest_name,
+          meta: formatUpcomingMeta(kind, dateKey, item.target_time),
+          dday: dateKey === todayStr ? 'D-DAY' : `D-${diffDays(dateKey)}`,
+          color: KIND_META[kind].color,
+          bg: KIND_META[kind].bg,
+        }));
+    }
+
     Promise.all([
       alarmsApi.getAlarmsByType('PERSONAL'),
       alarmsApi.getAlarmsByType('GROUP'),
@@ -316,15 +389,21 @@ export default function MainCalendarScreen() {
       (group.data ?? []).forEach((a) => expandAlarm(a.plan_date, a.repeat_days, 'group', counts));
       (home.data ?? []).forEach((a) => expandAlarm(a.plan_date, a.repeat_days, 'home', counts));
       setAlarmCounts(counts);
+
+      setUpcoming(buildUpcoming([
+        ...(personal.data ?? []).map((item) => ({ kind: 'personal' as const, item })),
+        ...(group.data ?? []).map((item) => ({ kind: 'group' as const, item })),
+        ...(home.data ?? []).map((item) => ({ kind: 'home' as const, item })),
+      ]));
     }).catch(() => {});
-  }, [alarmVersion]);
+  }, [alarmVersion, todayStr]);
 
   useEffect(() => {
     fetchHolidays(selectedYear, selectedMonth).then((holidays) => {
       const map: EventMap = {};
       holidays.forEach((h) => {
         const dateStr = locdateToString(h.locdate);
-        map[dateStr] = [{ label: h.dateName, color: '#FF3B30' }];
+        map[dateStr] = [{ label: h.dateName, color: '#FF453A' }];
       });
       setEvents((prev) => ({ ...prev, ...map }));
     });
@@ -376,22 +455,54 @@ export default function MainCalendarScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.yearNav} onPress={() => router.push('/year-calendar')}>
-          <Ionicons name="chevron-back" size={18} color="#1A1A1A" />
-          <Text style={styles.yearText}>{selectedYear}년</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.alarmTestBtn} onPress={() => router.push('/alarm-test' as any)}>
-          <Feather name="tool" size={14} color="#888888" />
-          <Text style={styles.alarmTestBtnText}>개발자 도구</Text>
-        </TouchableOpacity>
-        <View style={styles.headerIconPill}>
-          <TouchableOpacity style={styles.headerIconBtn} onPress={() => router.push('/home-address')}>
-            <Feather name="home" size={20} color="#1A1A1A" />
+        <View style={styles.monthNav}>
+          <TouchableOpacity style={styles.monthNavBtn} onPress={goPrevMonth} hitSlop={8}>
+            <Ionicons name="chevron-back" size={18} color="#1A1A1A" />
           </TouchableOpacity>
-          <View style={styles.headerIconDivider} />
-          <TouchableOpacity style={styles.headerIconBtn} onPress={() => router.push('/profile-settings')}>
-            <Feather name="user" size={20} color="#1A1A1A" />
+          <TouchableOpacity onPress={() => router.push('/year-calendar')}>
+            <Text style={styles.monthNavText}>{selectedYear}년 {selectedMonth}월</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={styles.monthNavBtn} onPress={goNextMonth} hitSlop={8}>
+            <Ionicons name="chevron-forward" size={18} color="#1A1A1A" />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.headerRight}>
+          <TouchableOpacity style={styles.devToolBtn} onPress={() => router.push('/alarm-test' as any)}>
+            <Feather name="tool" size={14} color="#888888" />
+          </TouchableOpacity>
+          <View style={styles.headerIconPill}>
+            <TouchableOpacity style={styles.headerIconBtn} onPress={() => router.push('/home-address')}>
+              <Feather name="home" size={18} color="#1A1A1A" />
+            </TouchableOpacity>
+            <View style={styles.headerIconDivider} />
+            <TouchableOpacity style={styles.headerIconBtn} onPress={() => router.push('/profile-settings')}>
+              <Feather name="user" size={18} color="#1A1A1A" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.statRow}>
+        <View style={styles.statCard}>
+          <View style={styles.statLabelRow}>
+            <View style={[styles.statDot, { backgroundColor: '#0A84FF' }]} />
+            <Text style={styles.statLabel}>개인</Text>
+          </View>
+          <Text style={styles.statCount}>{monthStats.personal}<Text style={styles.statUnit}> 건</Text></Text>
+        </View>
+        <View style={styles.statCard}>
+          <View style={styles.statLabelRow}>
+            <View style={[styles.statDot, { backgroundColor: '#FF9F0A' }]} />
+            <Text style={styles.statLabel}>그룹</Text>
+          </View>
+          <Text style={styles.statCount}>{monthStats.group}<Text style={styles.statUnit}> 건</Text></Text>
+        </View>
+        <View style={styles.statCard}>
+          <View style={styles.statLabelRow}>
+            <View style={[styles.statDot, { backgroundColor: '#30D158' }]} />
+            <Text style={styles.statLabel}>귀가</Text>
+          </View>
+          <Text style={styles.statCount}>{monthStats.home}<Text style={styles.statUnit}> 건</Text></Text>
         </View>
       </View>
 
@@ -419,6 +530,39 @@ export default function MainCalendarScreen() {
         )}
       </View>
 
+      <View style={styles.upcomingSection}>
+        <Text style={styles.upcomingTitle}>다가오는 일정</Text>
+        {upcoming.length === 0 ? (
+          <Text style={styles.upcomingEmpty}>다가오는 일정이 없어요</Text>
+        ) : (
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {upcoming.map((u) => (
+              <TouchableOpacity
+                key={u.id}
+                style={styles.upcomingCard}
+                activeOpacity={0.7}
+                onPress={() => {
+                  if (u.kind === 'personal') { setPersonalEditId(u.targetId); setShowPersonalSheet(true); }
+                  else if (u.kind === 'group') { setGroupEditId(u.targetId); setShowGroupSheet(true); }
+                  else { setHomeEditId(u.targetId); setShowHomeSheet(true); }
+                }}
+              >
+                <View style={[styles.upcomingIconChip, { backgroundColor: u.bg }]}>
+                  <Feather name="map-pin" size={17} color={u.color} />
+                </View>
+                <View style={styles.upcomingInfo}>
+                  <Text style={styles.upcomingCardTitle} numberOfLines={1}>{u.title}</Text>
+                  <Text style={styles.upcomingMeta}>{u.meta}</Text>
+                </View>
+                <View style={[styles.ddayBadge, { backgroundColor: u.bg }]}>
+                  <Text style={[styles.ddayText, { color: u.color }]}>{u.dday}</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+      </View>
+
       <View style={styles.bottomBar}>
         <TouchableOpacity style={styles.todayBtn} onPress={goToToday} activeOpacity={0.7}>
           <Text style={styles.todayBtnNum}>{today.getDate()}</Text>
@@ -427,22 +571,22 @@ export default function MainCalendarScreen() {
         <View style={styles.rightBtns}>
           {/* 개인 */}
           <TouchableOpacity style={styles.rightBtn} onPress={() => setShowPersonalSheet(true)} activeOpacity={0.7}>
-            <Feather name="user" size={26} color="#444444" />
-            <Text style={styles.rightBtnLabel}>개인</Text>
+            <Feather name="user" size={24} color="#0A84FF" />
+            <Text style={[styles.rightBtnLabel, { color: '#0A84FF' }]}>개인</Text>
           </TouchableOpacity>
           {/* 그룹 */}
           <TouchableOpacity style={styles.rightBtn} onPress={() => setShowGroupSheet(true)} activeOpacity={0.7}>
-            <Feather name="users" size={26} color="#444444" />
+            <Feather name="users" size={24} color="#8A8A8E" />
             <Text style={styles.rightBtnLabel}>그룹</Text>
           </TouchableOpacity>
           {/* 귀가 */}
           <TouchableOpacity style={styles.rightBtn} onPress={() => setShowHomeSheet(true)} activeOpacity={0.7}>
-            <Feather name="navigation" size={26} color="#444444" />
+            <Feather name="navigation" size={24} color="#8A8A8E" />
             <Text style={styles.rightBtnLabel}>귀가</Text>
           </TouchableOpacity>
           {/* 설정 */}
           <TouchableOpacity style={styles.rightBtn} onPress={() => setShowSettings(true)} activeOpacity={0.7}>
-            <Feather name="settings" size={26} color="#444444" />
+            <Feather name="settings" size={24} color="#8A8A8E" />
             <Text style={styles.rightBtnLabel}>설정</Text>
           </TouchableOpacity>
         </View>
@@ -456,12 +600,14 @@ export default function MainCalendarScreen() {
       )}
       {showPersonalSheet && (
         <PersonalAllAlarmSheet
-          onClose={() => setShowPersonalSheet(false)}
+          onClose={() => { setShowPersonalSheet(false); setPersonalEditId(undefined); }}
+          initialEditId={personalEditId}
         />
       )}
       {showGroupSheet && (
         <GroupAllAlarmSheet
-          onClose={() => setShowGroupSheet(false)}
+          onClose={() => { setShowGroupSheet(false); setGroupEditId(undefined); }}
+          initialEditId={groupEditId}
           onArrivalPress={(alarm) => {
             setSelectedGroupAlarm(alarm);
             setShowArrivalSheet(true);
@@ -469,7 +615,10 @@ export default function MainCalendarScreen() {
         />
       )}
       {showHomeSheet && (
-        <HomeAllAlarmSheet onClose={() => setShowHomeSheet(false)} />
+        <HomeAllAlarmSheet
+          onClose={() => { setShowHomeSheet(false); setHomeEditId(undefined); }}
+          initialEditId={homeEditId}
+        />
       )}
       {showArrivalSheet && selectedGroupAlarm?.appointmentId && (
         <ArrivalDashboardSheet
@@ -490,33 +639,53 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
   },
-  yearNav: { flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: '#F0F0F0', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
-  alarmTestBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#F0F0F0', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20 },
-  alarmTestBtnText: { fontSize: 12, fontWeight: '500', color: '#888888' },
-  yearText: { fontSize: 15, fontWeight: '500', color: '#1A1A1A' },
+  monthNav: { flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: '#F0F0F0', paddingHorizontal: 6, paddingVertical: 6, borderRadius: 20 },
+  monthNavBtn: { padding: 6 },
+  monthNavText: { fontSize: 16, fontWeight: '700', color: '#1A1A1A', paddingHorizontal: 4 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  devToolBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F0F0F0', alignItems: 'center', justifyContent: 'center' },
   headerIconPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0F0F0', borderRadius: 20, overflow: 'hidden' },
-  headerIconBtn: { paddingHorizontal: 12, paddingVertical: 8 },
+  headerIconBtn: { paddingHorizontal: 10, paddingVertical: 8 },
   headerIconDivider: { width: StyleSheet.hairlineWidth, height: 20, backgroundColor: '#CCCCCC' },
-  calendarArea: { flex: 1 },
-  monthTitleRow: { paddingHorizontal: 20, justifyContent: 'flex-end', paddingBottom: 4 },
-  monthTitle: { fontSize: 34, fontWeight: '800', color: '#1A1A1A' },
+  calendarArea: { height: 380 },
+  statRow: { flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12 },
+  statCard: { flex: 1, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 10, justifyContent: 'space-between', backgroundColor: '#F7F7F8' },
+  statLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  statDot: { width: 7, height: 7, borderRadius: 4 },
+  statLabel: { fontSize: 12, fontWeight: '600' },
+  statCount: { fontSize: 19, fontWeight: '800', marginTop: 4 },
+  statUnit: { fontSize: 12, fontWeight: '500' },
   weekdayRow: { flexDirection: 'row', paddingHorizontal: 4, alignItems: 'center' },
   weekdayText: { width: DAY_WIDTH, textAlign: 'center', fontSize: 12, fontWeight: '500', color: '#AAAAAA' },
-  sundayText: { color: '#FF3B30' },
-  saturdayText: { color: '#007AFF' },
+  sundayText: { color: '#FF453A' },
+  saturdayText: { color: '#0A84FF' },
   weekRow: { flexDirection: 'row' },
   weekBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E0E0E0' },
   dayCell: { width: DAY_WIDTH, paddingTop: 4, alignItems: 'center' },
   dayNumWrap: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
-  todayCircle: { backgroundColor: '#FF3B30' },
+  todayCircle: { backgroundColor: '#FFCE0C' },
   selectedCircle: { backgroundColor: '#1A1A1A' },
   dayNum: { fontSize: 16, fontWeight: '400', color: '#1A1A1A' },
-  todayText: { color: '#FFFFFF', fontWeight: '700' },
+  todayText: { color: '#1A1A1A', fontWeight: '700' },
   selectedText: { color: '#FFFFFF', fontWeight: '700' },
   otherMonthDay: { color: '#C8C8C8' },
   eventBadge: { flexDirection: 'row', alignItems: 'center', borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1, marginTop: 1, maxWidth: DAY_WIDTH - 4, gap: 3 },
   eventDot: { width: 6, height: 6, borderRadius: 3 },
   eventLabel: { fontSize: 9, fontWeight: '500', flexShrink: 1 },
+  upcomingSection: { flex: 1, paddingHorizontal: 20, paddingTop: 4 },
+  upcomingTitle: { fontSize: 15, fontWeight: '700', color: '#1A1A1A', marginBottom: 10 },
+  upcomingEmpty: { fontSize: 13, color: '#AAAAAA', paddingVertical: 8 },
+  upcomingCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: '#FFFFFF', borderRadius: 16, padding: 12, marginBottom: 10,
+    shadowColor: '#141413', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 6, elevation: 2,
+  },
+  upcomingIconChip: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  upcomingInfo: { flex: 1, minWidth: 0, gap: 2 },
+  upcomingCardTitle: { fontSize: 14, fontWeight: '600', color: '#1A1A1A' },
+  upcomingMeta: { fontSize: 12, color: '#8A8A8E' },
+  ddayBadge: { borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },
+  ddayText: { fontSize: 11, fontWeight: '700' },
   bottomBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -529,11 +698,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   todayBtn: { alignItems: 'center', justifyContent: 'center', minWidth: 44 },
-  todayBtnNum: { fontSize: 20, fontWeight: '300', color: '#FF3B30', lineHeight: 24 },
-  todayBtnLabel: { fontSize: 11, color: '#FF3B30', fontWeight: '500' },
-  rightBtns: { flexDirection: 'row', gap: 28, alignItems: 'center' },
-  rightBtn: { alignItems: 'center', gap: 3 },
-  rightBtnLabel: { fontSize: 10, color: '#444444', fontWeight: '500' },
-  alarmCountRow: { flexDirection: 'column', gap: 1, marginTop: 1, alignItems: 'flex-start', paddingLeft: 4 },
-  alarmCountText: { fontSize: 8, fontWeight: '600' },
+  todayBtnNum: { fontSize: 20, fontWeight: '300', color: '#FF453A', lineHeight: 24 },
+  todayBtnLabel: { fontSize: 11, color: '#FF453A', fontWeight: '500' },
+  rightBtns: { flex: 1, flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' },
+  rightBtn: { alignItems: 'center', gap: 4 },
+  rightBtnLabel: { fontSize: 10, fontWeight: '600', color: '#8A8A8E' },
+  dotRow: { flexDirection: 'row', gap: 3, marginTop: 3, height: 5 },
+  dot: { width: 5, height: 5, borderRadius: 2.5 },
 });
