@@ -7,6 +7,10 @@ import type { Href } from 'expo-router';
 export const ROUTES = {
   login: '/login' satisfies Href,
   signUp: '/sign-up' satisfies Href,
+  /** typed routes 재생성 전까지 Href 단언 (경로: `app/(auth)/email-verify.tsx`) */
+  emailVerify: '/email-verify' as Href,
+  /** typed routes 재생성 전까지 Href 단언 (경로: `app/(auth)/password-reset.tsx`) */
+  passwordReset: '/password-reset' as Href,
   /** typed routes 재생성 전까지 Href 단언 (경로: `app/(auth)/home-address-setup.tsx`) */
   homeAddressSetup: '/home-address-setup' as Href,
   leaveTimeSetup: '/leave-time-setup' as Href,

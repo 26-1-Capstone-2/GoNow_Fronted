@@ -27,8 +27,10 @@ import * as Notifications from 'expo-notifications';
 const authApi = createAuthApi();
 
 export default function LoginScreen() {
-  const { goToMainTabs, goToSignUp } = useAppNavigation();
+  const { goToMainTabs, goToSignUp, goToPasswordReset } = useAppNavigation();
   const setToken = useAuthStore((s) => s.setToken);
+  const setRefreshToken = useAuthStore((s) => s.setRefreshToken);
+  const setMemberId = useAuthStore((s) => s.setMemberId);
   const setNickname = useAuthStore((s) => s.setNickname);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -40,6 +42,8 @@ export default function LoginScreen() {
     try {
       const res = await authApi.login({ email, password });
       setToken(res.data.access_token);
+      setRefreshToken(res.data.refresh_token);
+      setMemberId(res.data.member_id);
 
       // 닉네임 저장
       try {
@@ -171,6 +175,11 @@ export default function LoginScreen() {
               : <Text style={styles.loginButtonText}>로그인</Text>
             }
           </TouchableOpacity>
+
+          {/* 비밀번호 찾기 */}
+          <TouchableOpacity style={styles.forgotPasswordButton} onPress={goToPasswordReset}>
+            <Text style={styles.forgotPasswordText}>비밀번호를 잊으셨나요?</Text>
+          </TouchableOpacity>
         </View>
 
         {/* 하단 회원가입 링크 */}
@@ -249,6 +258,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
+  },
+  forgotPasswordButton: {
+    alignItems: 'center',
+    marginTop: 16,
+    paddingVertical: 8,
+  },
+  forgotPasswordText: {
+    fontSize: 13,
+    color: '#888888',
   },
   footer: {
     flexDirection: 'row',

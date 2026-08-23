@@ -18,6 +18,27 @@ export function useAppNavigation() {
     router.push(ROUTES.signUp);
   }, [router]);
 
+  /**
+   * 회원가입 기본정보 입력 완료 후: 이메일 인증 (뒤로가기로 이메일 수정 가능하도록 push).
+   * recovery: true면 "인증 유효시간 만료로 인한 재인증"(leave-time-setup에서 진입) —
+   * 이 경우 EmailVerifyScreen이 성공 시 앞으로(home-address-setup)가 아니라
+   * 뒤로(leave-time-setup)가야 이미 입력한 주소/여유시간을 다시 안 물어봄.
+   */
+  const goToEmailVerify = useCallback(
+    (options?: { recovery?: boolean }) => {
+      router.push({
+        pathname: ROUTES.emailVerify,
+        params: options?.recovery ? { recovery: '1' } : {},
+      } as Href);
+    },
+    [router],
+  );
+
+  /** 로그인 화면에서: 비밀번호 찾기 (뒤로가기로 로그인 화면 복귀 가능하도록 push) */
+  const goToPasswordReset = useCallback(() => {
+    router.push(ROUTES.passwordReset);
+  }, [router]);
+
   const goToMainTabs = useCallback(() => {
     router.replace(ROUTES.mainTabs);
   }, [router]);
@@ -78,6 +99,8 @@ export function useAppNavigation() {
       routes: ROUTES,
       goToLogin,
       goToSignUp,
+      goToEmailVerify,
+      goToPasswordReset,
       goToHomeAddressSetup,
       goToLeaveTimeSetup,
       goToPermissionSetup,
@@ -87,6 +110,6 @@ export function useAppNavigation() {
       replace,
       push,
     }),
-    [goToLogin, goToSignUp, goToHomeAddressSetup, goToLeaveTimeSetup, goToPermissionSetup, goToYearCalendar, goToMainTabs, goBack, replace, push],
+    [goToLogin, goToSignUp, goToEmailVerify, goToPasswordReset, goToHomeAddressSetup, goToLeaveTimeSetup, goToPermissionSetup, goToYearCalendar, goToMainTabs, goBack, replace, push],
   );
 }

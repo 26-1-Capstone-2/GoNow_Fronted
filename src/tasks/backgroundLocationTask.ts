@@ -340,7 +340,8 @@ export function setLastCallTime(key: string, ms: number): Promise<void> {
   });
 }
 
-const BASE_URL = 'https://gonow-api.uk';
+// src/api/client.ts와 동일한 오버라이드 — .env.local의 EXPO_PUBLIC_API_BASE_URL을 따름
+const BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'https://gonow-api.uk';
 
 // nearDestGeofenceTask.ts도 이 헬퍼를 그대로 재사용(EXIT 처리 시 /location 호출)
 // 2026-08-13: 백그라운드에서 오랜만에(지오펜스 EXIT처럼 드물게) 호출할 때, 커넥션 풀에 있던
