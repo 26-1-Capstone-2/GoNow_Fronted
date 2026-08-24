@@ -12,7 +12,8 @@ export type AlarmItem = {
   dest_lat: number;
   dest_lng: number;
   plan_date: string;
-  target_time: string;
+  // 막차 모드(is_last_mode)에서 서버가 아직 계산 전이면 null — 데드라인 모드/개인/그룹은 항상 non-null
+  target_time: string | null;
   departure_alarm_time: string | null;
   transport_type: TransportType;
   is_active: boolean;

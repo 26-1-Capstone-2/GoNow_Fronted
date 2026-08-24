@@ -2,6 +2,7 @@ import * as Location from 'expo-location';
 import { AppState, Platform } from 'react-native';
 import type { JourneyStatus } from '@/src/api/journeys';
 import { useAppointmentStatusStore } from '@/src/store/appointmentStatusStore';
+import { useCalendarStore } from '@/src/store/calendarStore';
 import { getToken } from '@/src/store/authStore';
 import {
   syncStagedAlarms,
@@ -37,6 +38,7 @@ import { enterDepartingGeofenceMode, exitDepartingGeofenceMode } from '@/src/tas
 import { enterMovingGeofenceMode, exitMovingGeofenceMode } from '@/src/tasks/movingGeofenceTask';
 import { enterReadyGeofenceMode, exitReadyGeofenceMode } from '@/src/tasks/readyGeofenceTask';
 import { dlog } from '@/src/utils/deviceLogger';
+import { emitAlarmLocationUpdate } from '@/src/services/alarmEvents';
 import type { KakaoMapTransportMode } from '@/src/utils/kakaoMapDeeplink';
 
 const DEFAULT_INTERVAL = 30;
@@ -406,7 +408,15 @@ class AlarmRunner {
       if (!res.data) { dlog('FOREGROUND', `[포그라운드] /location 응답 data 없음 — journeyId:${this.target.journeyId}`); return; }
       const { journey_status, preparation_time, interval, which_station, departure_alarm_time } = res.data;
       dlog('FOREGROUND', `[포그라운드] /location 응답 — journeyId:${this.target.journeyId} status:${journey_status} interval:${interval} which_station:${which_station} departure_alarm_time:${departure_alarm_time}`);
+      // 지금 떠 있는 알람 목록 화면이 있으면(생성 직후 화면 등) 재조회 없이 즉시 반영하게 알림
+      emitAlarmLocationUpdate({ journeyId: this.target.journeyId, status: journey_status, departureAlarmTime: departure_alarm_time });
       if (interval !== null) {
+        // interval은 서버가 플라스크를 실제로 호출했을 때만 non-null이다(JourneyService.updateLocation
+        // 참고 — 앵커 500m 이탈/최초 수신/MOVING 등). target_time이 바뀔 수 있는 경우도 정확히
+        // 이때뿐이라(막차 모드 재계산), 이 신호에 맞춰서만 재조회한다 — 위 로컬 알림만으론 "목표
+        // 시각" 라벨까지는 못 따라잡으므로(DailyAlarmScreen/MainCalendarScreen 등이 alarmVersion을
+        // 구독해 서버 값으로 완전히 최신화됨), 매 GPS 핑마다가 아니라 실제로 바뀔 수 있는 순간에만.
+        useCalendarStore.getState().bumpAlarmVersion();
         const effectiveInterval = DEBUG_FORCE_INTERVAL_SEC ?? interval;
         dlog('FOREGROUND', `[포그라운드] interval 갱신 — journeyId:${this.target!.journeyId} ${this.intervalSec}s → ${effectiveInterval}s${DEBUG_FORCE_INTERVAL_SEC != null ? `(서버값 ${interval}s 무시, 테스트 강제)` : ''}`);
         this.intervalSec = effectiveInterval;
@@ -498,7 +508,13 @@ class AlarmRunner {
       const { participant_status, appointment_status, estimated_arrival, preparation_time, interval, which_station, departure_alarm_time } = res.data;
       dlog('FOREGROUND', `[포그라운드] /location 응답 — appointmentId:${this.target.appointmentId} participantStatus:${participant_status} appointmentStatus:${appointment_status} interval:${interval} which_station:${which_station} departure_alarm_time:${departure_alarm_time}`);
       useAppointmentStatusStore.getState().setStatus(this.target.appointmentId, appointment_status);
+      // 지금 떠 있는 알람 목록 화면이 있으면(생성 직후 화면 등) 재조회 없이 즉시 반영하게 알림
+      emitAlarmLocationUpdate({ appointmentId: this.target.appointmentId, status: participant_status, departureAlarmTime: departure_alarm_time });
       if (interval !== null) {
+        // pollPersonal과 동일 이유(위 주석 참고) — interval은 서버가 실제로 재계산했을 때만
+        // non-null이므로 이때만 재조회한다. (그룹은 target_time이 방장 고정값이라 GPS로 안
+        // 바뀌지만, 개인/귀가와 동일한 신호에 맞춰 일관되게 유지)
+        useCalendarStore.getState().bumpAlarmVersion();
         const effectiveInterval = DEBUG_FORCE_INTERVAL_SEC ?? interval;
         dlog('FOREGROUND', `[포그라운드] interval 갱신 — appointmentId:${this.target!.appointmentId} ${this.intervalSec}s → ${effectiveInterval}s${DEBUG_FORCE_INTERVAL_SEC != null ? `(서버값 ${interval}s 무시, 테스트 강제)` : ''}`);
         this.intervalSec = effectiveInterval;

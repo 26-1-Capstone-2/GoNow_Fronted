@@ -1,11 +1,14 @@
 import AddressSearchView, { SearchResult } from '@/src/components/common/AddressSearchView';
 import MiniCalendar from '@/src/components/common/MiniCalendar';
+import { SegmentedToggle } from '@/src/components/common/SegmentedToggle';
 import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
+import AlarmTimeBlock from '@/src/components/common/AlarmTimeBlock';
 import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createAppointmentsApi } from '@/src/api/appointments';
 import { alarmService } from '@/src/services/alarmService';
 import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
 import { toTransportMode, canNavigateAlarm, handleNavigateAlarm } from '@/src/utils/kakaoMapDeeplink';
+import { getAlarmTimeDisplay } from '@/src/utils/alarmTimeDisplay';
 import { targetTimeToAmpmHourMinute } from '@/src/api/journeys';
 import { createMembersApi } from '@/src/api/members';
 import { usePlaces } from '@/src/hooks/usePlaces';
@@ -76,6 +79,7 @@ interface GroupAlarm {
   date: string;
   isCurrentUserHost?: boolean;
   myStatus?: string;
+  departureAlarmTime: string | null;
 }
 
 function toTargetTime(date: string, ampm: string, hour: string, minute: string): string {
@@ -105,6 +109,7 @@ function fromAlarmItem(item: AlarmItem): GroupAlarm {
     transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
     date: item.plan_date,
     myStatus: item.my_status,
+    departureAlarmTime: item.departure_alarm_time,
   };
 }
 
@@ -123,6 +128,7 @@ const DEFAULT_ALARM: GroupAlarm = {
   isArrivalActive: false,
   transport: 'public' as Transport,
   date: '',
+  departureAlarmTime: null,
 };
 
 type ViewType = 'list' | 'edit' | 'place' | 'addChoice' | 'join' | 'date';
@@ -169,10 +175,15 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress, initialEdi
 
   useEffect(() => { loadAlarms(); }, [loadAlarms, alarmVersion]);
 
+  const consumedEditIdRef = useRef<number | undefined>(undefined);
   useEffect(() => {
     if (!initialEditId || alarms.length === 0) return;
+    if (consumedEditIdRef.current === initialEditId) return;
     const match = alarms.find((a) => a.appointmentId === initialEditId);
-    if (match) openEdit(match);
+    if (match) {
+      consumedEditIdRef.current = initialEditId;
+      openEdit(match);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialEditId, alarms]);
 
@@ -188,7 +199,10 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress, initialEdi
   }, [onClose]);
 
   const openAdd = () => { setView('addChoice'); };
-  const openNewGroup = () => { setEditAlarm(DEFAULT_ALARM); setView('edit'); };
+  const openNewGroup = () => {
+    setEditAlarm({ ...DEFAULT_ALARM, ...targetTimeToAmpmHourMinute(new Date().toISOString()), minute: '00' });
+    setView('edit');
+  };
   const handleJoin = async () => {
     if (inviteCode.trim().length === 0) { setInviteError('초대코드를 입력해주세요.'); return; }
     if (!(await checkCoreAlarmPermissions())) return;
@@ -572,19 +586,21 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress, initialEdi
                   <View style={[styles.alarmInfo, alarm.isArrivalActive && { opacity: 0.45 }]}>
                     {alarm.date ? <Text style={styles.alarmDate}>{formatCardDate(alarm.date)}</Text> : null}
                     <Text style={styles.alarmPlace}>{alarm.place}</Text>
-                    <View style={styles.alarmMeta}>
-                      <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.hour}:{alarm.minute} 까지</Text>
-                      {alarm.transport === 'public'
-                        ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
-                        : <FontAwesome5 name="car-side" size={13} color="#FF9F0A" />
-                      }
-                    </View>
+                    <AlarmTimeBlock
+                      display={getAlarmTimeDisplay({
+                        targetAmpm: alarm.ampm,
+                        targetHour: alarm.hour,
+                        targetMinute: alarm.minute,
+                        departureAlarmTime: alarm.departureAlarmTime,
+                        planDate: alarm.date,
+                        myStatus: alarm.myStatus,
+                      })}
+                      trailing={alarm.transport === 'public'
+                        ? <MaterialCommunityIcons name="bus-side" size={15} color="#FF9F0A" />
+                        : <FontAwesome5 name="car-side" size={13} color="#FF9F0A" />}
+                    />
                   </View>
                   <View style={styles.cardRight}>
-                    <View style={styles.memberBadge}>
-                      <Feather name="users" size={11} color="#555555" />
-                      <Text style={styles.memberCount}>{alarm.members.length}명</Text>
-                    </View>
                     <TouchableOpacity
                       style={[styles.dashboardBtn, alarm.isArrivalActive && styles.dashboardBtnActive]}
                       onPress={() => onArrivalPress?.(alarm)}
@@ -654,7 +670,7 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress, initialEdi
               style={[styles.timeCard, editAlarm.isCurrentUserHost === false && styles.pickerDisabled]}
               pointerEvents={editAlarm.isCurrentUserHost === false ? 'none' : 'auto'}
             >
-              <Text style={styles.timeCardLabel}>출발 시각</Text>
+              <Text style={styles.timeCardLabel}>목표 시각</Text>
               <View style={styles.pickerContainer}>
                 <Picker
                   selectedValue={editAlarm.ampm}
@@ -699,7 +715,7 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress, initialEdi
                       </View>
                       <View style={styles.memberRight}>
                         {member.transport === 'public' && (
-                          <MaterialCommunityIcons name="bus-side" size={20} color="#4A90D9" />
+                          <MaterialCommunityIcons name="bus-side" size={20} color="#FF9F0A" />
                         )}
                         {member.transport === 'car' && (
                           <FontAwesome5 name="car-side" size={18} color="#FF9F0A" />
@@ -735,22 +751,14 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress, initialEdi
             {/* 이동수단 */}
             <View style={styles.fieldGroup}>
               <Text style={styles.fieldGroupLabel}>이동 수단</Text>
-              <View style={styles.segmentTrack}>
-                <TouchableOpacity
-                  style={[styles.segmentBtn, editAlarm.transport === 'public' && styles.segmentBtnSelected]}
-                  onPress={() => setEditAlarm((prev) => ({ ...prev, transport: 'public' }))}
-                >
-                  <MaterialCommunityIcons name="bus-side" size={16} color={editAlarm.transport === 'public' ? '#1A1A1A' : '#8A8A8E'} />
-                  <Text style={[styles.segmentText, editAlarm.transport === 'public' && styles.segmentTextSelected]}>대중교통</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.segmentBtn, editAlarm.transport === 'car' && styles.segmentBtnSelected]}
-                  onPress={() => setEditAlarm((prev) => ({ ...prev, transport: 'car' }))}
-                >
-                  <FontAwesome5 name="car-side" size={14} color={editAlarm.transport === 'car' ? '#1A1A1A' : '#8A8A8E'} />
-                  <Text style={[styles.segmentText, editAlarm.transport === 'car' && styles.segmentTextSelected]}>자가용</Text>
-                </TouchableOpacity>
-              </View>
+              <SegmentedToggle
+                value={editAlarm.transport}
+                onChange={(v) => setEditAlarm((prev) => ({ ...prev, transport: v }))}
+                options={[
+                  { value: 'public', label: '대중교통', icon: (sel) => <MaterialCommunityIcons name="bus-side" size={16} color={sel ? '#1A1A1A' : '#8A8A8E'} /> },
+                  { value: 'car', label: '자가용', icon: (sel) => <FontAwesome5 name="car-side" size={14} color={sel ? '#1A1A1A' : '#8A8A8E'} /> },
+                ]}
+              />
             </View>
 
             {/* 초대코드 */}
@@ -955,11 +963,7 @@ const styles = StyleSheet.create({
   alarmInfo: { flex: 1, marginRight: 8, justifyContent: 'center' },
   alarmDate: { fontSize: 11, fontWeight: '500', color: '#FF453A', marginBottom: 3 },
   alarmPlace: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 5 },
-  alarmMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  alarmDeadline: { fontSize: 13, fontWeight: '500', color: '#555555' },
   cardRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  memberBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#E8E8E8', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 10 },
-  memberCount: { fontSize: 11, color: '#555555', fontWeight: '500' },
   dashboardBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center' },
   dashboardBtnActive: { backgroundColor: '#92DEFE' },
   navigateBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#EAF2FB', alignItems: 'center', justifyContent: 'center' },
@@ -983,11 +987,6 @@ const styles = StyleSheet.create({
   fieldValue: { flex: 1, fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
   timeCard: { backgroundColor: '#F7F7F8', borderRadius: 18, padding: 12, marginBottom: 16 },
   timeCardLabel: { fontSize: 12, fontWeight: '600', color: '#8A8A8E', textAlign: 'center' },
-  segmentTrack: { flexDirection: 'row', backgroundColor: '#F0F0F1', borderRadius: 16, padding: 4, gap: 4 },
-  segmentBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 11 },
-  segmentBtnSelected: { backgroundColor: '#FFCE0C' },
-  segmentText: { fontSize: 13, fontWeight: '600', color: '#8A8A8E' },
-  segmentTextSelected: { color: '#1A1A1A', fontWeight: '700' },
   section: { marginBottom: 16 },
   sectionTitle: { fontSize: 15, fontWeight: '600', color: '#1A1A1A', marginBottom: 8 },
   optionBox: { backgroundColor: '#F5F5F5', borderRadius: 12, paddingHorizontal: 16 },

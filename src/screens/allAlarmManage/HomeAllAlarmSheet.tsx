@@ -1,12 +1,16 @@
 import AddressSearchView, { SearchResult } from '@/src/components/common/AddressSearchView';
 import MiniCalendar from '@/src/components/common/MiniCalendar';
+import { SegmentedToggle } from '@/src/components/common/SegmentedToggle';
 import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
+import AlarmTimeBlock from '@/src/components/common/AlarmTimeBlock';
 import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
-import { createJourneysApi, ensureFutureDateTime, HomeJourneyPayload, JourneyDetail, maskToRepeatDays, repeatDaysToMask, targetTimeToAmpmHourMinute, toTargetTime } from '@/src/api/journeys';
+import { createJourneysApi, ensureFutureDateTime, getRepeatLabel, HomeJourneyPayload, JourneyDetail, maskToRepeatDays, nextOccurrenceDate, repeatDaysToMask, targetTimeToAmpmHourMinute, toTargetTime } from '@/src/api/journeys';
 import { alarmService } from '@/src/services/alarmService';
 import { extractApiErrorMessage } from '@/src/utils/notifications';
 import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
 import { toTransportMode, canNavigateAlarm, handleNavigateAlarm } from '@/src/utils/kakaoMapDeeplink';
+import { getAlarmTimeDisplay } from '@/src/utils/alarmTimeDisplay';
+import { subscribeAlarmLocationUpdate } from '@/src/services/alarmEvents';
 import { usePlaces } from '@/src/hooks/usePlaces';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -32,6 +36,12 @@ const REPEAT_DAYS = [
 const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));
 const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
 
+function addDaysStr(dateStr: string, days: number): string {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 type AlarmMode = 'lastTrain' | 'deadline';
 type Transport = 'public' | 'car';
 type ViewType = 'list' | 'edit' | 'homePlace' | 'date';
@@ -53,6 +63,9 @@ interface HomeAlarm {
   date: string;
   isActive?: boolean;
   myStatus?: string;
+  departureAlarmTime: string | null;
+  // 막차 모드 target_time 확정 여부(getAlarmTimeDisplay의 hasTargetTime으로 전달)
+  targetTimeKnown?: boolean;
 }
 
 interface Props { onClose: () => void; initialEditId?: number; }
@@ -74,6 +87,8 @@ function fromAlarmItem(item: AlarmItem): HomeAlarm {
     date: item.plan_date,
     isActive: ['MOVING'].includes(item.my_status),
     myStatus: item.my_status,
+    departureAlarmTime: item.departure_alarm_time,
+    targetTimeKnown: item.target_time != null,
   };
 }
 
@@ -92,6 +107,8 @@ function fromJourneyDetail(d: JourneyDetail, planDate: string): HomeAlarm {
     enabled: d.is_active,
     transport: d.transport_type === 'TRANSIT' ? 'public' : 'car',
     date: planDate,
+    departureAlarmTime: null,
+    targetTimeKnown: d.target_time != null,
   };
 }
 
@@ -104,33 +121,31 @@ function formatCardDate(dateStr: string): string {
   return `${d.getMonth() + 1}월 ${d.getDate()}일 ${DAY_LABEL[d.getDay()]}요일`;
 }
 
-function getRepeatLabel(repeat: string[]): string {
-  if (repeat.includes('안함') || repeat.length === 0) return '안함';
-  const weekdays = ['월요일마다', '화요일마다', '수요일마다', '목요일마다', '금요일마다'];
-  const weekend = ['토요일마다', '일요일마다'];
-  const all = [...weekdays, ...weekend];
-  if (all.every((d) => repeat.includes(d))) return '매일';
-  if (weekdays.every((d) => repeat.includes(d)) && repeat.length === weekdays.length) return '주중';
-  if (weekend.every((d) => repeat.includes(d)) && repeat.length === weekend.length) return '주말';
-  return repeat.map((r) => r.replace('요일마다', '')).join(', ');
-}
-
-const todayStr = (() => {
+// 이 화면은 백그라운드 GPS 추적 때문에 자정을 넘겨서도 계속 떠 있을 수 있는 앱(모듈은 앱
+// 시작/마지막 리로드 시점에 딱 한 번만 평가됨)이라, 모듈 최상단 상수로 고정해두면 자정이
+// 지나도 값이 안 바뀌는 버그가 생긴다(2026-08-25 발견 — 막차 "이미 지남" 판정에 이 값을
+// 쓰는데, 날짜가 하루 밀려서 판정이 틀어질 수 있었음). 호출 시점마다 새로 계산한다.
+function getTodayStr(): string {
   const t = new Date();
   return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
-})();
+}
+
+function isRepeatingAlarm(repeat: string[]): boolean {
+  return !repeat.includes('안함') && repeat.length > 0;
+}
 
 const DEFAULT_ALARM: HomeAlarm = {
   id: '', mode: 'lastTrain', ampm: '오후', hour: '11', minute: '00',
   home_name: '', home_address: '', home_lat: undefined, home_lng: undefined,
-  repeat: ['안함'], enabled: true, transport: 'public', date: todayStr,
+  repeat: ['안함'], enabled: true, transport: 'public', date: '',
+  departureAlarmTime: null,
 };
 
 export default function HomeAllAlarmSheet({ onClose, initialEditId }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const insets = useSafeAreaInsets();
   const snapPoints = useMemo(() => ['88%'], []);
-  const { bumpAlarmVersion } = useCalendarStore();
+  const { bumpAlarmVersion, alarmVersion } = useCalendarStore();
   const { places, searchKey, loadPlaces, savePlace, deletePlace } = usePlaces('HOME');
 
   const [view, setView] = useState<ViewType>('list');
@@ -147,19 +162,42 @@ export default function HomeAllAlarmSheet({ onClose, initialEditId }: Props) {
       const res = await alarmsApi.getAlarmsByType('HOME');
       setAlarms((res.data ?? []).map(fromAlarmItem));
     } catch {}
-  }, []);
+    // alarmVersion 의존 이유: alarmService가 GPS 응답을 받을 때마다(target_time 등 로컬 패치로는
+    // 못 따라잡는 값 포함) 이 값을 올려서 여기서도 다시 불러오게 한다.
+  }, [alarmVersion]);
 
   useEffect(() => { loadAlarms(); }, [loadAlarms]);
 
+  // 생성/수정 직후엔 서버가 아직 GPS 응답을 못 받아서 departureAlarmTime이 비어있는 채로
+  // 카드가 렌더된다 — alarmService가 실제 GPS 응답을 받는 시점에 재조회 없이 바로 반영한다.
+  useEffect(() => {
+    return subscribeAlarmLocationUpdate((update) => {
+      if (update.journeyId == null) return;
+      setAlarms((prev) => prev.map((a) =>
+        a.journeyId === update.journeyId
+          ? { ...a, departureAlarmTime: update.departureAlarmTime, myStatus: update.status }
+          : a
+      ));
+    });
+  }, []);
+
+  const consumedEditIdRef = useRef<number | undefined>(undefined);
   useEffect(() => {
     if (!initialEditId || alarms.length === 0) return;
+    if (consumedEditIdRef.current === initialEditId) return;
     const match = alarms.find((a) => a.journeyId === initialEditId);
-    if (match) openEdit(match);
+    if (match) {
+      consumedEditIdRef.current = initialEditId;
+      openEdit(match);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialEditId, alarms]);
 
   const handleSheetChange = useCallback((index: number) => { if (index === -1) onClose(); }, [onClose]);
-  const openAdd = () => { setEditAlarm(DEFAULT_ALARM); setView('edit'); };
+  const openAdd = () => {
+    setEditAlarm({ ...DEFAULT_ALARM, ...targetTimeToAmpmHourMinute(new Date().toISOString()), minute: '00', date: getTodayStr() });
+    setView('edit');
+  };
 
   const openEdit = async (alarm: HomeAlarm) => {
     if (alarm.isActive) return;
@@ -191,38 +229,55 @@ export default function HomeAllAlarmSheet({ onClose, initialEditId }: Props) {
     setView('edit');
   };
 
-  const handleSave = async () => {
-    if (!editAlarm.home_name) { Alert.alert('귀가지를 선택해주세요.'); return; }
-    if (!isEditMode && (!editAlarm.home_lat || !editAlarm.home_lng)) { Alert.alert('귀가지를 선택해주세요.'); return; }
-    if (!editAlarm.date) { Alert.alert('날짜를 선택해주세요.'); return; }
-    if (!(await checkCoreAlarmPermissions())) return;
+  // 실제 저장 API 호출 — baseDate가 이 저장의 plan_date 기준이 된다(평소엔 editAlarm.date,
+  // "내일 막차로 생성" 확인 후엔 그 다음 날짜). lastTrainAlreadyMissed는 baseDate 기준으로
+  // 다시 판정되므로, baseDate가 이미 내일이면 자연히 통과한다.
+  const saveWithBaseDate = async (baseDate: string) => {
     setSaving(true);
     try {
       const rawTime = editAlarm.mode === 'lastTrain'
-        ? `${editAlarm.date}T00:00:00`
-        : toTargetTime(editAlarm.date, editAlarm.ampm, editAlarm.hour, editAlarm.minute);
-      const isPast = new Date(rawTime) <= new Date();
+        ? `${baseDate}T00:00:00`
+        : toTargetTime(baseDate, editAlarm.ampm, editAlarm.hour, editAlarm.minute);
       const hasRepeat = !editAlarm.repeat.includes('안함') && editAlarm.repeat.length > 0;
-      if (isPast && !hasRepeat && editAlarm.mode === 'deadline') {
-        Alert.alert('시간 오류', '이미 지난 시간입니다. 시간을 다시 설정해주세요.');
-        setSaving(false);
-        return;
-      }
+      const repeatMask = repeatDaysToMask(editAlarm.repeat);
       const commonFields = {
         dest_name: editAlarm.home_name,
         dest_address: editAlarm.home_address,
         dest_lat: editAlarm.home_lat!,
         dest_lng: editAlarm.home_lng!,
-        repeat_days: repeatDaysToMask(editAlarm.repeat),
+        repeat_days: repeatMask,
       };
 
       let payload: HomeJourneyPayload;
       if (editAlarm.mode === 'lastTrain') {
-        payload = { is_last_mode: true, plan_date: editAlarm.date, ...commonFields };
+        // 막차 모드는 "자정이 지났는지"가 아니라 서버(validateLastTrainNotAlreadyMissed)와
+        // 동일한 기준으로 판단한다 — 과거 날짜이거나, 오늘인데 막차 탐색 시간대(23시~다음날 01시)를
+        // 넘긴 새벽(01시~day-boundary-hour) 구간이면 오늘 밤 막차는 확정적으로 이미 지난 것이다.
+        const now = new Date();
+        const todayStr = getTodayStr();
+        const lastTrainAlreadyMissed = baseDate < todayStr
+          || (baseDate === todayStr && now.getHours() >= 1 && now.getHours() < 4);
+        if (lastTrainAlreadyMissed && !hasRepeat) {
+          // handleSave가 이 경우엔 이미 "내일로 생성" 확인 절차를 거쳐서 호출하므로 여기까지
+          // 오면 안 되지만, 방어적으로 동일한 에러를 유지한다.
+          Alert.alert('시간 오류', '오늘 밤 막차는 이미 지났습니다. 날짜를 다시 설정해주세요.');
+          setSaving(false);
+          return;
+        }
+        const plan_date = lastTrainAlreadyMissed && hasRepeat
+          ? ensureFutureDateTime(baseDate, rawTime, repeatMask).plan_date
+          : baseDate;
+        payload = { is_last_mode: true, plan_date, ...commonFields };
       } else {
+        const isPast = new Date(rawTime) <= new Date();
+        if (isPast && !hasRepeat) {
+          Alert.alert('시간 오류', '이미 지난 시간입니다. 시간을 다시 설정해주세요.');
+          setSaving(false);
+          return;
+        }
         const { plan_date, target_time } = isPast && hasRepeat
-          ? ensureFutureDateTime(editAlarm.date, rawTime)
-          : { plan_date: editAlarm.date, target_time: rawTime };
+          ? ensureFutureDateTime(baseDate, rawTime, repeatMask)
+          : { plan_date: baseDate, target_time: rawTime };
         payload = {
           is_last_mode: false,
           plan_date,
@@ -253,6 +308,36 @@ export default function HomeAllAlarmSheet({ onClose, initialEditId }: Props) {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSave = async () => {
+    if (!editAlarm.home_name) { Alert.alert('귀가지를 선택해주세요.'); return; }
+    if (!isEditMode && (!editAlarm.home_lat || !editAlarm.home_lng)) { Alert.alert('귀가지를 선택해주세요.'); return; }
+    if (!editAlarm.date) { Alert.alert('날짜를 선택해주세요.'); return; }
+    if (!(await checkCoreAlarmPermissions())) return;
+
+    const hasRepeat = !editAlarm.repeat.includes('안함') && editAlarm.repeat.length > 0;
+    if (editAlarm.mode === 'lastTrain' && !hasRepeat) {
+      const now = new Date();
+      const todayStr = getTodayStr();
+      const lastTrainAlreadyMissed = editAlarm.date < todayStr
+        || (editAlarm.date === todayStr && now.getHours() >= 1 && now.getHours() < 4);
+      if (lastTrainAlreadyMissed) {
+        // 버그47 UX 개선 — 무조건 에러로 막고 날짜를 직접 다시 고르게 하는 대신, 바로 다음
+        // 날짜(내일)로 생성할지 물어본다. 반복 알람은 이미 ensureFutureDateTime이 자동으로
+        // 다음 발생일을 찾아주므로 이 확인 절차가 필요 없다(!hasRepeat인 경우만 해당).
+        Alert.alert(
+          '시간 오류',
+          '오늘 밤 막차는 이미 지났습니다. 내일 막차로 생성하시겠습니까?',
+          [
+            { text: '취소', style: 'cancel' },
+            { text: '내일로 생성', onPress: () => { void saveWithBaseDate(addDaysStr(editAlarm.date, 1)); } },
+          ],
+        );
+        return;
+      }
+    }
+    await saveWithBaseDate(editAlarm.date);
   };
 
   const handleDelete = async () => {
@@ -328,7 +413,22 @@ export default function HomeAllAlarmSheet({ onClose, initialEditId }: Props) {
             {[...alarms].sort((a, b) => {
               if (!a.date) return 1; if (!b.date) return -1;
               return a.date.localeCompare(b.date);
-            }).map((alarm) => (
+            }).map((alarm) => {
+              const display = getAlarmTimeDisplay({
+                targetAmpm: alarm.ampm,
+                targetHour: alarm.hour,
+                targetMinute: alarm.minute,
+                departureAlarmTime: alarm.departureAlarmTime,
+                planDate: nextOccurrenceDate(alarm.date, repeatDaysToMask(alarm.repeat)),
+                isLastMode: alarm.mode === 'lastTrain',
+                hasTargetTime: alarm.targetTimeKnown,
+                isRepeating: isRepeatingAlarm(alarm.repeat),
+                myStatus: alarm.myStatus,
+              });
+              // MOVING은 편집 자체를 막고(alarm.isActive), 도착 완료는 편집은 막지 않되
+              // DailyAlarmScreen과 동일하게 시각적으로만 흐리게 표시한다.
+              const dimmed = alarm.isActive || display.state === 'arrived';
+              return (
               <SwipeableAlarmCard key={alarm.id} onDelete={async () => {
                 if (alarm.journeyId) {
                   try {
@@ -349,25 +449,24 @@ export default function HomeAllAlarmSheet({ onClose, initialEditId }: Props) {
                     }
                     openEdit(alarm);
                   }} activeOpacity={0.7}>
-                  <View style={[styles.typeChip, alarm.isActive && { opacity: 0.45 }]}>
+                  <View style={[styles.typeChip, dimmed && { opacity: 0.45 }]}>
                     <Feather name="navigation" size={17} color="#30D158" />
                   </View>
-                  <View style={[styles.alarmInfo, alarm.isActive && { opacity: 0.45 }]}>
+                  <View style={[styles.alarmInfo, dimmed && { opacity: 0.45 }]}>
                     {alarm.date ? <Text style={styles.alarmDate}>{formatCardDate(alarm.date)}</Text> : null}
                     <Text style={styles.alarmPlace}>{alarm.home_name}</Text>
-                    <View style={styles.alarmMeta}>
-                      {alarm.mode === 'lastTrain'
-                        ? <Text style={styles.alarmDeadline}>막차 기준</Text>
-                        : <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.hour}:{alarm.minute} 까지</Text>
-                      }
-                      {alarm.mode === 'lastTrain' || alarm.transport === 'public'
-                        ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
-                        : <FontAwesome5 name="car-side" size={13} color="#30D158" />
-                      }
-                      {getRepeatLabel(alarm.repeat) !== '안함' && (
-                        <Text style={styles.repeatLabel}>· {getRepeatLabel(alarm.repeat)}</Text>
-                      )}
-                    </View>
+                    <AlarmTimeBlock
+                      display={display}
+                      trailing={<>
+                        {alarm.mode === 'lastTrain' || alarm.transport === 'public'
+                          ? <MaterialCommunityIcons name="bus-side" size={15} color="#30D158" />
+                          : <FontAwesome5 name="car-side" size={13} color="#30D158" />
+                        }
+                        {getRepeatLabel(alarm.repeat) !== '안함' && (
+                          <Text style={styles.repeatLabel}>· {getRepeatLabel(alarm.repeat)}</Text>
+                        )}
+                      </>}
+                    />
                   </View>
                   <View style={styles.cardRight}>
                     <TouchableOpacity
@@ -384,7 +483,8 @@ export default function HomeAllAlarmSheet({ onClose, initialEditId }: Props) {
                   </View>
                 </TouchableOpacity>
               </SwipeableAlarmCard>
-            ))}
+              );
+            })}
           </BottomSheetScrollView>
           <TouchableOpacity style={[styles.fab, { bottom: 24 + insets.bottom }]} onPress={openAdd} activeOpacity={0.85}>
             <Feather name="plus" size={24} color="#1A1A1A" />
@@ -406,20 +506,14 @@ export default function HomeAllAlarmSheet({ onClose, initialEditId }: Props) {
           <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             <View style={styles.fieldGroup}>
               <Text style={styles.fieldGroupLabel}>기준</Text>
-              <View style={styles.segmentTrack}>
-                <TouchableOpacity
-                  style={[styles.segmentBtn, editAlarm.mode === 'lastTrain' && styles.segmentBtnSelected]}
-                  onPress={() => setEditAlarm((prev) => ({ ...prev, mode: 'lastTrain' }))}
-                >
-                  <Text style={[styles.segmentText, editAlarm.mode === 'lastTrain' && styles.segmentTextSelected]}>막차 기준</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.segmentBtn, editAlarm.mode === 'deadline' && styles.segmentBtnSelected]}
-                  onPress={() => setEditAlarm((prev) => ({ ...prev, mode: 'deadline' }))}
-                >
-                  <Text style={[styles.segmentText, editAlarm.mode === 'deadline' && styles.segmentTextSelected]}>직접 설정</Text>
-                </TouchableOpacity>
-              </View>
+              <SegmentedToggle
+                value={editAlarm.mode}
+                onChange={(v) => setEditAlarm((prev) => ({ ...prev, mode: v }))}
+                options={[
+                  { value: 'lastTrain', label: '막차' },
+                  { value: 'deadline', label: '데드라인' },
+                ]}
+              />
             </View>
 
             <TouchableOpacity style={styles.fieldRow} onPress={() => setView('date')} activeOpacity={0.7}>
@@ -435,7 +529,7 @@ export default function HomeAllAlarmSheet({ onClose, initialEditId }: Props) {
               </View>
             ) : (
               <View style={styles.timeCard}>
-                <Text style={styles.timeCardLabel}>출발 시각</Text>
+                <Text style={styles.timeCardLabel}>목표 시각</Text>
                 <View style={styles.pickerContainer}>
                   <Picker selectedValue={editAlarm.ampm} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, ampm: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
                     <Picker.Item label="오전" value="오전" color="#1A1A1A" /><Picker.Item label="오후" value="오후" color="#1A1A1A" />
@@ -462,22 +556,14 @@ export default function HomeAllAlarmSheet({ onClose, initialEditId }: Props) {
             {editAlarm.mode === 'deadline' && (
               <View style={styles.fieldGroup}>
                 <Text style={styles.fieldGroupLabel}>이동 수단</Text>
-                <View style={styles.segmentTrack}>
-                  <TouchableOpacity
-                    style={[styles.segmentBtn, editAlarm.transport === 'public' && styles.segmentBtnSelected]}
-                    onPress={() => setEditAlarm((prev) => ({ ...prev, transport: 'public' }))}
-                  >
-                    <MaterialCommunityIcons name="bus-side" size={16} color={editAlarm.transport === 'public' ? '#1A1A1A' : '#8A8A8E'} />
-                    <Text style={[styles.segmentText, editAlarm.transport === 'public' && styles.segmentTextSelected]}>대중교통</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.segmentBtn, editAlarm.transport === 'car' && styles.segmentBtnSelected]}
-                    onPress={() => setEditAlarm((prev) => ({ ...prev, transport: 'car' }))}
-                  >
-                    <FontAwesome5 name="car-side" size={14} color={editAlarm.transport === 'car' ? '#1A1A1A' : '#8A8A8E'} />
-                    <Text style={[styles.segmentText, editAlarm.transport === 'car' && styles.segmentTextSelected]}>자가용</Text>
-                  </TouchableOpacity>
-                </View>
+                <SegmentedToggle
+                  value={editAlarm.transport}
+                  onChange={(v) => setEditAlarm((prev) => ({ ...prev, transport: v }))}
+                  options={[
+                    { value: 'public', label: '대중교통', icon: (sel) => <MaterialCommunityIcons name="bus-side" size={16} color={sel ? '#1A1A1A' : '#8A8A8E'} /> },
+                    { value: 'car', label: '자가용', icon: (sel) => <FontAwesome5 name="car-side" size={14} color={sel ? '#1A1A1A' : '#8A8A8E'} /> },
+                  ]}
+                />
               </View>
             )}
 
@@ -576,8 +662,6 @@ const styles = StyleSheet.create({
   navigateBtnDisabled: { backgroundColor: '#EEEEEE' },
   alarmDate: { fontSize: 11, fontWeight: '500', color: '#FF453A', marginBottom: 3 },
   alarmPlace: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 5 },
-  alarmMeta: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
-  alarmDeadline: { fontSize: 13, fontWeight: '500', color: '#555555' },
   repeatLabel: { fontSize: 12, color: '#888888' },
   lastTrainInfo: { alignItems: 'center', paddingVertical: 24, backgroundColor: '#F7F7F8', borderRadius: 16, marginBottom: 16 },
   lastTrainBig: { fontSize: 36, fontWeight: '700', color: '#1A1A1A', marginBottom: 10 },
@@ -599,11 +683,6 @@ const styles = StyleSheet.create({
   dayPillSelected: { backgroundColor: '#FFCE0C' },
   dayPillText: { fontSize: 13, fontWeight: '700', color: '#8A8A8E' },
   dayPillTextSelected: { color: '#1A1A1A' },
-  segmentTrack: { flexDirection: 'row', backgroundColor: '#F0F0F1', borderRadius: 16, padding: 4, gap: 4 },
-  segmentBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 11 },
-  segmentBtnSelected: { backgroundColor: '#FFCE0C' },
-  segmentText: { fontSize: 13, fontWeight: '600', color: '#8A8A8E' },
-  segmentTextSelected: { color: '#1A1A1A', fontWeight: '700' },
   deleteContainer: { alignItems: 'center', marginTop: 8 },
   deleteButton: { backgroundColor: '#FF453A', borderRadius: 24, paddingVertical: 14, paddingHorizontal: 48 },
   deleteButtonText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },

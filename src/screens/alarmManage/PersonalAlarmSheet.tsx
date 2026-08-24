@@ -1,6 +1,5 @@
 import AddressSearchView, { SearchResult } from '@/src/components/common/AddressSearchView';
-import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
-import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
+import { SegmentedToggle } from '@/src/components/common/SegmentedToggle';
 import { createJourneysApi, ensureFutureDateTime, JourneyDetail, maskToRepeatDays, PersonalJourneyPayload, repeatDaysToMask, targetTimeToAmpmHourMinute, toTargetTime } from '@/src/api/journeys';
 import { alarmService } from '@/src/services/alarmService';
 import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
@@ -11,39 +10,17 @@ import { Feather, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icon
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ActivityIndicator,
   Alert,
   Platform,
   StyleSheet,
-  Switch,
   Text,
-  ToastAndroid,
   TouchableOpacity,
   View,
 } from 'react-native';
 
 const journeysApi = createJourneysApi();
-const alarmsApi = createAlarmsApi();
-
-function fromAlarmItem(item: AlarmItem): Alarm {
-  const { ampm, hour, minute } = targetTimeToAmpmHourMinute(item.target_time);
-  return {
-    id: String(item.journey_id),
-    journeyId: item.journey_id ?? undefined,
-    ampm, hour, minute,
-    dest_name: item.dest_name,
-    dest_address: '',
-    dest_lat: item.dest_lat,
-    dest_lng: item.dest_lng,
-    repeat: maskToRepeatDays(item.repeat_days ?? 0),
-    enabled: item.is_active,
-    transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
-    isActive: ['MOVING'].includes(item.my_status),
-    myStatus: item.my_status,
-  };
-}
 
 function fromJourneyDetail(d: JourneyDetail): Alarm {
   const { ampm, hour, minute } = targetTimeToAmpmHourMinute(d.target_time);
@@ -61,7 +38,6 @@ function fromJourneyDetail(d: JourneyDetail): Alarm {
   };
 }
 
-const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
 const REPEAT_DAYS = [
   { short: '월', full: '월요일마다' },
   { short: '화', full: '화요일마다' },
@@ -89,13 +65,11 @@ interface Alarm {
   repeat: string[];
   enabled: boolean;
   transport: Transport;
-  isActive?: boolean;
-  myStatus?: string;
 }
 
 interface Props {
   onClose: () => void;
-  initialMode?: 'add' | 'edit';
+  initialMode: 'add' | 'edit';
   editJourneyId?: number;
   initialAlarm?: any;
 }
@@ -106,61 +80,29 @@ const DEFAULT_ALARM: Alarm = {
   repeat: ['안함'], enabled: true, transport: 'public',
 };
 
-type ViewType = 'list' | 'edit' | 'place';
-
-function getRepeatLabel(repeat: string[]): string {
-  if (repeat.includes('안함') || repeat.length === 0) return '안함';
-  const weekdays = ['월요일마다', '화요일마다', '수요일마다', '목요일마다', '금요일마다'];
-  const weekend = ['토요일마다', '일요일마다'];
-  const all = [...weekdays, ...weekend];
-  if (all.every((d) => repeat.includes(d))) return '매일';
-  if (weekdays.every((d) => repeat.includes(d)) && repeat.length === weekdays.length) return '주중';
-  if (weekend.every((d) => repeat.includes(d)) && repeat.length === weekend.length) return '주말';
-  return repeat.map((r) => r.replace('요일마다', '')).join(', ');
-}
+type ViewType = 'edit' | 'place';
 
 export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId, initialAlarm }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const insets = useSafeAreaInsets();
   const snapPoints = useMemo(() => ['88%'], []);
-  const { selectedDate, bumpAlarmVersion } = useCalendarStore();
+  const { selectedDate, bumpAlarmVersion, setSelectedDate } = useCalendarStore();
 
   const { places, searchKey, loadPlaces, savePlace, deletePlace } = usePlaces('DEST');
 
-  const [view, setView] = useState<ViewType>(initialMode ? 'edit' : 'list');
+  const [view, setView] = useState<ViewType>('edit');
   const [tempPlace, setTempPlace] = useState<SearchResult | null>(null);
-  const [alarms, setAlarms] = useState<Alarm[]>([]);
   const [editAlarm, setEditAlarm] = useState<Alarm>(() => {
     if (initialMode === 'edit' && editJourneyId && initialAlarm) {
       return { ...DEFAULT_ALARM, id: String(editJourneyId), journeyId: editJourneyId, dest_name: initialAlarm.place, ampm: initialAlarm.ampm, hour: initialAlarm.time?.split(':')[0] ?? '7', minute: initialAlarm.time?.split(':')[1] ?? '00', transport: initialAlarm.transport };
     }
-    return DEFAULT_ALARM;
+    return { ...DEFAULT_ALARM, ...targetTimeToAmpmHourMinute(new Date().toISOString()), minute: '00' };
   });
   const [saving, setSaving] = useState(false);
   const isEditMode = !!editAlarm.id;
 
-  const dateObj = new Date(selectedDate);
-  const month = dateObj.getMonth() + 1;
-  const date = dateObj.getDate();
-  const dayName = DAY_NAMES[dateObj.getDay()];
-
   useEffect(() => {
     loadPlaces().catch(() => {});
   }, [loadPlaces]);
-
-  const loadAlarms = useCallback(async () => {
-    try {
-      const res = await alarmsApi.getAlarms(selectedDate);
-      console.log('selectedDate:', selectedDate, '/ res.data:', JSON.stringify(res.data));
-      setAlarms((res.data ?? []).filter((a) => a.alarm_type === 'PERSONAL').map(fromAlarmItem));
-    } catch (e) {
-      console.error('loadAlarms 실패:', e);
-    }
-  }, [selectedDate]);
-
-  useEffect(() => {
-    loadAlarms();
-  }, [loadAlarms]);
 
   const handleSheetChange = useCallback((index: number) => {
     if (index === -1) onClose();
@@ -176,9 +118,7 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const openAdd = () => { setEditAlarm(DEFAULT_ALARM); setView('edit'); };
   const openEdit = async (alarm: Alarm) => {
-    if (alarm.isActive) return;
     if (alarm.journeyId) {
       try {
         const res = await journeysApi.getJourney(alarm.journeyId);
@@ -218,13 +158,14 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
       const rawTime = toTargetTime(selectedDate, editAlarm.ampm, editAlarm.hour, editAlarm.minute);
       const isPast = new Date(rawTime) <= new Date();
       const hasRepeat = !editAlarm.repeat.includes('안함') && editAlarm.repeat.length > 0;
+      const repeatMask = repeatDaysToMask(editAlarm.repeat);
       if (isPast && !hasRepeat) {
         Alert.alert('시간 오류', '이미 지난 시간입니다. 시간을 다시 설정해주세요.');
         setSaving(false);
         return;
       }
       const { plan_date, target_time } = hasRepeat
-        ? ensureFutureDateTime(selectedDate, rawTime)
+        ? ensureFutureDateTime(selectedDate, rawTime, repeatMask)
         : { plan_date: selectedDate, target_time: rawTime };
 
       const payload: PersonalJourneyPayload = {
@@ -235,7 +176,7 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
         dest_lat: editAlarm.dest_lat,
         dest_lng: editAlarm.dest_lng,
         transport_type: editAlarm.transport === 'public' ? 'TRANSIT' : 'DRIVING',
-        repeat_days: repeatDaysToMask(editAlarm.repeat),
+        repeat_days: repeatMask,
       };
 
       if (isEditMode && editAlarm.journeyId) {
@@ -251,9 +192,13 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
           alarmService.start({ alarmType: 'personal', destination: payload.dest_name, journeyId: res.data.journey_id, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, transportMode: toTransportMode(editAlarm.transport === 'car'), repeatDays: payload.repeat_days });
         }
       }
-      await loadAlarms();
       bumpAlarmVersion();
-      initialMode ? onClose() : setView('list');
+      // 과거 날짜에 반복 알람을 만들면 서버는 그대로 저장하지 않고 앵커를 가장 가까운 미래
+      // 발생일로 전진시킨다(ensureFutureDateTime) — 화면(selectedDate)은 그대로 과거 날짜에
+      // 머물러 있어서, 저장했는데 리스트에 아무것도 안 뜨는 것처럼 보이는 문제가 있었다.
+      // 실제로 날짜가 바뀐 경우 화면도 그 날짜로 따라가서 방금 만든 알람을 바로 보여준다.
+      if (plan_date !== selectedDate) setSelectedDate(plan_date);
+      onClose();
     } catch {
       Alert.alert('저장 실패', '다시 시도해주세요.');
     } finally {
@@ -272,9 +217,8 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
         return;
       }
     }
-    setAlarms((prev) => prev.filter((a) => a.id !== editAlarm.id));
     bumpAlarmVersion();
-    initialMode ? onClose() : setView('list');
+    onClose();
   };
 
   const handlePlaceConfirm = () => {
@@ -289,21 +233,6 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
       savePlace(tempPlace).catch(() => {});
     }
     setView('edit');
-  };
-
-  const toggleAlarm = (alarm: Alarm) => {
-    const newEnabled = !alarm.enabled;
-    setAlarms((prev) => prev.map((a) => a.id === alarm.id ? { ...a, enabled: newEnabled } : a));
-    if (alarm.journeyId) {
-      journeysApi.toggleActive(alarm.journeyId, newEnabled).catch(() => {
-        setAlarms((prev) => prev.map((a) => a.id === alarm.id ? { ...a, enabled: !newEnabled } : a));
-      });
-      if (!newEnabled) {
-        alarmService.stop(alarm.journeyId);
-      } else if (!!alarm.myStatus && ['READY', 'DEPARTING', 'MOVING', 'NEARDEST'].includes(alarm.myStatus)) {
-        alarmService.start({ alarmType: 'personal', destination: alarm.dest_name, journeyId: alarm.journeyId, destLat: alarm.dest_lat, destLng: alarm.dest_lng, transportMode: toTransportMode(alarm.transport === 'car'), repeatDays: repeatDaysToMask(alarm.repeat) });
-      }
-    }
   };
 
   const toggleRepeat = (day: string) => {
@@ -331,88 +260,11 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
       handleIndicatorStyle={styles.indicator}
       backgroundStyle={styles.background}
     >
-      {/* ── 목록 화면 ── */}
-      {view === 'list' && (
-        <View style={{ flex: 1 }}>
-          <View style={styles.header}>
-            <TouchableOpacity style={styles.headerBtn} onPress={onClose}>
-              <Feather name="x" size={22} color="#1A1A1A" />
-            </TouchableOpacity>
-            <Text style={styles.title}>개인</Text>
-            <View style={{ width: 36 }} />
-          </View>
-
-          <View style={styles.datePillContainer}>
-            <View style={styles.datePill}>
-              <Text style={styles.datePillText}>{month}월 {date}일 {dayName}요일</Text>
-            </View>
-          </View>
-
-          <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-            {alarms.map((alarm) => (
-              <SwipeableAlarmCard key={alarm.id} onDelete={async () => {
-                if (alarm.journeyId) {
-                  try {
-                    await journeysApi.deleteJourney(alarm.journeyId);
-                    // alarmService.stop()이 내부적으로 ACTIVE_JOURNEYS_KEY 제거까지 안전하게(잠금 걸린 채) 처리함
-                    alarmService.stop(alarm.journeyId);
-                  } catch { Alert.alert('삭제 실패', '다시 시도해주세요.'); return; }
-                }
-                setAlarms((prev) => prev.filter((a) => a.id !== alarm.id));
-                bumpAlarmVersion();
-              }}>
-                <TouchableOpacity
-                  style={styles.alarmCard}
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    if (alarm.isActive) {
-                      Platform.OS === 'android'
-                        ? ToastAndroid.show('이동 중에는 수정할 수 없어요.', ToastAndroid.SHORT)
-                        : Alert.alert('', '이동 중에는 수정할 수 없어요.');
-                      return;
-                    }
-                    openEdit(alarm);
-                  }}
-                >
-                  <View style={[styles.typeChip, alarm.isActive && { opacity: 0.45 }]}>
-                    <Feather name="map-pin" size={17} color="#0A84FF" />
-                  </View>
-                  <View style={[styles.alarmInfo, alarm.isActive && { opacity: 0.45 }]}>
-                    <Text style={styles.alarmPlace}>{alarm.dest_name}</Text>
-                    <View style={styles.alarmMeta}>
-                      <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.hour}:{alarm.minute} 까지</Text>
-                      {alarm.transport === 'public'
-                        ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
-                        : <FontAwesome5 name="car-side" size={13} color="#0A84FF" />
-                      }
-                      {getRepeatLabel(alarm.repeat) !== '안함' && (
-                        <Text style={styles.repeatLabel}>· {getRepeatLabel(alarm.repeat)}</Text>
-                      )}
-                    </View>
-                  </View>
-                  <View style={styles.cardRight}>
-                    <Switch
-                      value={alarm.enabled}
-                      onValueChange={() => toggleAlarm(alarm)}
-                      trackColor={{ false: '#E0E0E0', true: '#30D158' }}
-                      thumbColor="#FFFFFF"
-                    />
-                  </View>
-                </TouchableOpacity>
-              </SwipeableAlarmCard>
-            ))}
-          </BottomSheetScrollView>
-          <TouchableOpacity style={[styles.fab, { bottom: 24 + insets.bottom }]} onPress={openAdd} activeOpacity={0.85}>
-            <Feather name="plus" size={24} color="#1A1A1A" />
-          </TouchableOpacity>
-        </View>
-      )}
-
       {/* ── 수정/추가 화면 ── */}
       {view === 'edit' && (
         <>
           <View style={styles.header}>
-            <TouchableOpacity style={styles.headerBtn} onPress={() => initialMode ? onClose() : setView('list')}>
+            <TouchableOpacity style={styles.headerBtn} onPress={onClose}>
               <Feather name="x" size={22} color="#1A1A1A" />
             </TouchableOpacity>
             <Text style={styles.title}>{isEditMode ? '개인 알람 수정' : '개인 알람 추가'}</Text>
@@ -435,7 +287,7 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
             </View>
 
             <View style={styles.timeCard}>
-              <Text style={styles.timeCardLabel}>출발 시각</Text>
+              <Text style={styles.timeCardLabel}>목표 시각</Text>
               <View style={styles.pickerContainer}>
                 <Picker
                   selectedValue={editAlarm.ampm}
@@ -485,22 +337,14 @@ export default function PersonalAlarmSheet({ onClose, initialMode, editJourneyId
 
             <View style={styles.fieldGroup}>
               <Text style={styles.fieldGroupLabel}>이동 수단</Text>
-              <View style={styles.segmentTrack}>
-                <TouchableOpacity
-                  style={[styles.segmentBtn, editAlarm.transport === 'public' && styles.segmentBtnSelected]}
-                  onPress={() => setEditAlarm((prev) => ({ ...prev, transport: 'public' }))}
-                >
-                  <MaterialCommunityIcons name="bus-side" size={16} color={editAlarm.transport === 'public' ? '#1A1A1A' : '#8A8A8E'} />
-                  <Text style={[styles.segmentText, editAlarm.transport === 'public' && styles.segmentTextSelected]}>대중교통</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.segmentBtn, editAlarm.transport === 'car' && styles.segmentBtnSelected]}
-                  onPress={() => setEditAlarm((prev) => ({ ...prev, transport: 'car' }))}
-                >
-                  <FontAwesome5 name="car-side" size={14} color={editAlarm.transport === 'car' ? '#1A1A1A' : '#8A8A8E'} />
-                  <Text style={[styles.segmentText, editAlarm.transport === 'car' && styles.segmentTextSelected]}>자가용</Text>
-                </TouchableOpacity>
-              </View>
+              <SegmentedToggle
+                value={editAlarm.transport}
+                onChange={(v) => setEditAlarm((prev) => ({ ...prev, transport: v }))}
+                options={[
+                  { value: 'public', label: '대중교통', icon: (sel) => <MaterialCommunityIcons name="bus-side" size={16} color={sel ? '#1A1A1A' : '#8A8A8E'} /> },
+                  { value: 'car', label: '자가용', icon: (sel) => <FontAwesome5 name="car-side" size={14} color={sel ? '#1A1A1A' : '#8A8A8E'} /> },
+                ]}
+              />
             </View>
 
             {isEditMode && (
@@ -555,28 +399,7 @@ const styles = StyleSheet.create({
     width: 36, height: 36, borderRadius: 18,
     backgroundColor: '#0A84FF', alignItems: 'center', justifyContent: 'center',
   },
-  fab: {
-    position: 'absolute', right: 20, bottom: 24, width: 56, height: 56, borderRadius: 20,
-    backgroundColor: '#FFCE0C', alignItems: 'center', justifyContent: 'center',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.2, shadowRadius: 6, elevation: 4,
-  },
-  datePillContainer: { alignItems: 'center', marginBottom: 16 },
-  datePill: { backgroundColor: '#E8E8E8', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 6 },
-  datePillText: { fontSize: 13, fontWeight: '500', color: '#FF453A' },
   content: { paddingHorizontal: 16, paddingBottom: Platform.OS === 'ios' ? 40 : 24 },
-  alarmCard: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 14, paddingHorizontal: 14,
-    backgroundColor: '#FFFFFF', borderRadius: 18, marginBottom: 10,
-    shadowColor: '#141413', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 6, elevation: 2,
-  },
-  typeChip: { width: 40, height: 40, borderRadius: 14, backgroundColor: '#EAF3FF', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  alarmInfo: { flex: 1, marginRight: 8, justifyContent: 'center' },
-  cardRight: { justifyContent: 'center' },
-  alarmPlace: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 5 },
-  alarmMeta: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
-  alarmDeadline: { fontSize: 13, fontWeight: '500', color: '#555555' },
-  repeatLabel: { fontSize: 12, color: '#888888' },
   pickerContainer: {
     flexDirection: 'row', backgroundColor: '#F7F7F8', borderRadius: 14,
     overflow: 'hidden', height: Platform.OS === 'ios' ? 200 : 56, marginTop: 8,
@@ -597,11 +420,6 @@ const styles = StyleSheet.create({
   dayPillSelected: { backgroundColor: '#FFCE0C' },
   dayPillText: { fontSize: 13, fontWeight: '700', color: '#8A8A8E' },
   dayPillTextSelected: { color: '#1A1A1A' },
-  segmentTrack: { flexDirection: 'row', backgroundColor: '#F0F0F1', borderRadius: 16, padding: 4, gap: 4 },
-  segmentBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 11 },
-  segmentBtnSelected: { backgroundColor: '#FFCE0C' },
-  segmentText: { fontSize: 13, fontWeight: '600', color: '#8A8A8E' },
-  segmentTextSelected: { color: '#1A1A1A', fontWeight: '700' },
   deleteContainer: { alignItems: 'center', marginTop: 8 },
   deleteButton: { backgroundColor: '#FF453A', borderRadius: 24, paddingVertical: 14, paddingHorizontal: 48 },
   deleteButtonText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },

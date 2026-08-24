@@ -4,6 +4,7 @@ import HomeAlarmSheet from '@/src/screens/alarmManage/HomeAlarmSheet';
 import PersonalAlarmSheet from '@/src/screens/alarmManage/PersonalAlarmSheet';
 import DailyAlarmScreen from '@/src/screens/main/DailyAlarmScreen';
 import { consumePendingInviteCode } from '@/src/utils/inviteDeepLink';
+import { useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 
@@ -11,6 +12,10 @@ type PersonalHomeSheetState = { mode: 'add' | 'edit'; id?: number; alarm?: any }
 type GroupSheetState = { mode: 'add' | 'create' | 'edit' | 'join'; id?: number; alarm?: any; inviteCode?: string } | null;
 
 export default function DailyAlarmPage() {
+  // "다가오는 일정" 카드 탭으로 진입한 경우(MainCalendarScreen) — 날짜별 리스트가 로드되면
+  // 해당 알람의 수정 화면까지 자동으로 이어서 연다.
+  const { editKind, editId } = useLocalSearchParams<{ editKind?: string; editId?: string }>();
+
   const [personalSheet, setPersonalSheet] = useState<PersonalHomeSheetState>(null);
   const [groupSheet, setGroupSheet] = useState<GroupSheetState>(null);
   const [homeSheet, setHomeSheet] = useState<PersonalHomeSheetState>(null);
@@ -27,6 +32,8 @@ export default function DailyAlarmPage() {
   return (
     <View style={{ flex: 1 }}>
       <DailyAlarmScreen
+        autoEditKind={editKind as 'personal' | 'group' | 'home' | undefined}
+        autoEditId={editId != null ? Number(editId) : undefined}
         onPersonalAdd={() => setPersonalSheet({ mode: 'add' })}
         onPersonalEdit={(journeyId, alarm) => setPersonalSheet({ mode: 'edit', id: journeyId, alarm })}
         onGroupAdd={() => setGroupSheet({ mode: 'create' })}
@@ -53,10 +60,6 @@ export default function DailyAlarmPage() {
           editAppointmentId={groupSheet.id}
           initialAlarm={groupSheet.alarm}
           initialInviteCode={groupSheet.inviteCode}
-          onArrivalPress={(alarm) => {
-            setSelectedGroupAlarm(alarm);
-            setShowArrivalSheet(true);
-          }}
         />
       )}
       {showArrivalSheet && selectedGroupAlarm?.appointmentId != null && (

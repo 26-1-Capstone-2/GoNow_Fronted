@@ -35,7 +35,7 @@ function formatTargetTime(isoString: string): string {
 
 function TransportBadge({ transport }: { transport: 'TRANSIT' | 'DRIVING' }) {
   if (transport === 'TRANSIT') {
-    return <MaterialCommunityIcons name="bus-side" size={20} color="#4A90D9" />;
+    return <MaterialCommunityIcons name="bus-side" size={20} color="#FF9F0A" />;
   }
   return <FontAwesome5 name="car-side" size={18} color="#FF9F0A" />;
 }

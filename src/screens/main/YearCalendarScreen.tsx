@@ -67,7 +67,7 @@ const MiniMonth = memo(function MiniMonth({
         ))}
       </View>
       {weeks.map((week, wi) => (
-        <View key={wi} style={{ flexDirection: 'row' }}>
+        <View key={wi} style={{ flexDirection: 'row', justifyContent: 'center' }}>
           {week.map((day, di) => {
             const isToday = isCurrentMonth && day.date === todayDate;
             return (
@@ -264,7 +264,7 @@ const styles = StyleSheet.create({
   miniMonth: { flex: 1 },
   miniMonthTitle: { fontSize: 12, fontWeight: '700', color: '#1A1A1A', marginBottom: 3 },
   currentMonthTitle: { color: '#FF453A' },
-  miniWeekdayRow: { flexDirection: 'row', marginBottom: 1 },
+  miniWeekdayRow: { flexDirection: 'row', justifyContent: 'center', marginBottom: 1 },
   sundayText: { color: '#FF453A' },
   saturdayText: { color: '#0A84FF' },
   todayCircle: { backgroundColor: '#FFCE0C' },
