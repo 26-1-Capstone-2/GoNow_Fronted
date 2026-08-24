@@ -6,7 +6,9 @@ import React, { useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
+    KeyboardAvoidingView,
     Platform,
+    ScrollView,
     StyleSheet,
     Text,
     TextInput,
@@ -58,49 +60,53 @@ export default function ChangePasswordScreen() {
         <View style={{ width: 34 }} />
       </View>
 
-      {/* 입력 영역 */}
-      <View style={styles.formContainer}>
-        <Text style={styles.label}>새로운 비밀번호를 입력해주세요.</Text>
+      {/* 입력창 3개가 세로로 쌓여있어, 아래쪽 "새 비밀번호 확인" 포커스 시 키보드에 가려질 수
+          있었다(2026-08-25 발견) — KeyboardAvoidingView + ScrollView로 감싸서 포커스된
+          입력창으로 자동 스크롤되게 한다(LoginScreen.tsx 등과 동일 패턴). */}
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={styles.formContainer} keyboardShouldPersistTaps="handled">
+          <Text style={styles.label}>새로운 비밀번호를 입력해주세요.</Text>
 
-        <Text style={styles.inputLabel}>현재 비밀번호</Text>
-        <TextInput
-          style={styles.input}
-          placeholder=""
-          placeholderTextColor="#BBBBBB"
-          value={currentPassword}
-          onChangeText={setCurrentPassword}
-          secureTextEntry
-        />
+          <Text style={styles.inputLabel}>현재 비밀번호</Text>
+          <TextInput
+            style={styles.input}
+            placeholder=""
+            placeholderTextColor="#BBBBBB"
+            value={currentPassword}
+            onChangeText={setCurrentPassword}
+            secureTextEntry
+          />
 
-        <Text style={styles.inputLabel}>새 비밀번호</Text>
-        <TextInput
-          style={[styles.input, (isNewPasswordInvalid || isSamePassword) && styles.inputError]}
-          placeholder=""
-          placeholderTextColor="#BBBBBB"
-          value={newPassword}
-          onChangeText={setNewPassword}
-          secureTextEntry
-        />
-        {isNewPasswordInvalid && (
-          <Text style={styles.errorText}>공백 없는 영문/숫자/특수문자로 8~64자여야 합니다.</Text>
-        )}
-        {!isNewPasswordInvalid && isSamePassword && (
-          <Text style={styles.errorText}>기존 비밀번호와 다른 비밀번호를 입력해주세요.</Text>
-        )}
+          <Text style={styles.inputLabel}>새 비밀번호</Text>
+          <TextInput
+            style={[styles.input, (isNewPasswordInvalid || isSamePassword) && styles.inputError]}
+            placeholder=""
+            placeholderTextColor="#BBBBBB"
+            value={newPassword}
+            onChangeText={setNewPassword}
+            secureTextEntry
+          />
+          {isNewPasswordInvalid && (
+            <Text style={styles.errorText}>공백 없는 영문/숫자/특수문자로 8~64자여야 합니다.</Text>
+          )}
+          {!isNewPasswordInvalid && isSamePassword && (
+            <Text style={styles.errorText}>기존 비밀번호와 다른 비밀번호를 입력해주세요.</Text>
+          )}
 
-        <Text style={styles.inputLabel}>새 비밀번호 확인</Text>
-        <TextInput
-          style={[styles.input, isMismatch && styles.inputError]}
-          placeholder=""
-          placeholderTextColor="#BBBBBB"
-          value={confirmPassword}
-          onChangeText={setConfirmPassword}
-          secureTextEntry
-        />
-        {isMismatch && (
-          <Text style={styles.errorText}>비밀번호가 일치하지 않습니다.</Text>
-        )}
-      </View>
+          <Text style={styles.inputLabel}>새 비밀번호 확인</Text>
+          <TextInput
+            style={[styles.input, isMismatch && styles.inputError]}
+            placeholder=""
+            placeholderTextColor="#BBBBBB"
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
+            secureTextEntry
+          />
+          {isMismatch && (
+            <Text style={styles.errorText}>비밀번호가 일치하지 않습니다.</Text>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* 저장 버튼 */}
       <View style={styles.footer}>
@@ -125,18 +131,21 @@ export default function ChangePasswordScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
+  // space-between이어야 backButton이 왼쪽 끝에 고정되고, 양쪽 폭이 같은 backButton/스페이서
+  // 사이에서 title만 진짜 정중앙에 온다 — center로 두면 셋을 한 묶음으로 가운데 몰아버려서
+  // backButton까지 화면 중앙 쪽으로 끌려온다(2026-08-25, 앞선 수정에서 놓친 부분).
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     paddingVertical: 16,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0F0',
   },
+  // absolute로 빼면 header의 justifyContent:'center' 계산에서 backButton이 빠져서, 제목이
+  // 오른쪽 스페이서(width:34) 폭만큼 왼쪽으로 치우쳐 보이는 버그가 있었다(2026-08-25 발견).
   backButton: {
-    position: 'absolute',
-    left: 16,
     padding: 4,
   },
   title: {

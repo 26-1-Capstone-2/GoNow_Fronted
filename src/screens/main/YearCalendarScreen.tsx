@@ -3,7 +3,6 @@ import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Dimensions,
   FlatList,
   LayoutChangeEvent,
   NativeScrollEvent,
@@ -12,14 +11,18 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const COL_GAP = 12;
 const H_PADDING = 16;
-const MONTH_WIDTH = (SCREEN_WIDTH - H_PADDING * 2 - COL_GAP * 2) / 3;
+// 화면 폭에 따라 매번 다시 계산해야 하므로(2026-08-25, 모듈 최상단 고정값이 분할화면/폴더블
+// 전환에 안 따라가던 문제) 상수가 아니라 함수로 둔다 — useWindowDimensions()의 width로 호출.
+function getMonthWidth(screenWidth: number): number {
+  return (screenWidth - H_PADDING * 2 - COL_GAP * 2) / 3;
+}
 const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const TOTAL_YEARS = 21;
 const CENTER_INDEX = 10;
@@ -47,11 +50,13 @@ const MiniMonth = memo(function MiniMonth({
   year: number; month: number; todayYear: number; todayMonth: number;
   todayDate: number; daySize: number; onPress: () => void;
 }) {
+  const { width } = useWindowDimensions();
+  const monthWidth = getMonthWidth(width);
   const weeks = getCalendarWeeks(year, month);
   const isCurrentMonth = year === todayYear && month === todayMonth;
 
   return (
-    <TouchableOpacity style={[styles.miniMonth, { width: MONTH_WIDTH }]} onPress={onPress} activeOpacity={0.7}>
+    <TouchableOpacity style={[styles.miniMonth, { width: monthWidth }]} onPress={onPress} activeOpacity={0.7}>
       <Text style={[styles.miniMonthTitle, isCurrentMonth && styles.currentMonthTitle]}>
         {month}월
       </Text>
@@ -102,15 +107,17 @@ const YearPage = memo(function YearPage({
   year: number; todayYear: number; todayMonth: number; todayDate: number;
   containerHeight: number; onMonthPress: (year: number, month: number) => void;
 }) {
+  const { width } = useWindowDimensions();
+  const monthWidth = getMonthWidth(width);
   const YEAR_TITLE_H = 60;
   const AVAILABLE_H = containerHeight - YEAR_TITLE_H;
   const ROW_H = Math.floor(AVAILABLE_H / 4);
   const MONTH_INNER_H = ROW_H - 8;
-  const DAY_SIZE = Math.floor(Math.min(MONTH_WIDTH / 7, (MONTH_INNER_H - 28) / 6));
+  const DAY_SIZE = Math.floor(Math.min(monthWidth / 7, (MONTH_INNER_H - 28) / 6));
   const monthRows = [[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]];
 
   return (
-    <View style={{ width: SCREEN_WIDTH, height: containerHeight }}>
+    <View style={{ width, height: containerHeight }}>
       <View style={{ height: YEAR_TITLE_H, justifyContent: 'flex-end', paddingHorizontal: H_PADDING, paddingBottom: 8 }}>
         <Text style={styles.yearTitle}>{year}년</Text>
       </View>

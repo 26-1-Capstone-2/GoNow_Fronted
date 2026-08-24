@@ -102,13 +102,18 @@ export default function HomeAddressSetupScreen({ isOnboarding = false }: Props) 
     <SafeAreaView style={styles.container}>
       {/* 헤더 */}
       <View style={styles.header}>
-        {!isOnboarding && (
+        {/* space-between인 header에서 title이 항상 정중앙에 오려면 양쪽에 항상 같은 폭의
+            요소가 있어야 한다 — onboarding 모드에서 뒤로가기 버튼을 아예 안 그리면 자리만
+            빈 View로라도 채워서 3칸 구조(왼쪽/제목/오른쪽)를 유지한다. */}
+        {!isOnboarding ? (
           <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
             <Feather name="chevron-left" size={26} color="#1A1A1A" />
           </TouchableOpacity>
+        ) : (
+          <View style={{ width: 34 }} />
         )}
         <Text style={styles.title}>귀가지 설정</Text>
-        {!isOnboarding && <View style={{ width: 34 }} />}
+        <View style={{ width: 34 }} />
       </View>
 
       {/* 주소 검색 공통 컴포넌트 */}
@@ -142,16 +147,21 @@ export default function HomeAddressSetupScreen({ isOnboarding = false }: Props) 
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
+  // space-between이어야 backButton이 왼쪽 끝에 고정되고, 양쪽 폭이 같은 backButton/스페이서
+  // 사이에서 title만 진짜 정중앙에 온다 — center로 두면 셋을 한 묶음으로 가운데 몰아버려서
+  // backButton까지 화면 중앙 쪽으로 끌려온다(2026-08-25, 앞선 수정에서 놓친 부분).
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     paddingVertical: 16,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0F0',
   },
-  backButton: { position: 'absolute', left: 16, padding: 4 },
+  // absolute로 빼면 header의 justifyContent:'center' 계산에서 backButton이 빠져서, 제목이
+  // 오른쪽 스페이서(width:34) 폭만큼 왼쪽으로 치우쳐 보이는 버그가 있었다(2026-08-25 발견).
+  backButton: { padding: 4 },
   title: { fontSize: 17, fontWeight: '600', color: '#1A1A1A' },
   footer: { position: 'absolute', bottom: 40, left: 0, right: 0, alignItems: 'center' },
   completeButton: {

@@ -6,12 +6,11 @@ import AlarmSettingsSheet from '@/src/screens/main/AlarmSettingsSheet';
 import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { targetTimeToAmpmHourMinute } from '@/src/api/journeys';
 import { useCalendarStore } from '@/src/store/calendarStore';
+import { useDoubleBackToExit } from '@/src/hooks/useDoubleBackToExit';
 import { Feather, Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useRouter, type Href } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  BackHandler,
-  Dimensions,
   FlatList,
   InteractionManager,
   LayoutChangeEvent,
@@ -21,14 +20,12 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  ToastAndroid,
   TouchableOpacity,
+  useWindowDimensions,
   View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const DAY_WIDTH = Math.floor(SCREEN_WIDTH / 7);
 const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const TOTAL_MONTHS = 49;
 const CENTER_INDEX = 24;
@@ -141,16 +138,21 @@ const alarmsApi = createAlarmsApi();
 const CalendarMonth = memo(function CalendarMonth({
   year, month, todayStr, selectedDate, onSelectDate, onDayPress, containerHeight, events, alarmCounts,
 }: CalendarMonthProps) {
+  // 모듈 최상단에서 Dimensions.get('window')로 한 번만 고정하면 분할화면/폴더블 등으로 화면
+  // 폭이 바뀌어도 요일 칸 너비가 안 따라가는 문제가 있었다(2026-08-25 발견) — useWindowDimensions()로
+  // 실시간 반응하게 바꾼다.
+  const { width } = useWindowDimensions();
+  const dayWidth = Math.floor(width / 7);
   const weeks = getCalendarWeeks(year, month);
   const WEEKDAY_H = 32;
   const GRID_H = containerHeight - WEEKDAY_H;
   const ROW_HEIGHT = Math.floor(GRID_H / weeks.length);
 
   return (
-    <View style={{ width: SCREEN_WIDTH, height: containerHeight }}>
+    <View style={{ width, height: containerHeight }}>
       <View style={[styles.weekdayRow, { height: WEEKDAY_H }]}>
         {DAYS.map((d, i) => (
-          <Text key={d} style={[styles.weekdayText, i === 0 && styles.sundayText, i === 6 && styles.saturdayText]}>
+          <Text key={d} style={[styles.weekdayText, { width: dayWidth }, i === 0 && styles.sundayText, i === 6 && styles.saturdayText]}>
             {d}
           </Text>
         ))}
@@ -166,7 +168,7 @@ const CalendarMonth = memo(function CalendarMonth({
               return (
                 <TouchableOpacity
                   key={di}
-                  style={styles.dayCell}
+                  style={[styles.dayCell, { width: dayWidth }]}
                   onPress={() => { if (isCur) onDayPress(day.fullDate); }}
                   activeOpacity={0.7}
                 >
@@ -187,7 +189,7 @@ const CalendarMonth = memo(function CalendarMonth({
                     </Text>
                   </View>
                   {dayEvents.slice(0, 1).map((ev, ei) => (
-                    <View key={ei} style={[styles.eventBadge, { backgroundColor: ev.color + '22' }]}>
+                    <View key={ei} style={[styles.eventBadge, { maxWidth: dayWidth - 4, backgroundColor: ev.color + '22' }]}>
                       <View style={[styles.eventDot, { backgroundColor: ev.color }]} />
                       <Text style={[styles.eventLabel, { color: ev.color }]} numberOfLines={1}>{ev.label}</Text>
                     </View>
@@ -235,7 +237,6 @@ export default function MainCalendarScreen() {
   const [alarmCounts, setAlarmCounts] = useState<AlarmCountMap>({});
   const [upcoming, setUpcoming] = useState<UpcomingItem[]>([]);
   const flatListRef = useRef<FlatList>(null);
-  const lastBackPressRef = useRef(0);
   const isAtTodayRef = useRef(true);
   const isMountedRef = useRef(false);
   const pendingScrollRef = useRef(false);
@@ -516,38 +517,22 @@ export default function MainCalendarScreen() {
     }
   }, [todayStr]);
 
-  // 앱 최상위(탭) 화면에서 뒤로가기를 누르면 원래도 조용히 백그라운드로 내려갈 뿐 프로세스가
-  // 죽지는 않는다(BackHandler 커스텀 없이 안드로이드 기본 동작) — 다만 사용자에게 그 사실이
-  // 안 보여서 "꺼진 건가?" 헷갈릴 수 있어, 한 번은 안내만 하고 실제 동작(백그라운드 전환)은
-  // 그대로 둔다. useFocusEffect로 이 탭이 실제 최상단일 때만 리스너를 걸어야, daily-alarm 등
-  // 위에 쌓인 화면에서 누르는 뒤로가기(정상적인 화면 pop)까지 이 로직이 가로채지 않는다.
-  //
   // 하단바(개인/그룹/귀가/설정) 버튼은 새 화면으로 이동하는 게 아니라 이 화면 위에 바텀시트를
   // 띄우는 것뿐이라 내비게이션 스택은 그대로다 — 그래서 시트가 열려있는 채로 뒤로가기를 누르면
   // (시트를 안 닫고) 곧장 종료 안내가 뜨는 게 비직관적이었다(2026-08-25 발견). 열린 시트가
-  // 있으면 그 시트부터 닫고, 아무 시트도 없을 때만 종료 안내 로직을 탄다. 가장 위에 겹쳐 뜨는
-  // 도착 대시보드(그룹 시트 위)부터 먼저 검사해야 한 번 누를 때마다 가장 바깥 레이어부터 닫힌다.
-  useFocusEffect(
-    useCallback(() => {
-      if (Platform.OS !== 'android') return;
-      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-        if (showArrivalSheet) { setShowArrivalSheet(false); return true; }
-        if (showSettings) { setShowSettings(false); return true; }
-        if (showPersonalSheet) { setShowPersonalSheet(false); return true; }
-        if (showGroupSheet) { setShowGroupSheet(false); return true; }
-        if (showHomeSheet) { setShowHomeSheet(false); return true; }
-
-        const now = Date.now();
-        if (now - lastBackPressRef.current < 2000) {
-          return false; // 기본 동작(백그라운드 전환) 허용
-        }
-        lastBackPressRef.current = now;
-        ToastAndroid.show('한 번 더 누르면 종료됩니다', ToastAndroid.SHORT);
-        return true; // 이번 뒤로가기는 소비 — 기본 동작을 1회 막음
-      });
-      return () => sub.remove();
-    }, [showArrivalSheet, showSettings, showPersonalSheet, showGroupSheet, showHomeSheet])
-  );
+  // 있으면 그 시트부터 닫고, 아무 시트도 없을 때만 종료 안내 로직(useDoubleBackToExit)을 탄다.
+  // 가장 위에 겹쳐 뜨는 도착 대시보드(그룹 시트 위)부터 먼저 검사해야 한 번 누를 때마다 가장
+  // 바깥 레이어부터 닫힌다.
+  useDoubleBackToExit({
+    onBackPressed: useCallback(() => {
+      if (showArrivalSheet) { setShowArrivalSheet(false); return true; }
+      if (showSettings) { setShowSettings(false); return true; }
+      if (showPersonalSheet) { setShowPersonalSheet(false); return true; }
+      if (showGroupSheet) { setShowGroupSheet(false); return true; }
+      if (showHomeSheet) { setShowHomeSheet(false); return true; }
+      return false;
+    }, [showArrivalSheet, showSettings, showPersonalSheet, showGroupSheet, showHomeSheet]),
+  });
 
   const renderItem = useCallback(({ item }: { item: number }) => {
     const { year, month } = getYearMonthFromIndex(today.getFullYear(), today.getMonth() + 1, item);
@@ -779,12 +764,12 @@ const styles = StyleSheet.create({
   statCount: { fontSize: 19, fontWeight: '800', marginTop: 4 },
   statUnit: { fontSize: 12, fontWeight: '500' },
   weekdayRow: { flexDirection: 'row', paddingHorizontal: 4, alignItems: 'center' },
-  weekdayText: { width: DAY_WIDTH, textAlign: 'center', fontSize: 12, fontWeight: '500', color: '#AAAAAA' },
+  weekdayText: { textAlign: 'center', fontSize: 12, fontWeight: '500', color: '#AAAAAA' },
   sundayText: { color: '#FF453A' },
   saturdayText: { color: '#0A84FF' },
   weekRow: { flexDirection: 'row' },
   weekBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E0E0E0' },
-  dayCell: { width: DAY_WIDTH, paddingTop: 4, alignItems: 'center' },
+  dayCell: { paddingTop: 4, alignItems: 'center' },
   dayNumWrap: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
   todayCircle: { backgroundColor: '#FFCE0C' },
   selectedCircle: { backgroundColor: '#1A1A1A' },
@@ -792,7 +777,7 @@ const styles = StyleSheet.create({
   todayText: { color: '#1A1A1A', fontWeight: '700' },
   selectedText: { color: '#FFFFFF', fontWeight: '700' },
   otherMonthDay: { color: '#C8C8C8' },
-  eventBadge: { flexDirection: 'row', alignItems: 'center', borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1, marginTop: 1, maxWidth: DAY_WIDTH - 4, gap: 3 },
+  eventBadge: { flexDirection: 'row', alignItems: 'center', borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1, marginTop: 1, gap: 3 },
   eventDot: { width: 6, height: 6, borderRadius: 3 },
   eventLabel: { fontSize: 9, fontWeight: '500', flexShrink: 1 },
   upcomingSection: { flex: 1, paddingHorizontal: 20, paddingTop: 4 },

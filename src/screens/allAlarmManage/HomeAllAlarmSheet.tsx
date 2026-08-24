@@ -454,7 +454,7 @@ export default function HomeAllAlarmSheet({ onClose, initialEditId }: Props) {
                   </View>
                   <View style={[styles.alarmInfo, dimmed && { opacity: 0.45 }]}>
                     {alarm.date ? <Text style={styles.alarmDate}>{formatCardDate(alarm.date)}</Text> : null}
-                    <Text style={styles.alarmPlace}>{alarm.home_name}</Text>
+                    <Text style={styles.alarmPlace} numberOfLines={1}>{alarm.home_name}</Text>
                     <AlarmTimeBlock
                       display={display}
                       trailing={<>

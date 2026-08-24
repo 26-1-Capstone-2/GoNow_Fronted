@@ -149,7 +149,7 @@ export default function AlarmSettingsSheet({ onClose, onSave }: Props) {
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>선호 대중교통</Text>
               <View style={styles.sectionBox}>
-                {(['SUBWAY', 'BUS', 'ALL'] as TransitType[]).map((type, i, arr) => (
+                {(['ALL', 'SUBWAY', 'BUS'] as TransitType[]).map((type, i, arr) => (
                   <View key={type}>
                     <View style={styles.row}>
                       <Text style={styles.rowLabel}>

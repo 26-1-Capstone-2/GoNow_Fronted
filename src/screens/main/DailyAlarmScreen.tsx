@@ -269,7 +269,7 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   <Feather name="map-pin" size={17} color="#0A84FF" />
                 </View>
                 <View style={[styles.alarmInfo, (selectedDate < todayStr || (alarm.myStatus === 'ARRIVED' && selectedDate === todayStr)) && { opacity: 0.45 }]}>
-                  <Text style={styles.alarmPlace}>{alarm.place}</Text>
+                  <Text style={styles.alarmPlace} numberOfLines={1}>{alarm.place}</Text>
                   <AlarmTimeBlock
                     display={getAlarmTimeDisplay({
                       targetAmpm: alarm.ampm,
@@ -361,7 +361,7 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   <Feather name="users" size={17} color="#FF9F0A" />
                 </View>
                 <View style={[styles.alarmInfo, isGroupActive && { opacity: 0.45 }]}>
-                  <Text style={styles.alarmPlace}>{alarm.place}</Text>
+                  <Text style={styles.alarmPlace} numberOfLines={1}>{alarm.place}</Text>
                   <AlarmTimeBlock
                     display={getAlarmTimeDisplay({
                       targetAmpm: alarm.ampm,
@@ -439,7 +439,7 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   <Feather name="navigation" size={17} color="#30D158" />
                 </View>
                 <View style={[styles.alarmInfo, (selectedDate < todayStr || (alarm.myStatus === 'ARRIVED' && selectedDate === todayStr)) && { opacity: 0.45 }]}>
-                  <Text style={styles.alarmPlace}>{alarm.place}</Text>
+                  <Text style={styles.alarmPlace} numberOfLines={1}>{alarm.place}</Text>
                   <AlarmTimeBlock
                     display={getAlarmTimeDisplay({
                       targetAmpm: alarm.ampm,

@@ -6,6 +6,7 @@ import React, { useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
+    KeyboardAvoidingView,
     Platform,
     StyleSheet,
     Text,
@@ -48,19 +49,22 @@ export default function ChangeNicknameScreen() {
         <View style={{ width: 34 }} />
       </View>
 
-      {/* 입력 영역 */}
-      <View style={styles.formContainer}>
-        <Text style={styles.label}>새로운 닉네임을 입력해주세요.</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="새 닉네임"
-          placeholderTextColor="#BBBBBB"
-          value={nickname}
-          onChangeText={(t) => t.length <= 12 && setNickname(t)}
-          maxLength={12}
-          autoFocus
-        />
-      </View>
+      {/* 입력 영역 — autoFocus로 화면 진입 즉시 키보드가 뜨는데, KeyboardAvoidingView가
+          없으면 작은 화면 기기에서 입력창이 키보드에 가려질 수 있었다(2026-08-25 발견). */}
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <View style={styles.formContainer}>
+          <Text style={styles.label}>새로운 닉네임을 입력해주세요.</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="새 닉네임"
+            placeholderTextColor="#BBBBBB"
+            value={nickname}
+            onChangeText={(t) => t.length <= 12 && setNickname(t)}
+            maxLength={12}
+            autoFocus
+          />
+        </View>
+      </KeyboardAvoidingView>
 
       {/* 저장 버튼 */}
       <View style={styles.footer}>
@@ -82,18 +86,22 @@ export default function ChangeNicknameScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
+  // space-between이어야 backButton이 왼쪽 끝에 고정되고, 양쪽 폭이 같은 backButton/스페이서
+  // 사이에서 title만 진짜 정중앙에 온다 — center로 두면 셋을 한 묶음으로 가운데 몰아버려서
+  // backButton까지 화면 중앙 쪽으로 끌려온다(2026-08-25, 앞선 수정에서 놓친 부분).
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     paddingVertical: 16,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0F0',
   },
+  // absolute로 빼면 header의 justifyContent:'center' 계산에서 backButton이 빠져서, 제목이
+  // 오른쪽 스페이서(width:34) 폭만큼 왼쪽으로 치우쳐 보이는 버그가 있었다(2026-08-25 발견).
+  // flex 흐름에 그대로 두고 폭을 스페이서와 맞춰야(둘 다 34px 안팎) 제목이 진짜 화면 중앙에 온다.
   backButton: {
-    position: 'absolute',
-    left: 16,
     padding: 4,
   },
   title: {
