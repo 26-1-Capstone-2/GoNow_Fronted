@@ -134,6 +134,11 @@ const DEFAULT_ALARM: GroupAlarm = {
 
 type ViewType = 'list' | 'edit' | 'place' | 'addChoice' | 'join' | 'date';
 
+// 뒤로가기 시 각 view가 되돌아갈 상위 view — 각 헤더의 "‹" 버튼이 이미 정의해둔 관계와 동일.
+const GROUP_BACK_VIEW: Partial<Record<ViewType, ViewType>> = {
+  edit: 'list', addChoice: 'list', join: 'addChoice', place: 'edit', date: 'edit',
+};
+
 export default function GroupAllAlarmSheet({ onClose, onArrivalPress, initialEditId }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
   const insets = useSafeAreaInsets();
@@ -190,9 +195,6 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress, initialEdi
   // 화면까지 들어간 상태로 뒤로가기(스와이프 포함)를 하면 한 단계씩 안 돌아가고 시트 전체가
   // 닫혀버렸다(2026-08-26 발견). 각 헤더의 "‹" 버튼이 이미 정의해둔 상위 화면과 동일하게
   // 한 단계만 되돌리고, list에서 누르면 그제서야 상위 핸들러가 시트 전체를 닫도록 넘긴다.
-  const GROUP_BACK_VIEW: Partial<Record<ViewType, ViewType>> = {
-    edit: 'list', addChoice: 'list', join: 'addChoice', place: 'edit', date: 'edit',
-  };
   useEffect(() => {
     if (Platform.OS !== 'android') return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
