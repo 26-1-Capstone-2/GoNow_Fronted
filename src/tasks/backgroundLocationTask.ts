@@ -4,6 +4,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, Platform } from 'react-native';
 import { TOKEN_KEY } from '@/src/store/authStore';
 import { syncStagedAlarms, cancelStagedAlarms, AlarmType, sendDebugNotification } from '@/src/utils/notifications';
+import { emitAlarmLocationUpdate } from '@/src/services/alarmEvents';
+import { useCalendarStore } from '@/src/store/calendarStore';
 import type { KakaoMapTransportMode } from '@/src/utils/kakaoMapDeeplink';
 import { enterNearDestGeofenceMode } from '@/src/tasks/nearDestGeofenceTask';
 import { enterDepartingGeofenceMode } from '@/src/tasks/departingGeofenceTask';
@@ -750,12 +752,19 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
         dlog('POLLING', `/location 응답 — journeyId:${id} status:${journey_status} interval:${interval}`);
         const type: AlarmType = journey_type === 'HOME' ? 'home' : 'personal';
 
+        // 포그라운드(alarmService.ts)만 이 로컬 이벤트/alarmVersion을 올렸었다 — 알람 생성
+        // 직후 시트가 닫히며 생기는 짧은 AppState 블립 동안(2026-08-14 버그3/8 주석 참고) 이
+        // 헤드리스 경로가 먼저 응답을 처리하면, 화면(DailyAlarmScreen 등)이 이 사실을 전혀
+        // 알 방법이 없어 다음 재조회 전까지 낡은 상태로 남아있었다(2026-08-27 발견 — "가끔은
+        // 바로 반영되고 가끔은 뒤로 갔다 와야 반영되는" 비결정성의 실제 원인이었음).
+        emitAlarmLocationUpdate({ journeyId: id, status: journey_status, departureAlarmTime: departure_alarm_time ?? null });
         if (interval != null) {
           const effectiveInterval = DEBUG_FORCE_INTERVAL_SEC ?? interval;
           dlog('POLLING', `[백그라운드] interval 갱신 — journeyId:${id} → ${effectiveInterval}s${DEBUG_FORCE_INTERVAL_SEC != null ? `(서버값 ${interval}s 무시, 테스트 강제)` : ''}`);
           desiredIntervals[key] = effectiveInterval;
           intervalSets[key] = effectiveInterval;
           intervalDeletes.delete(key);
+          useCalendarStore.getState().bumpAlarmVersion();
         }
         // 2026-08-14: 등록 시점 알림 대신, 실제 호출이 성공한 이 시점에 "다음 호출까지 약
         // N초"를 알려주는 게 더 직관적이다(사용자 피드백) — 다음 호출 예정 간격은 방금 받은
@@ -899,12 +908,16 @@ TaskManager.defineTask(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
         const { participant_status, preparation_time, dest_name, which_station, interval, departure_alarm_time } = res?.data ?? {};
         dlog('POLLING', `/location 응답 — appointmentId:${id} status:${participant_status} interval:${interval}`);
 
+        // journeyIds 루프와 동일 이유(위 주석 참고) — 헤드리스 경로가 응답을 처리해도 화면에
+        // 즉시 반영되도록 로컬 이벤트/alarmVersion을 올린다(2026-08-27).
+        emitAlarmLocationUpdate({ appointmentId: id, status: participant_status, departureAlarmTime: departure_alarm_time ?? null });
         if (interval != null) {
           const effectiveInterval = DEBUG_FORCE_INTERVAL_SEC ?? interval;
           dlog('POLLING', `[백그라운드] interval 갱신 — appointmentId:${id} → ${effectiveInterval}s${DEBUG_FORCE_INTERVAL_SEC != null ? `(서버값 ${interval}s 무시, 테스트 강제)` : ''}`);
           desiredIntervals[key] = effectiveInterval;
           intervalSets[key] = effectiveInterval;
           intervalDeletes.delete(key);
+          useCalendarStore.getState().bumpAlarmVersion();
         }
         sendDebugNotification('GPS 호출 완료(백그라운드)', `appointmentId:${id} status:${participant_status} interval: ${interval != null ? interval : '유지'} → ${desiredIntervals[key] ?? 30}초`).catch(() => {});
 
