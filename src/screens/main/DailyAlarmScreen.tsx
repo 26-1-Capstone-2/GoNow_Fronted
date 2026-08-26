@@ -1,17 +1,21 @@
 import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
 import { createAppointmentsApi } from '@/src/api/appointments';
-import { createJourneysApi, targetTimeToAmpmHourMinute } from '@/src/api/journeys';
+import { createJourneysApi, getRepeatLabel, maskToRepeatDays, targetTimeToAmpmHourMinute } from '@/src/api/journeys';
 import { createMembersApi } from '@/src/api/members';
 import { alarmService } from '@/src/services/alarmService';
+import { subscribeAlarmLocationUpdate } from '@/src/services/alarmEvents';
 import { toTransportMode, canNavigateAlarm, handleNavigateAlarm } from '@/src/utils/kakaoMapDeeplink';
+import { getAlarmTimeDisplay } from '@/src/utils/alarmTimeDisplay';
 import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
+import AlarmTimeBlock from '@/src/components/common/AlarmTimeBlock';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { Feather, FontAwesome5, FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  InteractionManager,
   Platform,
   ScrollView,
   StyleSheet,
@@ -40,7 +44,11 @@ type AlarmCard = {
   destLng: number;
   enabled: boolean;
   transport: 'public' | 'car';
+  departureAlarmTime: string | null;
   isLastMode?: boolean;
+  // 막차 모드 target_time 확정 여부(getAlarmTimeDisplay의 hasTargetTime으로 전달) — 그 외
+  // 알람 타입은 항상 undefined로 두고 기본값(true) 그대로 씀
+  targetTimeKnown?: boolean;
   participantCount?: number;
   myStatus?: string;
   appointmentStatus?: string;
@@ -61,7 +69,9 @@ function toAlarmCard(item: AlarmItem): AlarmCard {
     destLng: item.dest_lng,
     enabled: item.is_active,
     transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
+    departureAlarmTime: item.departure_alarm_time,
     isLastMode: item.is_last_mode,
+    targetTimeKnown: item.target_time != null,
     participantCount: item.participant_count ?? undefined,
     myStatus: item.my_status,
     appointmentStatus: item.appointment_status ?? undefined,
@@ -77,9 +87,13 @@ interface Props {
   onHomeAdd: () => void;
   onHomeEdit: (journeyId: number, alarm: AlarmCard) => void;
   onArrivalPress: (appointmentId: number) => void;
+  // "다가오는 일정" 카드 탭 등 외부에서 특정 알람의 수정 화면으로 바로 이어서 열고 싶을 때
+  // 사용 — 이 날짜의 알람 목록이 로드되면 해당 id를 찾아 카드 탭과 동일한 경로로 수정 시트를 연다.
+  autoEditKind?: 'personal' | 'group' | 'home';
+  autoEditId?: number;
 }
 
-export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGroupAdd, onGroupEdit, onHomeAdd, onHomeEdit, onArrivalPress }: Props) {
+export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGroupAdd, onGroupEdit, onHomeAdd, onHomeEdit, onArrivalPress, autoEditKind, autoEditId }: Props) {
   const router = useRouter();
   const { selectedDate, selectedMonth, setSelectedDate, alarmVersion, bumpAlarmVersion } = useCalendarStore();
   const today = new Date();
@@ -94,10 +108,22 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
   const date = dateObj.getDate();
   const dayName = DAY_NAMES[dateObj.getDay()];
 
+  // 재조회(loadAlarms)와 실시간 패치(subscribeAlarmLocationUpdate)가 거의 동시에 발생할 때,
+  // 먼저 나간 재조회가 네트워크 지연으로 나중에 도착하면 이미 반영된 최신 패치를 덮어써버리는
+  // 경쟁 조건이 있었다(2026-08-26 발견 — "가끔은 바로 반영, 가끔은 뒤로 갔다 와야 반영"되는
+  // 비결정적 증상으로 나타남). 매 loadAlarms 호출과 패치마다 세대를 올려서, 응답이 도착했을
+  // 때 그 사이 더 최신 정보가 이미 반영됐다면(세대가 바뀌었다면) 낡은 응답은 버린다.
+  const loadGenRef = useRef(0);
+
   const loadAlarms = useCallback(async () => {
+    const gen = ++loadGenRef.current;
     try {
       const res = await alarmsApi.getAlarms(selectedDate);
-      const data = res.data ?? [];
+      if (loadGenRef.current !== gen) return;
+      // 서버 조회 쿼리(findAllByPlanDate)가 반복 요일만 보고 매칭해서, 그 여정이 생성되기
+      // 전(=앵커 plan_date보다 이른) 날짜를 조회해도 유령처럼 매칭되는 버그가 있다(2026-08-24
+      // 발견). 조회한 날짜가 여정 앵커보다 이르면 클라이언트에서 걸러낸다.
+      const data = (res.data ?? []).filter((a) => selectedDate >= a.plan_date.split('T')[0]);
       setPersonal(data.filter((a) => a.alarm_type === 'PERSONAL').map(toAlarmCard));
       setGroup(data.filter((a) => a.alarm_type === 'GROUP').map(toAlarmCard));
       setHome(data.filter((a) => a.alarm_type === 'HOME').map(toAlarmCard));
@@ -107,6 +133,53 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
   useEffect(() => {
     loadAlarms();
   }, [loadAlarms]);
+
+  // 생성/수정 직후엔 서버가 아직 GPS 응답을 못 받아서 departureAlarmTime이 비어있는 채로
+  // 화면이 렌더된다 — 이후 alarmService가 실제 GPS 응답을 받는 시점(수 초~수십 초 뒤)에
+  // 재조회 없이 그 값을 바로 반영한다(이전엔 화면을 나갔다 다시 들어와야만 갱신됐음).
+  useEffect(() => {
+    return subscribeAlarmLocationUpdate((update) => {
+      // 진행 중인 낡은 재조회가 있다면 이 패치보다 늦게 도착해도 무시되게 세대를 올린다.
+      loadGenRef.current++;
+      const patch = (arr: AlarmCard[]) => arr.map((a) =>
+        (update.journeyId != null && a.journeyId === update.journeyId) ||
+        (update.appointmentId != null && a.appointmentId === update.appointmentId)
+          ? { ...a, departureAlarmTime: update.departureAlarmTime, myStatus: update.status }
+          : a
+      );
+      if (update.journeyId != null) {
+        setPersonal(patch);
+        setHome(patch);
+      } else if (update.appointmentId != null) {
+        setGroup(patch);
+      }
+    });
+  }, []);
+
+  // "다가오는 일정" 카드 탭으로 진입한 경우, 이 날짜의 목록이 로드되면 해당 알람을 찾아 카드
+  // 탭과 동일한 경로로 수정 시트를 자동으로 연다. selectedDate가 아직 목표 날짜로 안 바뀐
+  // 시점(라우팅 직후)엔 못 찾는 게 정상이고, 그러면 아무 것도 안 하고 다음 로드를 기다린다
+  // (setSelectedDate 반영 후 loadAlarms가 다시 돌면서 personal/group/home이 갱신되어 재시도됨).
+  const consumedAutoEditRef = useRef(false);
+  useEffect(() => {
+    if (!autoEditKind || autoEditId == null || consumedAutoEditRef.current) return;
+    if (autoEditKind === 'personal') {
+      const alarm = personal.find((a) => a.journeyId === autoEditId);
+      if (!alarm) return;
+      consumedAutoEditRef.current = true;
+      if (alarm.myStatus !== 'MOVING') onPersonalEdit(autoEditId, alarm);
+    } else if (autoEditKind === 'home') {
+      const alarm = home.find((a) => a.journeyId === autoEditId);
+      if (!alarm) return;
+      consumedAutoEditRef.current = true;
+      if (alarm.myStatus !== 'MOVING') onHomeEdit(autoEditId, alarm);
+    } else if (autoEditKind === 'group') {
+      const alarm = group.find((a) => a.appointmentId === autoEditId);
+      if (!alarm) return;
+      consumedAutoEditRef.current = true;
+      if (alarm.appointmentStatus === 'WAITING') onGroupEdit(autoEditId, alarm);
+    }
+  }, [autoEditKind, autoEditId, personal, home, group, onPersonalEdit, onHomeEdit, onGroupEdit]);
 
   // alarmType은 isLastMode(막차 모드 여부)로 유추하면 안 된다 — HOME 여정도 데드라인 모드
   // (is_last_mode=false)면 PERSONAL로 잘못 판정된다. 호출부가 이미 personal/home 중 어느
@@ -151,7 +224,15 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
     <SafeAreaView style={styles.container}>
       {/* 헤더 */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => { setSelectedDate(todayStr); router.back(); }}>
+        <TouchableOpacity style={styles.backButton} onPress={() => {
+          // setSelectedDate와 router.back()을 같은 틱에서 동시에 실행하면, 전환 애니메이션
+          // 도중 이 화면과 캘린더 화면이 동시에 같은 selectedDate를 보고 리렌더링되면서
+          // Fabric이 뷰를 두 부모에 동시에 붙이려다 크래시하는 경우가 있었다(2026-08-24,
+          // "View already has a parent" IllegalStateException 실기기 로그로 확인). 네비게이션을
+          // 먼저 보내고, 상태 갱신은 전환이 끝난 뒤로 미룬다.
+          router.back();
+          InteractionManager.runAfterInteractions(() => setSelectedDate(todayStr));
+        }}>
           <Feather name="chevron-left" size={20} color="#1A1A1A" />
           <Text style={styles.backMonth}>{selectedMonth}월</Text>
         </TouchableOpacity>
@@ -195,18 +276,29 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   }
                   alarm.journeyId && onPersonalEdit(alarm.journeyId, alarm);
                 }}>
-                <View style={[styles.typeChip, { backgroundColor: '#EAF3FF' }, alarm.myStatus === 'MOVING' && { opacity: 0.45 }]}>
+                <View style={[styles.typeChip, { backgroundColor: '#EAF3FF' }, (selectedDate < todayStr || (alarm.myStatus === 'ARRIVED' && selectedDate === todayStr)) && { opacity: 0.45 }]}>
                   <Feather name="map-pin" size={17} color="#0A84FF" />
                 </View>
-                <View style={[styles.alarmInfo, alarm.myStatus === 'MOVING' && { opacity: 0.45 }]}>
-                  <Text style={styles.alarmPlace}>{alarm.place}</Text>
-                  <View style={styles.alarmMeta}>
-                    <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.time} 까지</Text>
-                    {alarm.transport === 'public'
-                      ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
-                      : <FontAwesome5 name="car-side" size={13} color="#0A84FF" />
-                    }
-                  </View>
+                <View style={[styles.alarmInfo, (selectedDate < todayStr || (alarm.myStatus === 'ARRIVED' && selectedDate === todayStr)) && { opacity: 0.45 }]}>
+                  <Text style={styles.alarmPlace} numberOfLines={1}>{alarm.place}</Text>
+                  <AlarmTimeBlock
+                    display={getAlarmTimeDisplay({
+                      targetAmpm: alarm.ampm,
+                      targetHour: alarm.time.split(':')[0],
+                      targetMinute: alarm.time.split(':')[1],
+                      departureAlarmTime: alarm.departureAlarmTime,
+                      planDate: selectedDate,
+                      myStatus: alarm.myStatus,
+                    })}
+                    trailing={<>
+                      {alarm.transport === 'public'
+                        ? <MaterialCommunityIcons name="bus-side" size={15} color="#0A84FF" />
+                        : <FontAwesome5 name="car-side" size={13} color="#0A84FF" />}
+                      {getRepeatLabel(maskToRepeatDays(alarm.repeatDays ?? 0)) !== '안함' && (
+                        <Text style={styles.repeatLabel}>· {getRepeatLabel(maskToRepeatDays(alarm.repeatDays ?? 0))}</Text>
+                      )}
+                    </>}
+                  />
                 </View>
                 <View style={styles.cardRight}>
                   <TouchableOpacity
@@ -280,20 +372,22 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   <Feather name="users" size={17} color="#FF9F0A" />
                 </View>
                 <View style={[styles.alarmInfo, isGroupActive && { opacity: 0.45 }]}>
-                  <Text style={styles.alarmPlace}>{alarm.place}</Text>
-                  <View style={styles.alarmMeta}>
-                    <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.time} 까지</Text>
-                    {alarm.transport === 'public'
-                      ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
-                      : <FontAwesome5 name="car-side" size={13} color="#FF9F0A" />
-                    }
-                  </View>
+                  <Text style={styles.alarmPlace} numberOfLines={1}>{alarm.place}</Text>
+                  <AlarmTimeBlock
+                    display={getAlarmTimeDisplay({
+                      targetAmpm: alarm.ampm,
+                      targetHour: alarm.time.split(':')[0],
+                      targetMinute: alarm.time.split(':')[1],
+                      departureAlarmTime: alarm.departureAlarmTime,
+                      planDate: selectedDate,
+                      myStatus: alarm.myStatus,
+                    })}
+                    trailing={alarm.transport === 'public'
+                      ? <MaterialCommunityIcons name="bus-side" size={15} color="#FF9F0A" />
+                      : <FontAwesome5 name="car-side" size={13} color="#FF9F0A" />}
+                  />
                 </View>
                 <View style={styles.cardRight}>
-                  <View style={styles.memberBadge}>
-                    <Feather name="users" size={11} color="#555555" />
-                    <Text style={styles.memberCount}>{alarm.participantCount ?? 0}명</Text>
-                  </View>
                   <TouchableOpacity
                     onPress={() => { if (alarm.appointmentId) { onArrivalPress(alarm.appointmentId); } }}
                     disabled={!isGroupActive}
@@ -352,20 +446,32 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
                   }
                   alarm.journeyId && onHomeEdit(alarm.journeyId, alarm);
                 }}>
-                <View style={[styles.typeChip, { backgroundColor: '#EAF9EE' }, alarm.myStatus === 'MOVING' && { opacity: 0.45 }]}>
+                <View style={[styles.typeChip, { backgroundColor: '#EAF9EE' }, (selectedDate < todayStr || (alarm.myStatus === 'ARRIVED' && selectedDate === todayStr)) && { opacity: 0.45 }]}>
                   <Feather name="navigation" size={17} color="#30D158" />
                 </View>
-                <View style={[styles.alarmInfo, alarm.myStatus === 'MOVING' && { opacity: 0.45 }]}>
-                  <Text style={styles.alarmPlace}>{alarm.place}</Text>
-                  <View style={styles.alarmMeta}>
-                    <Text style={styles.alarmDeadline}>
-                      {alarm.isLastMode ? '막차 기준' : `${alarm.ampm} ${alarm.time} 까지`}
-                    </Text>
-                    {alarm.isLastMode || alarm.transport === 'public'
-                      ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
-                      : <FontAwesome5 name="car-side" size={13} color="#30D158" />
-                    }
-                  </View>
+                <View style={[styles.alarmInfo, (selectedDate < todayStr || (alarm.myStatus === 'ARRIVED' && selectedDate === todayStr)) && { opacity: 0.45 }]}>
+                  <Text style={styles.alarmPlace} numberOfLines={1}>{alarm.place}</Text>
+                  <AlarmTimeBlock
+                    display={getAlarmTimeDisplay({
+                      targetAmpm: alarm.ampm,
+                      targetHour: alarm.time.split(':')[0],
+                      targetMinute: alarm.time.split(':')[1],
+                      departureAlarmTime: alarm.departureAlarmTime,
+                      planDate: selectedDate,
+                      isLastMode: alarm.isLastMode,
+                      hasTargetTime: alarm.targetTimeKnown,
+                      isRepeating: !!alarm.repeatDays,
+                      myStatus: alarm.myStatus,
+                    })}
+                    trailing={<>
+                      {alarm.isLastMode || alarm.transport === 'public'
+                        ? <MaterialCommunityIcons name="bus-side" size={15} color="#30D158" />
+                        : <FontAwesome5 name="car-side" size={13} color="#30D158" />}
+                      {getRepeatLabel(maskToRepeatDays(alarm.repeatDays ?? 0)) !== '안함' && (
+                        <Text style={styles.repeatLabel}>· {getRepeatLabel(maskToRepeatDays(alarm.repeatDays ?? 0))}</Text>
+                      )}
+                    </>}
+                  />
                 </View>
                 <View style={styles.cardRight}>
                   <TouchableOpacity
@@ -474,10 +580,7 @@ const styles = StyleSheet.create({
   alarmInfo: { flex: 1, marginRight: 8, justifyContent: 'center' },
   cardRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   alarmPlace: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 5 },
-  alarmDeadline: { fontSize: 13, fontWeight: '500', color: '#555555' },
-  alarmMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  memberBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#E8E8E8', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 10 },
-  memberCount: { fontSize: 11, color: '#555555', fontWeight: '500' },
+  repeatLabel: { fontSize: 12, color: '#888888' },
   arrivalBtn: {
     width: 30,
     height: 30,

@@ -10,7 +10,13 @@ import { ROUTES } from './routes';
 export function useAppNavigation() {
   const router = useRouter();
 
+  // dismissAll() 먼저 호출하는 이유: replace()만 쓰면 지금 화면 하나만 로그인 화면으로 바뀌고
+  // 그 아래 쌓여있던 인증된 화면은 스택에 그대로 남아, 로그인 화면에서 뒤로가기(스와이프)를
+  // 하면 그 화면이 그대로 노출되는 문제가 있었다(client.ts/ProfileSettingsScreen.tsx에서
+  // 2026-08-25 발견 후 동일하게 적용) — "로그인 화면으로 보낸다"는 이 함수의 목적상 항상
+  // 스택을 비우는 게 안전하다.
   const goToLogin = useCallback(() => {
+    router.dismissAll();
     router.replace(ROUTES.login);
   }, [router]);
 

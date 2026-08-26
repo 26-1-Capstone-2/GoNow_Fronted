@@ -18,6 +18,13 @@
       },
       "channel": "preview"
     },
+    "local": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "channel": "local-dev"
+    },
     "production": {
       "android": {
         "buildType": "app-bundle"

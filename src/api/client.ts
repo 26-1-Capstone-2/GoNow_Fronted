@@ -94,6 +94,11 @@ export function createApiClient(options: ApiClientOptions = {}) {
       useAuthStore.getState().setToken(null);
       useAuthStore.getState().setRefreshToken(null);
       useAuthStore.getState().setMemberId(null);
+      // replace()만 쓰면 지금 화면 하나만 로그인 화면으로 바뀌고 그 아래 쌓여있던 인증된
+      // 화면(캘린더 등)은 스택에 그대로 남아, 로그인 화면에서 뒤로가기(스와이프)를 하면 로그아웃된
+      // 상태로 그 화면이 그대로 노출되는 문제가 있었다(2026-08-25 발견) — dismissAll()로 스택을
+      // 완전히 비운 뒤 이동한다.
+      router.dismissAll();
       router.replace('/(auth)/login');
       throw new Error('401 Unauthorized');
     }

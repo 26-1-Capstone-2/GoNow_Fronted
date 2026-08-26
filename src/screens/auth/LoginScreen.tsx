@@ -4,6 +4,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -22,12 +23,17 @@ import { toTransportMode } from '@/src/utils/kakaoMapDeeplink';
 import { useAppNavigation } from '@/src/navigation';
 import { useAuthStore } from '@/src/store/authStore';
 import { dlog } from '@/src/utils/deviceLogger';
+import { useDoubleBackToExit } from '@/src/hooks/useDoubleBackToExit';
 import * as Notifications from 'expo-notifications';
 
 const authApi = createAuthApi();
 
 export default function LoginScreen() {
   const { goToMainTabs, goToSignUp, goToPasswordReset } = useAppNavigation();
+  // 로그아웃/세션만료 시 dismissAll()로 스택을 비우고 나면 이 화면이 최상위(root)가 되어,
+  // 캘린더 화면과 동일하게 뒤로가기를 눌러도 조용히 백그라운드로만 내려가는 게 기본 동작이다
+  // — 같은 종료 안내 UX를 적용한다.
+  useDoubleBackToExit();
   const setToken = useAuthStore((s) => s.setToken);
   const setRefreshToken = useAuthStore((s) => s.setRefreshToken);
   const setMemberId = useAuthStore((s) => s.setMemberId);
@@ -131,64 +137,74 @@ export default function LoginScreen() {
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.inner}
+        style={{ flex: 1 }}
       >
-        {/* 로고 */}
-        <View style={styles.logoContainer}>
-          <Text style={styles.logoText}>
-            <Text style={styles.logoGo}>go</Text>
-            <Text style={styles.logoNow}>now</Text>
-          </Text>
-        </View>
+        {/* 다른 인증 화면(SignUpScreen 등)과 동일하게 ScrollView로 감싼다 — 키보드가 올라와
+            KeyboardAvoidingView가 높이를 줄이면, 가운데 정렬된 콘텐츠를 억지로 좁은 영역에
+            우겨넣는 대신 포커스된 입력창으로 자동 스크롤되게 한다(2026-08-25, 비밀번호
+            입력창이 키보드에 가려지던 문제 수정). */}
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* 로고 */}
+          <View style={styles.logoContainer}>
+            <Text style={styles.logoText}>
+              <Text style={styles.logoGo}>go</Text>
+              <Text style={styles.logoNow}>now</Text>
+            </Text>
+          </View>
 
-        {/* 인풋 영역 */}
-        <View style={styles.formContainer}>
-          <Text style={styles.label}>E-mail</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="email@email.com"
-            placeholderTextColor="#BBBBBB"
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
-          />
+          {/* 인풋 영역 */}
+          <View style={styles.formContainer}>
+            <Text style={styles.label}>E-mail</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="email@email.com"
+              placeholderTextColor="#BBBBBB"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
 
-          <Text style={[styles.label, { marginTop: 16 }]}>비밀번호</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="비밀번호"
-            placeholderTextColor="#BBBBBB"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-          />
+            <Text style={[styles.label, { marginTop: 16 }]}>비밀번호</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="비밀번호"
+              placeholderTextColor="#BBBBBB"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+            />
 
-          {/* 로그인 버튼 */}
-          <TouchableOpacity
-            style={[styles.loginButton, loading && { backgroundColor: '#888888' }]}
-            onPress={handleLogin}
-            disabled={loading}
-          >
-            {loading
-              ? <ActivityIndicator color="#FFFFFF" />
-              : <Text style={styles.loginButtonText}>로그인</Text>
-            }
-          </TouchableOpacity>
+            {/* 로그인 버튼 */}
+            <TouchableOpacity
+              style={[styles.loginButton, loading && { backgroundColor: '#888888' }]}
+              onPress={handleLogin}
+              disabled={loading}
+            >
+              {loading
+                ? <ActivityIndicator color="#FFFFFF" />
+                : <Text style={styles.loginButtonText}>로그인</Text>
+              }
+            </TouchableOpacity>
 
-          {/* 비밀번호 찾기 */}
-          <TouchableOpacity style={styles.forgotPasswordButton} onPress={goToPasswordReset}>
-            <Text style={styles.forgotPasswordText}>비밀번호를 잊으셨나요?</Text>
-          </TouchableOpacity>
-        </View>
+            {/* 비밀번호 찾기 */}
+            <TouchableOpacity style={styles.forgotPasswordButton} onPress={goToPasswordReset}>
+              <Text style={styles.forgotPasswordText}>비밀번호를 잊으셨나요?</Text>
+            </TouchableOpacity>
+          </View>
 
-        {/* 하단 회원가입 링크 */}
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>계정이 없으신가요? </Text>
-          <TouchableOpacity onPress={goToSignUp}>
-            <Text style={styles.signUpText}>가입하기</Text>
-          </TouchableOpacity>
-        </View>
+          {/* 하단 회원가입 링크 */}
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>계정이 없으신가요? </Text>
+            <TouchableOpacity onPress={goToSignUp}>
+              <Text style={styles.signUpText}>가입하기</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -199,8 +215,8 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
-  inner: {
-    flex: 1,
+  scrollContent: {
+    flexGrow: 1,
     justifyContent: 'center',
     paddingHorizontal: 32,
   },

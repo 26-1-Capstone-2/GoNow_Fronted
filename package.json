@@ -9,7 +9,10 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "android:release": "node scripts/android-release.js",
+    "android:install": "adb install -r android/app/build/outputs/apk/release/app-release.apk",
+    "update:publish": "node scripts/publish-update.js"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

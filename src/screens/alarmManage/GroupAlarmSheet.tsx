@@ -1,6 +1,5 @@
 import AddressSearchView, { SearchResult } from '@/src/components/common/AddressSearchView';
-import SwipeableAlarmCard from '@/src/components/common/SwipeableAlarmCard';
-import { AlarmItem, createAlarmsApi } from '@/src/api/alarms';
+import { SegmentedToggle } from '@/src/components/common/SegmentedToggle';
 import { createAppointmentsApi } from '@/src/api/appointments';
 import { alarmService } from '@/src/services/alarmService';
 import { checkCoreAlarmPermissions } from '@/src/utils/permissions';
@@ -10,14 +9,12 @@ import { createMembersApi } from '@/src/api/members';
 import { usePlaces } from '@/src/hooks/usePlaces';
 import { useCalendarStore } from '@/src/store/calendarStore';
 import { useAppointmentStatusStore } from '@/src/store/appointmentStatusStore';
-import { Entypo, Feather, FontAwesome5, FontAwesome6, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Entypo, Feather, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icons';
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Platform, Share, StyleSheet, Switch, Text, TextInput, ToastAndroid, TouchableOpacity, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Alert, BackHandler, Platform, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
 const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));
 const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
 
@@ -30,24 +27,19 @@ interface GroupAlarm {
   appointmentId?: number;
   ampm: string; hour: string; minute: string;
   dest_name: string; dest_address: string; dest_lat?: number; dest_lng?: number;
-  enabled: boolean; members: Member[]; inviteCode: string;
-  isArrivalActive?: boolean;
+  members: Member[]; inviteCode: string;
   transport: Transport;
-  appointment_status?: string;
-  participant_count?: number;
   isCurrentUserHost?: boolean;
 }
 
 interface Props {
   onClose: () => void;
-  onArrivalPress?: (alarm: GroupAlarm) => void;
-  initialMode?: 'add' | 'create' | 'edit' | 'join';
+  initialMode: 'add' | 'create' | 'edit' | 'join';
   editAppointmentId?: number;
   initialAlarm?: any;
   initialInviteCode?: string;
 }
 
-const alarmsApi = createAlarmsApi();
 const appointmentsApi = createAppointmentsApi();
 const membersApi = createMembersApi();
 
@@ -58,40 +50,19 @@ function toTargetTime(date: string, ampm: string, hour: string, minute: string):
   return `${date}T${String(h).padStart(2, '0')}:${minute}:00`;
 }
 
-function fromAlarmItem(item: AlarmItem): GroupAlarm {
-  const { ampm, hour, minute } = targetTimeToAmpmHourMinute(item.target_time);
-  return {
-    id: String(item.appointment_id),
-    appointmentId: item.appointment_id ?? undefined,
-    ampm, hour, minute,
-    dest_name: item.dest_name,
-    dest_address: '',
-    dest_lat: item.dest_lat,
-    dest_lng: item.dest_lng,
-    enabled: item.is_active,
-    members: [],
-    inviteCode: '',
-    isArrivalActive: item.appointment_status !== 'WAITING',
-    transport: item.transport_type === 'TRANSIT' ? 'public' : 'car',
-    appointment_status: item.appointment_status ?? undefined,
-    participant_count: item.participant_count ?? undefined,
-  };
-}
-
 const DEFAULT_ALARM: GroupAlarm = {
   id: '', ampm: '오전', hour: '7', minute: '00',
   dest_name: '', dest_address: '', dest_lat: undefined, dest_lng: undefined,
-  enabled: true, members: [{ id: 'me', name: '가가가(본인)', isMe: true }], inviteCode: '',
-  isArrivalActive: false, transport: 'public' as Transport,
+  members: [{ id: 'me', name: '가가가(본인)', isMe: true }], inviteCode: '',
+  transport: 'public' as Transport,
 };
 
-type ViewType = 'list' | 'edit' | 'place' | 'addChoice' | 'join';
+type ViewType = 'edit' | 'place' | 'addChoice' | 'join';
 
-export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, editAppointmentId, initialAlarm, initialInviteCode }: Props) {
+export default function GroupAlarmSheet({ onClose, initialMode, editAppointmentId, initialAlarm, initialInviteCode }: Props) {
   const bottomSheetRef = useRef<BottomSheet>(null);
-  const insets = useSafeAreaInsets();
   const snapPoints = useMemo(() => ['88%'], []);
-  const { selectedDate, alarmVersion, bumpAlarmVersion } = useCalendarStore();
+  const { selectedDate, bumpAlarmVersion } = useCalendarStore();
   const { participantsVersion, deletedAppointmentId, setDeletedAppointmentId, removedAppointmentId, setRemovedAppointmentId } = useAppointmentStatusStore();
 
   const { places, searchKey, loadPlaces, savePlace, deletePlace } = usePlaces('DEST');
@@ -99,14 +70,13 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
   const [view, setView] = useState<ViewType>(
     initialMode === 'join' ? 'join'
       : initialMode === 'add' ? 'addChoice'
-      : (initialMode === 'create' || initialMode === 'edit') ? 'edit' : 'list'
+      : 'edit'
   );
-  const [alarms, setAlarms] = useState<GroupAlarm[]>([]);
   const [editAlarm, setEditAlarm] = useState<GroupAlarm>(() => {
     if (initialMode === 'edit' && editAppointmentId && initialAlarm) {
       return { ...DEFAULT_ALARM, id: String(editAppointmentId), appointmentId: editAppointmentId, dest_name: initialAlarm.place, ampm: initialAlarm.ampm, hour: initialAlarm.time?.split(':')[0] ?? '7', minute: initialAlarm.time?.split(':')[1] ?? '00', transport: initialAlarm.transport };
     }
-    return DEFAULT_ALARM;
+    return { ...DEFAULT_ALARM, ...targetTimeToAmpmHourMinute(new Date().toISOString()), minute: '00' };
   });
   const [tempPlace, setTempPlace] = useState<SearchResult | null>(null);
   const [inviteCode, setInviteCode] = useState(initialInviteCode ?? '');
@@ -114,40 +84,24 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
   const [joinTransport, setJoinTransport] = useState<Transport>('public');
   const isEditMode = !!editAlarm.id;
 
+  // place/join 화면에서 뒤로가기(스와이프 포함)를 하면 상위(edit/addChoice)로 안 돌아가고
+  // 이 시트 전체가 닫혀버리는 문제 방지(2026-08-26, daily-alarm.tsx의 시트 전체 닫기
+  // 핸들러와 같은 유형) — place/join에서는 이 핸들러가 먼저 소비해서 한 단계만 되돌리고,
+  // edit/addChoice(이 컴포넌트의 최상위 화면)에서 누르면 소비하지 않고 넘겨서 상위
+  // (daily-alarm.tsx)가 시트 전체를 닫도록 한다.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (view === 'place') { setView('edit'); return true; }
+      if (view === 'join') { setView('addChoice'); return true; }
+      return false;
+    });
+    return () => sub.remove();
+  }, [view]);
+
   useEffect(() => {
     loadPlaces().catch(() => {});
   }, [loadPlaces]);
-
-  const loadAlarms = useCallback(async () => {
-    try {
-      const [alarmsRes, profileRes] = await Promise.all([
-        alarmsApi.getAlarms(selectedDate),
-        membersApi.getMyProfile(),
-      ]);
-      const groupItems = (alarmsRes.data ?? []).filter((a) => a.alarm_type === 'GROUP');
-      const myMemberId = profileRes.data?.member_id;
-      const resolved = await Promise.all(
-        groupItems.map(async (item) => {
-          const base = fromAlarmItem(item);
-          if (!item.appointment_id || myMemberId == null) return { ...base, isCurrentUserHost: true };
-          try {
-            const detail = await appointmentsApi.getAppointment(item.appointment_id);
-            const isHost = detail.success && detail.data
-              ? detail.data.participants.some((p) => p.member_id === myMemberId && p.is_host)
-              : true;
-            return { ...base, isCurrentUserHost: isHost };
-          } catch {
-            return { ...base, isCurrentUserHost: true };
-          }
-        }),
-      );
-      setAlarms(resolved);
-    } catch {}
-  }, [selectedDate]);
-
-  useEffect(() => {
-    loadAlarms();
-  }, [loadAlarms, alarmVersion]);
 
   useEffect(() => {
     if (initialMode === 'edit' && editAppointmentId) {
@@ -159,14 +113,11 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const dateObj = new Date(selectedDate);
-  const month = dateObj.getMonth() + 1;
-  const date = dateObj.getDate();
-  const dayName = DAY_NAMES[dateObj.getDay()];
-
   const handleSheetChange = useCallback((index: number) => { if (index === -1) onClose(); }, [onClose]);
-  const openAdd = () => { setEditAlarm(DEFAULT_ALARM); setView('edit'); };
-  const openNewGroup = () => { setEditAlarm(DEFAULT_ALARM); setView('edit'); };
+  const openNewGroup = () => {
+    setEditAlarm({ ...DEFAULT_ALARM, ...targetTimeToAmpmHourMinute(new Date().toISOString()), minute: '00' });
+    setView('edit');
+  };
   const handleJoin = async () => {
     if (inviteCode.trim().length === 0) { setInviteError('초대코드를 입력해주세요.'); return; }
     if (!(await checkCoreAlarmPermissions())) return;
@@ -185,9 +136,8 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
         setInviteCode('');
         setInviteError('');
         setJoinTransport('public');
-        await loadAlarms();
         bumpAlarmVersion();
-        setView('list');
+        onClose();
       } else {
         setInviteError(res.message ?? '참여에 실패했습니다.');
       }
@@ -203,7 +153,6 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
     }
   };
   const openEdit = async (alarm: GroupAlarm) => {
-    if (alarm.isArrivalActive) return;
     setEditAlarm(alarm);
     setView('edit');
     if (!alarm.appointmentId) return;
@@ -227,8 +176,6 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
           dest_lat: d.dest_lat,
           dest_lng: d.dest_lng,
           inviteCode: d.invite_code,
-          appointment_status: d.appointment_status,
-          participant_count: d.participants.length,
           isCurrentUserHost,
           members: d.participants.map((p) => ({
             id: String(p.member_id),
@@ -287,9 +234,8 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
           const res = await appointmentsApi.updateParticipantTransport(editAlarm.appointmentId, transportType);
           if (res.success) {
             alarmService.start({ alarmType: 'group', destination: editAlarm.dest_name, appointmentId: editAlarm.appointmentId, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, transportMode: toTransportMode(editAlarm.transport === 'car') });
-            await loadAlarms();
             bumpAlarmVersion();
-            initialMode ? onClose() : setView('list');
+            onClose();
           } else {
             Alert.alert('수정 실패', res.message ?? '다시 시도해주세요.');
           }
@@ -310,9 +256,8 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
             } else if (res.data?.participant_status === 'SCHEDULED' && editAlarm.appointmentId != null) {
               alarmService.stop(undefined, editAlarm.appointmentId);
             }
-            await loadAlarms();
             bumpAlarmVersion();
-            initialMode ? onClose() : setView('list');
+            onClose();
           } else {
             Alert.alert('수정 실패', res.message ?? '다시 시도해주세요.');
           }
@@ -339,9 +284,8 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
         if (res.data.participant_status === 'READY') {
           alarmService.start({ alarmType: 'group', destination: editAlarm.dest_name, appointmentId: res.data.appointment_id, destLat: editAlarm.dest_lat, destLng: editAlarm.dest_lng, transportMode: toTransportMode(editAlarm.transport === 'car') });
         }
-        await loadAlarms();
         bumpAlarmVersion();
-        initialMode ? onClose() : setView('list');
+        onClose();
       } else {
         Alert.alert('저장 실패', res.message ?? '다시 시도해주세요.');
       }
@@ -358,7 +302,6 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
           try {
             const res = await appointmentsApi.removeParticipant(editAlarm.appointmentId!, parseInt(member.id));
             if (res.success) {
-              await loadAlarms();
               bumpAlarmVersion();
               await openEdit(editAlarm);
               Alert.alert('추방 완료', `${member.name}님을 추방했습니다.`);
@@ -383,10 +326,9 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
           try {
             const res = await appointmentsApi.removeParticipant(editAlarm.appointmentId!, parseInt(myMember.id));
             if (res.success) {
-              await loadAlarms();
               bumpAlarmVersion();
               Alert.alert('탈퇴 완료', '그룹에서 탈퇴했습니다.', [
-                { text: '확인', onPress: () => initialMode ? onClose() : setView('list') },
+                { text: '확인', onPress: onClose },
               ]);
             } else {
               Alert.alert('탈퇴 실패', '다시 시도해주세요.');
@@ -405,26 +347,13 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
       if (res.success) {
         // alarmService.stop()이 내부적으로 ACTIVE_APPOINTMENTS_KEY 제거까지 안전하게(잠금 걸린 채) 처리함
         alarmService.stop(undefined, editAlarm.appointmentId);
-        await loadAlarms();
         bumpAlarmVersion();
-        initialMode ? onClose() : setView('list');
+        onClose();
       } else {
         Alert.alert('삭제 실패', res.message ?? '다시 시도해주세요.');
       }
     } catch {
       Alert.alert('삭제 실패', '네트워크 오류가 발생했습니다.');
-    }
-  };
-  const toggleAlarm = async (id: string) => {
-    const alarm = alarms.find((a) => a.id === id);
-    if (!alarm?.appointmentId) return;
-    const newValue = !alarm.enabled;
-    setAlarms((prev) => prev.map((a) => a.id === id ? { ...a, enabled: newValue } : a));
-    try {
-      await appointmentsApi.toggleParticipantAlarm(alarm.appointmentId, newValue);
-      alarmService.setActive(newValue, undefined, alarm.appointmentId);
-    } catch {
-      setAlarms((prev) => prev.map((a) => a.id === id ? { ...a, enabled: alarm.enabled } : a));
     }
   };
   const shareInviteCode = async () => {
@@ -459,103 +388,11 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
       animateOnMount={false}
       handleIndicatorStyle={styles.indicator} backgroundStyle={styles.background}>
 
-      {/* ── 목록 화면 ── */}
-      {view === 'list' && (
-        <View style={{ flex: 1 }}>
-          <View style={styles.header}>
-            <TouchableOpacity style={styles.headerBtn} onPress={onClose}><Feather name="x" size={22} color="#1A1A1A" /></TouchableOpacity>
-            <Text style={styles.title}>그룹</Text>
-            <View style={{ width: 36 }} />
-          </View>
-          <View style={styles.datePillContainer}>
-            <View style={styles.datePill}><Text style={styles.datePillText}>{month}월 {date}일 {dayName}요일</Text></View>
-          </View>
-          <BottomSheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-            {alarms.map((alarm) => (
-              <SwipeableAlarmCard key={alarm.id} icon={alarm.isCurrentUserHost === false ? 'log-out' : 'trash'} onDelete={async () => {
-                if (!alarm.appointmentId) return;
-                try {
-                  const [detailRes, profileRes] = await Promise.all([
-                    appointmentsApi.getAppointment(alarm.appointmentId),
-                    membersApi.getMyProfile(),
-                  ]);
-                  if (!detailRes.success || !detailRes.data || !profileRes.data) return;
-                  const myMemberId = profileRes.data.member_id;
-                  const isHost = detailRes.data.participants.some(
-                    (p) => p.member_id === myMemberId && p.is_host,
-                  );
-                  if (isHost) {
-                    const res = await appointmentsApi.deleteAppointment(alarm.appointmentId);
-                    if (res.success) {
-                      // alarmService.stop()이 내부적으로 ACTIVE_APPOINTMENTS_KEY 제거까지 안전하게(잠금 걸린 채) 처리함
-                      alarmService.stop(undefined, alarm.appointmentId);
-                      await loadAlarms(); bumpAlarmVersion();
-                    }
-                  } else {
-                    const res = await appointmentsApi.removeParticipant(alarm.appointmentId, myMemberId);
-                    if (res.success) {
-                      alarmService.stop(undefined, alarm.appointmentId);
-                      await loadAlarms(); bumpAlarmVersion();
-                    }
-                  }
-                } catch {}
-              }}>
-                <TouchableOpacity
-                  style={styles.alarmCard}
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    if (alarm.isArrivalActive) {
-                      Platform.OS === 'android'
-                        ? ToastAndroid.show('약속이 진행 중에는 수정할 수 없어요.', ToastAndroid.SHORT)
-                        : Alert.alert('', '약속이 진행 중에는 수정할 수 없어요.');
-                      return;
-                    }
-                    openEdit(alarm);
-                  }}
-                >
-                  <View style={[styles.typeChip, alarm.isArrivalActive && { opacity: 0.45 }]}>
-                    <Feather name="users" size={17} color="#FF9F0A" />
-                  </View>
-                  <View style={[styles.alarmInfo, alarm.isArrivalActive && { opacity: 0.45 }]}>
-                    <Text style={styles.alarmPlace}>{alarm.dest_name}</Text>
-                    <View style={styles.alarmMeta}>
-                      <Text style={styles.alarmDeadline}>{alarm.ampm} {alarm.hour}:{alarm.minute} 까지</Text>
-                      {alarm.transport === 'public'
-                        ? <MaterialCommunityIcons name="bus-side" size={15} color="#4A90D9" />
-                        : <FontAwesome5 name="car-side" size={13} color="#FF9F0A" />
-                      }
-                    </View>
-                  </View>
-                  <View style={styles.cardRight}>
-                    <View style={styles.memberBadge}>
-                      <Feather name="users" size={11} color="#555555" />
-                      <Text style={styles.memberCount}>{alarm.participant_count ?? alarm.members.length}명</Text>
-                    </View>
-                    <TouchableOpacity
-                      onPress={() => onArrivalPress?.(alarm)}
-                      disabled={!alarm.isArrivalActive}
-                      style={[styles.arrivalBtn, alarm.isArrivalActive && styles.arrivalBtnActive]}
-                    >
-                      <FontAwesome6 name="person-walking" size={14} color={alarm.isArrivalActive ? '#FFFFFF' : '#CCCCCC'} />
-                    </TouchableOpacity>
-                    <Switch value={alarm.enabled} onValueChange={() => toggleAlarm(alarm.id)}
-                      trackColor={{ false: '#E0E0E0', true: '#30D158' }} thumbColor="#FFFFFF" />
-                  </View>
-                </TouchableOpacity>
-              </SwipeableAlarmCard>
-            ))}
-          </BottomSheetScrollView>
-          <TouchableOpacity style={[styles.fab, { bottom: 24 + insets.bottom }]} onPress={openAdd} activeOpacity={0.85}>
-            <Feather name="plus" size={24} color="#1A1A1A" />
-          </TouchableOpacity>
-        </View>
-      )}
-
       {/* ── 수정/추가 화면 ── */}
       {view === 'edit' && (
         <>
           <View style={styles.header}>
-            <TouchableOpacity style={styles.headerBtn} onPress={() => initialMode ? onClose() : setView('list')}>
+            <TouchableOpacity style={styles.headerBtn} onPress={onClose}>
               <Feather name="x" size={22} color="#1A1A1A" />
             </TouchableOpacity>
             <Text style={styles.title}>
@@ -570,7 +407,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
               style={[styles.timeCard, editAlarm.isCurrentUserHost === false && styles.pickerDisabled]}
               pointerEvents={editAlarm.isCurrentUserHost === false ? 'none' : 'auto'}
             >
-              <Text style={styles.timeCardLabel}>출발 시각</Text>
+              <Text style={styles.timeCardLabel}>목표 시각</Text>
               <View style={styles.pickerContainer}>
                 <Picker selectedValue={editAlarm.ampm} onValueChange={(v) => setEditAlarm((prev) => ({ ...prev, ampm: v }))} style={styles.picker} itemStyle={styles.pickerItem}>
                   <Picker.Item label="오전" value="오전" color="#1A1A1A" /><Picker.Item label="오후" value="오후" color="#1A1A1A" />
@@ -597,7 +434,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
                       </View>
                       <View style={styles.memberRight}>
                         {member.transport === 'public' && (
-                          <MaterialCommunityIcons name="bus-side" size={20} color="#4A90D9" />
+                          <MaterialCommunityIcons name="bus-side" size={20} color="#FF9F0A" />
                         )}
                         {member.transport === 'car' && (
                           <FontAwesome5 name="car-side" size={18} color="#FF9F0A" />
@@ -630,22 +467,14 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
 
             <View style={styles.fieldGroup}>
               <Text style={styles.fieldGroupLabel}>이동 수단</Text>
-              <View style={styles.segmentTrack}>
-                <TouchableOpacity
-                  style={[styles.segmentBtn, editAlarm.transport === 'public' && styles.segmentBtnSelected]}
-                  onPress={() => setEditAlarm((prev) => ({ ...prev, transport: 'public' }))}
-                >
-                  <MaterialCommunityIcons name="bus-side" size={16} color={editAlarm.transport === 'public' ? '#1A1A1A' : '#8A8A8E'} />
-                  <Text style={[styles.segmentText, editAlarm.transport === 'public' && styles.segmentTextSelected]}>대중교통</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.segmentBtn, editAlarm.transport === 'car' && styles.segmentBtnSelected]}
-                  onPress={() => setEditAlarm((prev) => ({ ...prev, transport: 'car' }))}
-                >
-                  <FontAwesome5 name="car-side" size={14} color={editAlarm.transport === 'car' ? '#1A1A1A' : '#8A8A8E'} />
-                  <Text style={[styles.segmentText, editAlarm.transport === 'car' && styles.segmentTextSelected]}>자가용</Text>
-                </TouchableOpacity>
-              </View>
+              <SegmentedToggle
+                value={editAlarm.transport}
+                onChange={(v) => setEditAlarm((prev) => ({ ...prev, transport: v }))}
+                options={[
+                  { value: 'public', label: '대중교통', icon: (sel) => <MaterialCommunityIcons name="bus-side" size={16} color={sel ? '#1A1A1A' : '#8A8A8E'} /> },
+                  { value: 'car', label: '자가용', icon: (sel) => <FontAwesome5 name="car-side" size={14} color={sel ? '#1A1A1A' : '#8A8A8E'} /> },
+                ]}
+              />
             </View>
 
             {isEditMode && (
@@ -678,7 +507,7 @@ export default function GroupAlarmSheet({ onClose, onArrivalPress, initialMode, 
       {view === 'addChoice' && (
         <>
           <View style={styles.header}>
-            <TouchableOpacity style={styles.headerBtn} onPress={() => initialMode ? onClose() : setView('list')}>
+            <TouchableOpacity style={styles.headerBtn} onPress={onClose}>
               <Feather name="chevron-left" size={22} color="#1A1A1A" />
             </TouchableOpacity>
             <Text style={styles.title}>그룹 추가</Text>
@@ -786,31 +615,7 @@ const styles = StyleSheet.create({
   headerBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center' },
   title: { fontSize: 16, fontWeight: '600', color: '#1A1A1A' },
   saveBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#FF9F0A', alignItems: 'center', justifyContent: 'center' },
-  fab: {
-    position: 'absolute', right: 20, bottom: 24, width: 56, height: 56, borderRadius: 20,
-    backgroundColor: '#FFCE0C', alignItems: 'center', justifyContent: 'center',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.2, shadowRadius: 6, elevation: 4,
-  },
-  datePillContainer: { alignItems: 'center', marginBottom: 16 },
-  datePill: { backgroundColor: '#E8E8E8', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 6 },
-  datePillText: { fontSize: 13, fontWeight: '500', color: '#FF453A' },
   content: { paddingHorizontal: 16, paddingBottom: Platform.OS === 'ios' ? 40 : 24 },
-  alarmCard: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 14, paddingHorizontal: 14, backgroundColor: '#FFFFFF', borderRadius: 18,
-    marginBottom: 10,
-    shadowColor: '#141413', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 6, elevation: 2,
-  },
-  typeChip: { width: 40, height: 40, borderRadius: 14, backgroundColor: '#FFF3E5', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  alarmInfo: { flex: 1, marginRight: 8, justifyContent: 'center' },
-  alarmPlace: { fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 5 },
-  alarmMeta: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  alarmDeadline: { fontSize: 13, fontWeight: '500', color: '#555555' },
-  cardRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  memberBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#E8E8E8', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 10 },
-  memberCount: { fontSize: 11, color: '#555555', fontWeight: '500' },
-  arrivalBtn: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#E0E0E0', alignItems: 'center', justifyContent: 'center' },
-  arrivalBtnActive: { backgroundColor: '#92DEFE' },
   pickerContainer: { flexDirection: 'row', backgroundColor: '#F7F7F8', borderRadius: 14, overflow: 'hidden', height: Platform.OS === 'ios' ? 200 : 56, marginTop: 8 },
   picker: { flex: 1 },
   pickerItem: { fontSize: 20, color: '#1A1A1A', height: 200 },
@@ -824,11 +629,6 @@ const styles = StyleSheet.create({
   fieldValue: { flex: 1, fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
   timeCard: { backgroundColor: '#F7F7F8', borderRadius: 18, padding: 12, marginBottom: 16 },
   timeCardLabel: { fontSize: 12, fontWeight: '600', color: '#8A8A8E', textAlign: 'center' },
-  segmentTrack: { flexDirection: 'row', backgroundColor: '#F0F0F1', borderRadius: 16, padding: 4, gap: 4 },
-  segmentBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 11 },
-  segmentBtnSelected: { backgroundColor: '#FFCE0C' },
-  segmentText: { fontSize: 13, fontWeight: '600', color: '#8A8A8E' },
-  segmentTextSelected: { color: '#1A1A1A', fontWeight: '700' },
   section: { marginBottom: 16 },
   sectionTitle: { fontSize: 15, fontWeight: '600', color: '#1A1A1A', marginBottom: 8 },
   optionBox: { backgroundColor: '#F5F5F5', borderRadius: 12, paddingHorizontal: 16 },

@@ -35,7 +35,7 @@ function formatTargetTime(isoString: string): string {
 
 function TransportBadge({ transport }: { transport: 'TRANSIT' | 'DRIVING' }) {
   if (transport === 'TRANSIT') {
-    return <MaterialCommunityIcons name="bus-side" size={20} color="#4A90D9" />;
+    return <MaterialCommunityIcons name="bus-side" size={20} color="#FF9F0A" />;
   }
   return <FontAwesome5 name="car-side" size={18} color="#FF9F0A" />;
 }
@@ -130,7 +130,7 @@ export default function ArrivalDashboardSheet({ onClose, appointmentId }: Props)
 
           <View style={styles.destinationContainer}>
             <View style={styles.destinationPill}>
-              <Text style={styles.destinationText}>{destName}</Text>
+              <Text style={styles.destinationText} numberOfLines={1}>{destName}</Text>
             </View>
           </View>
 
@@ -179,7 +179,10 @@ const styles = StyleSheet.create({
   datePill: { backgroundColor: '#F5F5F5', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8 },
   datePillText: { fontSize: 13, fontWeight: '500', color: '#FF453A' },
   destinationContainer: { alignItems: 'center', marginBottom: 24 },
-  destinationPill: { backgroundColor: '#F5F5F5', borderRadius: 20, paddingHorizontal: 20, paddingVertical: 8 },
+  // 목적지 이름(카카오 검색 결과라 길 수 있음)에 maxWidth 없이 numberOfLines만 주면 텍스트
+  // 줄바꿈 없이 잘리기 전에 pill 자체가 화면 폭을 넘어 그대로 넓어질 수 있다(2026-08-25 발견) —
+  // '90%'로 pill 폭 자체를 제한해야 말줄임(ellipsis)이 실제로 동작한다.
+  destinationPill: { maxWidth: '90%', backgroundColor: '#F5F5F5', borderRadius: 20, paddingHorizontal: 20, paddingVertical: 8 },
   destinationText: { fontSize: 14, fontWeight: '500', color: '#1A1A1A' },
   section: { marginBottom: 16 },
   sectionTitle: { fontSize: 15, fontWeight: '600', color: '#1A1A1A', marginBottom: 8 },

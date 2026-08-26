@@ -127,11 +127,14 @@ module.exports = {
     updates: {
       url: "https://u.expo.dev/f9e1a464-f427-4bb3-ba40-7d6e2382f3f0",
       requestHeaders: {
-        "expo-channel-name": "preview"
+        // EXPO_PUBLIC_API_BASE_URL이 설정된(로컬 서버 겨냥) 빌드는 preview와 완전히 분리된
+        // local-dev 채널만 구독한다 — eas update 배포 실수가 나도 preview 채널(EC2/팀원 공유)에는
+        // 물리적으로 닿지 않는다(2026-08-23, docs/local-vs-ec2-server.md 참고).
+        "expo-channel-name": process.env.EXPO_PUBLIC_API_BASE_URL ? "local-dev" : "preview"
       },
-      // 로컬 서버 테스트 중(.env.local의 EXPO_PUBLIC_API_BASE_URL)엔 네이티브 자동 OTA 체크를 꺼서
-      // preview 채널의 예전 번들(EC2 전용 하드코딩)이 로컬 빌드를 조용히 덮어쓰는 걸 막는다.
-      // 이 값이 없는 일반 빌드(팀원/테스터용)는 원래 기본 동작(ON_LOAD) 그대로 유지된다.
+      // 로컬 서버 테스트 빌드는 네이티브 자동 OTA 체크 자체를 꺼둔다 — 채널이 분리된 지금은 필수는
+      // 아니지만(잘못된 채널을 받아올 일이 없음), 로컬 테스트 도중 의도치 않게 번들이 바뀌는 것
+      // 자체를 막기 위해 그대로 유지한다. 이 값이 없는 일반 빌드는 원래 기본 동작(ON_LOAD) 유지.
       checkAutomatically: process.env.EXPO_PUBLIC_API_BASE_URL ? "NEVER" : "ON_LOAD"
     }
   }
