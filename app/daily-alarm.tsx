@@ -4,9 +4,9 @@ import HomeAlarmSheet from '@/src/screens/alarmManage/HomeAlarmSheet';
 import PersonalAlarmSheet from '@/src/screens/alarmManage/PersonalAlarmSheet';
 import DailyAlarmScreen from '@/src/screens/main/DailyAlarmScreen';
 import { consumePendingInviteCode } from '@/src/utils/inviteDeepLink';
-import { useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { View } from 'react-native';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import { BackHandler, Platform, View } from 'react-native';
 
 type PersonalHomeSheetState = { mode: 'add' | 'edit'; id?: number; alarm?: any } | null;
 type GroupSheetState = { mode: 'add' | 'create' | 'edit' | 'join'; id?: number; alarm?: any; inviteCode?: string } | null;
@@ -28,6 +28,27 @@ export default function DailyAlarmPage() {
       if (code) setGroupSheet({ mode: 'join', inviteCode: code });
     });
   }, []);
+
+  // 알람 생성(+)/카드 탭으로 여는 시트들은 새 화면(라우트)이 아니라 이 화면 위에 얹는
+  // 오버레이라 내비게이션 스택은 그대로 daily-alarm 하나뿐이다 — 그래서 시트가 열린 채로
+  // 뒤로가기(스와이프 포함)를 하면 시트만 닫혀야 하는데 daily-alarm 화면 자체가 통째로
+  // pop되어 캘린더로 바로 돌아가버렸다(MainCalendarScreen 하단바 시트에서 2026-08-25에 먼저
+  // 발견·수정된 것과 동일한 유형의 문제, 2026-08-26). 열린 시트가 있으면 그것부터 닫고 이번
+  // 뒤로가기는 소비하며, 아무 시트도 없을 때만 기본 동작(화면 자체를 pop, 캘린더로 복귀)을
+  // 그대로 둔다. 가장 위에 겹쳐 뜨는 도착 대시보드부터 먼저 검사한다.
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== 'android') return;
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        if (showArrivalSheet) { setShowArrivalSheet(false); return true; }
+        if (homeSheet) { setHomeSheet(null); return true; }
+        if (groupSheet) { setGroupSheet(null); return true; }
+        if (personalSheet) { setPersonalSheet(null); return true; }
+        return false;
+      });
+      return () => sub.remove();
+    }, [showArrivalSheet, homeSheet, groupSheet, personalSheet])
+  );
 
   return (
     <View style={{ flex: 1 }}>

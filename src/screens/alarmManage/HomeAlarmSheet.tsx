@@ -14,6 +14,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   Platform,
   StyleSheet,
   Text,
@@ -108,6 +109,19 @@ export default function HomeAlarmSheet({ onClose, initialMode, editJourneyId, in
   const [tempPlace, setTempPlace] = useState<SearchResult | null>(null);
   const [saving, setSaving] = useState(false);
   const isEditMode = !!editAlarm.id;
+
+  // homePlace 화면(귀가지 검색)에서 뒤로가기(스와이프 포함)를 하면 edit으로 안 돌아가고 이
+  // 시트 전체가 닫혀버리는 문제 방지(2026-08-26, daily-alarm.tsx의 시트 전체 닫기 핸들러와
+  // 같은 유형) — homePlace에서는 이 핸들러가 먼저 소비해서 edit으로 한 단계만 되돌리고,
+  // edit에서 누르면 소비하지 않고 넘겨서 상위(daily-alarm.tsx)가 시트 전체를 닫도록 한다.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (view !== 'edit') { setView('edit'); return true; }
+      return false;
+    });
+    return () => sub.remove();
+  }, [view]);
 
   useEffect(() => {
     loadPlaces().catch(() => {});

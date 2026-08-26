@@ -108,9 +108,18 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
   const date = dateObj.getDate();
   const dayName = DAY_NAMES[dateObj.getDay()];
 
+  // 재조회(loadAlarms)와 실시간 패치(subscribeAlarmLocationUpdate)가 거의 동시에 발생할 때,
+  // 먼저 나간 재조회가 네트워크 지연으로 나중에 도착하면 이미 반영된 최신 패치를 덮어써버리는
+  // 경쟁 조건이 있었다(2026-08-26 발견 — "가끔은 바로 반영, 가끔은 뒤로 갔다 와야 반영"되는
+  // 비결정적 증상으로 나타남). 매 loadAlarms 호출과 패치마다 세대를 올려서, 응답이 도착했을
+  // 때 그 사이 더 최신 정보가 이미 반영됐다면(세대가 바뀌었다면) 낡은 응답은 버린다.
+  const loadGenRef = useRef(0);
+
   const loadAlarms = useCallback(async () => {
+    const gen = ++loadGenRef.current;
     try {
       const res = await alarmsApi.getAlarms(selectedDate);
+      if (loadGenRef.current !== gen) return;
       // 서버 조회 쿼리(findAllByPlanDate)가 반복 요일만 보고 매칭해서, 그 여정이 생성되기
       // 전(=앵커 plan_date보다 이른) 날짜를 조회해도 유령처럼 매칭되는 버그가 있다(2026-08-24
       // 발견). 조회한 날짜가 여정 앵커보다 이르면 클라이언트에서 걸러낸다.
@@ -130,6 +139,8 @@ export default function DailyAlarmScreen({ onPersonalAdd, onPersonalEdit, onGrou
   // 재조회 없이 그 값을 바로 반영한다(이전엔 화면을 나갔다 다시 들어와야만 갱신됐음).
   useEffect(() => {
     return subscribeAlarmLocationUpdate((update) => {
+      // 진행 중인 낡은 재조회가 있다면 이 패치보다 늦게 도착해도 무시되게 세대를 올린다.
+      loadGenRef.current++;
       const patch = (arr: AlarmCard[]) => arr.map((a) =>
         (update.journeyId != null && a.journeyId === update.journeyId) ||
         (update.appointmentId != null && a.appointmentId === update.appointmentId)

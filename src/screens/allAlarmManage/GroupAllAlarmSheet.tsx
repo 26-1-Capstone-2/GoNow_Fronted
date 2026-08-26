@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   Platform,
   Share,
   StyleSheet,
@@ -146,7 +147,14 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress, initialEdi
   const [view, setView] = useState<ViewType>('list');
   const [alarms, setAlarms] = useState<GroupAlarm[]>([]);
 
+  // 참가자별 호스트 여부까지 N+1 조회하는 무거운 재조회라, alarmVersion이 짧은 간격으로 여러 번
+  // 올라가면(GPS 응답 연속 수신 등) 먼저 나간 재조회가 나중 것보다 늦게 도착해 최신 상태를
+  // 덮어쓸 수 있다(2026-08-26 — 개인/귀가와 동일 계열 경쟁 조건). 세대가 바뀐 뒤 도착한 낡은
+  // 응답은 버린다.
+  const loadGenRef = useRef(0);
+
   const loadAlarms = useCallback(async () => {
+    const gen = ++loadGenRef.current;
     try {
       const [alarmsRes, profileRes] = await Promise.all([
         alarmsApi.getAlarmsByType('GROUP'),
@@ -169,11 +177,31 @@ export default function GroupAllAlarmSheet({ onClose, onArrivalPress, initialEdi
           }
         }),
       );
+      if (loadGenRef.current !== gen) return;
       setAlarms(resolved);
     } catch {}
   }, []);
 
   useEffect(() => { loadAlarms(); }, [loadAlarms, alarmVersion]);
+
+  // 이 시트는 새 화면(라우트)이 아니라 MainCalendarScreen 위에 얹힌 오버레이라, MainCalendarScreen
+  // 이 하단바 시트 전체를 닫는 뒤로가기 핸들러를 별도로 갖고 있다(2026-08-25). 그 핸들러가
+  // "시트가 열려 있으면 통째로 닫는다"는 식으로만 판단해서, 이 시트 안에서 카드를 눌러 수정
+  // 화면까지 들어간 상태로 뒤로가기(스와이프 포함)를 하면 한 단계씩 안 돌아가고 시트 전체가
+  // 닫혀버렸다(2026-08-26 발견). 각 헤더의 "‹" 버튼이 이미 정의해둔 상위 화면과 동일하게
+  // 한 단계만 되돌리고, list에서 누르면 그제서야 상위 핸들러가 시트 전체를 닫도록 넘긴다.
+  const GROUP_BACK_VIEW: Partial<Record<ViewType, ViewType>> = {
+    edit: 'list', addChoice: 'list', join: 'addChoice', place: 'edit', date: 'edit',
+  };
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (view === 'list') return false;
+      setView(GROUP_BACK_VIEW[view] ?? 'list');
+      return true;
+    });
+    return () => sub.remove();
+  }, [view]);
 
   const consumedEditIdRef = useRef<number | undefined>(undefined);
   useEffect(() => {

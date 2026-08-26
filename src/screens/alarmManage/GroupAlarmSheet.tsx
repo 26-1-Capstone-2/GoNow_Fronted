@@ -13,7 +13,7 @@ import { Entypo, Feather, FontAwesome5, MaterialCommunityIcons } from '@expo/vec
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Platform, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, BackHandler, Platform, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));
 const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
@@ -83,6 +83,21 @@ export default function GroupAlarmSheet({ onClose, initialMode, editAppointmentI
   const [inviteError, setInviteError] = useState('');
   const [joinTransport, setJoinTransport] = useState<Transport>('public');
   const isEditMode = !!editAlarm.id;
+
+  // place/join 화면에서 뒤로가기(스와이프 포함)를 하면 상위(edit/addChoice)로 안 돌아가고
+  // 이 시트 전체가 닫혀버리는 문제 방지(2026-08-26, daily-alarm.tsx의 시트 전체 닫기
+  // 핸들러와 같은 유형) — place/join에서는 이 핸들러가 먼저 소비해서 한 단계만 되돌리고,
+  // edit/addChoice(이 컴포넌트의 최상위 화면)에서 누르면 소비하지 않고 넘겨서 상위
+  // (daily-alarm.tsx)가 시트 전체를 닫도록 한다.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (view === 'place') { setView('edit'); return true; }
+      if (view === 'join') { setView('addChoice'); return true; }
+      return false;
+    });
+    return () => sub.remove();
+  }, [view]);
 
   useEffect(() => {
     loadPlaces().catch(() => {});

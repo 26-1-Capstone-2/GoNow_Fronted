@@ -17,7 +17,7 @@ import { Feather, FontAwesome5, MaterialCommunityIcons } from '@expo/vector-icon
 import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { Picker } from '@react-native-picker/picker';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, StyleSheet, Switch, Text, ToastAndroid, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, BackHandler, Platform, StyleSheet, Switch, Text, ToastAndroid, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const journeysApi = createJourneysApi();
@@ -157,9 +157,17 @@ export default function HomeAllAlarmSheet({ onClose, initialEditId }: Props) {
 
   useEffect(() => { loadPlaces().catch(() => {}); }, [loadPlaces]);
 
+  // 재조회(loadAlarms)와 실시간 패치(subscribeAlarmLocationUpdate)가 거의 동시에 발생할 때,
+  // 먼저 나간 재조회가 네트워크 지연으로 나중에 도착하면 이미 반영된 최신 패치를 덮어써버리는
+  // 경쟁 조건 방지용(2026-08-26). 매 loadAlarms 호출과 패치마다 세대를 올려서, 그 사이 더
+  // 최신 정보가 이미 반영됐다면(세대가 바뀌었다면) 낡은 응답은 버린다.
+  const loadGenRef = useRef(0);
+
   const loadAlarms = useCallback(async () => {
+    const gen = ++loadGenRef.current;
     try {
       const res = await alarmsApi.getAlarmsByType('HOME');
+      if (loadGenRef.current !== gen) return;
       setAlarms((res.data ?? []).map(fromAlarmItem));
     } catch {}
     // alarmVersion 의존 이유: alarmService가 GPS 응답을 받을 때마다(target_time 등 로컬 패치로는
@@ -173,6 +181,7 @@ export default function HomeAllAlarmSheet({ onClose, initialEditId }: Props) {
   useEffect(() => {
     return subscribeAlarmLocationUpdate((update) => {
       if (update.journeyId == null) return;
+      loadGenRef.current++;
       setAlarms((prev) => prev.map((a) =>
         a.journeyId === update.journeyId
           ? { ...a, departureAlarmTime: update.departureAlarmTime, myStatus: update.status }
@@ -180,6 +189,22 @@ export default function HomeAllAlarmSheet({ onClose, initialEditId }: Props) {
       ));
     });
   }, []);
+
+  // 이 시트는 새 화면(라우트)이 아니라 MainCalendarScreen 위에 얹힌 오버레이라, MainCalendarScreen
+  // 이 하단바 시트 전체를 닫는 뒤로가기 핸들러를 별도로 갖고 있다(2026-08-25). 그 핸들러가
+  // "시트가 열려 있으면 통째로 닫는다"는 식으로만 판단해서, 이 시트 안에서 카드를 눌러 수정
+  // 화면(edit)까지 들어간 상태로 뒤로가기(스와이프 포함)를 하면 목록(list)으로 안 돌아가고
+  // 시트 전체가 닫혀버렸다(2026-08-26 발견). view 스택 한 단계만 되돌리고, list에서 누르면
+  // 그제서야 상위 핸들러가 시트 전체를 닫도록 이번 이벤트를 소비하지 않고 넘긴다.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (view === 'list') return false;
+      setView(view === 'edit' ? 'list' : 'edit');
+      return true;
+    });
+    return () => sub.remove();
+  }, [view]);
 
   const consumedEditIdRef = useRef<number | undefined>(undefined);
   useEffect(() => {
